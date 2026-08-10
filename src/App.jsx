@@ -156,6 +156,8 @@ const INTERVALS = [
 ];
 const SPEEDS = [1, 2, 5, 10, 25, 50];
 const START_BALANCE = 10000;
+const MAX_LEVERAGE = 10;
+const MAX_ENTRY_DRIFT = 0.25;   // reject entries >25% from the live bar
 const CHUNK = 1000;
 const LWC_URLS = [
   "https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.2.0/lightweight-charts.standalone.production.js",
@@ -225,19 +227,21 @@ const makeCode = () => { const a = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; return Arr
 /* ---------------- stats ---------------- */
 function computeStats(trades) {
   const ord = [...trades].sort((a, b) => (a.closedAt || 0) - (b.closedAt || 0));
-  let gw = 0, gl = 0, wins = 0, peak = START_BALANCE, maxDD = 0, eq = START_BALANCE, rSum = 0;
+  let gw = 0, gl = 0, wins = 0, losses = 0, flat = 0, peak = START_BALANCE, maxDD = 0, eq = START_BALANCE, rSum = 0;
   const curve = [START_BALANCE];
   for (const t of ord) {
     eq += t.pnl; curve.push(eq); rSum += t.r || 0;
-    if (t.pnl > 0) { wins++; gw += t.pnl; } else gl += Math.abs(t.pnl);
+    if (t.pnl > 0) { wins++; gw += t.pnl; }
+    else if (t.pnl < 0) { losses++; gl += Math.abs(t.pnl); }
+    else flat++;
     if (eq > peak) peak = eq;
     if (peak - eq > maxDD) maxDD = peak - eq;
   }
-  const n = ord.length, losses = n - wins;
+  const n = ord.length, decided = wins + losses;
   return {
-    count: n, wins, losses, net: eq - START_BALANCE,
-    winRate: n ? (wins / n) * 100 : 0,
-    profitFactor: gl > 0 ? gw / gl : gw > 0 ? Infinity : 0,
+    count: n, wins, losses, flat, net: eq - START_BALANCE,
+    winRate: decided ? (wins / decided) * 100 : 0,
+    profitFactor: gl > 0 ? gw / gl : null,   // null = no losses to divide by
     avgR: n ? rSum / n : 0,
     avgWin: wins ? gw / wins : 0, avgLoss: losses ? gl / losses : 0,
     expectancy: n ? (eq - START_BALANCE) / n : 0,
@@ -246,6 +250,39 @@ function computeStats(trades) {
     worst: n ? Math.min(...ord.map((t) => t.pnl)) : 0,
     equity: eq, curve,
   };
+}
+
+/* ---------------- setup validation ---------------- */
+function validateSetup({ dir, entry, stop, target, riskPct, equity, price }) {
+  const e = +entry, s = +stop, t = target === "" || target == null ? null : +target;
+  const r = +riskPct;
+  const errs = [];
+  const long = dir === "long";
+
+  if (!(e > 0)) errs.push("Entry must be a positive number.");
+  if (!(s > 0)) errs.push("Stop must be a positive number.");
+  if (e > 0 && s > 0) {
+    if (s === e) errs.push("Stop cannot equal the entry — there would be no risk to size against.");
+    else if (long && s > e) errs.push("A long stop must sit below the entry.");
+    else if (!long && s < e) errs.push("A short stop must sit above the entry.");
+  }
+  if (t != null && !Number.isNaN(t) && e > 0) {
+    if (long && t <= e) errs.push("A long target must sit above the entry.");
+    if (!long && t >= e) errs.push("A short target must sit below the entry.");
+  }
+  if (!(r > 0)) errs.push("Risk % must be greater than zero.");
+  else if (r > 100) errs.push("Risk % cannot exceed 100.");
+
+  if (price > 0 && e > 0 && Math.abs(e - price) / price > MAX_ENTRY_DRIFT) {
+    errs.push(`Entry is ${(Math.abs(e - price) / price * 100).toFixed(0)}% away from the current price (${fmtPrice(price)}) — check the instrument.`);
+  }
+  if (!errs.length) {
+    const qty = (equity * (r / 100)) / Math.abs(e - s);
+    if (qty * e > equity * MAX_LEVERAGE) {
+      errs.push(`That stop is too tight — it needs ${(qty * e / equity).toFixed(1)}x leverage (cap is ${MAX_LEVERAGE}x). Widen the stop or lower the risk %.`);
+    }
+  }
+  return errs;
 }
 
 /* ---------------- indicators ---------------- */
@@ -366,7 +403,7 @@ function useLWC() {
 /* ============================================================
    CHART
    ============================================================ */
-function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings, onDrawings, tool, setTool, color, selected, setSelected, indicators, logScale, zoom }) {
+function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings, onDrawings: onDrawingsRaw, onSnapshot, tool, setTool, color, selected, setSelected, indicators, logScale, zoom }) {
   const boxRef = useRef(null), ovRef = useRef(null);
   const chartRef = useRef(null), serRef = useRef(null), volRef = useRef(null), indRefs = useRef({});
   const lastRef = useRef({ key: "", cursor: -1 });
@@ -375,7 +412,17 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
   const lwc = useLWC();
   const t = THEMES[theme];
   const dataKey = `${bars[0]?.t || 0}|${bars.length}|${interval}`;
-  stRef.current = { drawings, onDrawings, tool, setTool, color, selected, setSelected, t, trade };
+  const market = `${symbol}|${interval}`;
+  const onDrawings = useCallback((next) => {
+    onDrawingsRaw((prev) => {
+      const others = (prev || []).filter((d) => d.market && d.market !== market);
+      const mine = (prev || []).filter((d) => !d.market || d.market === market);
+      const updated = typeof next === "function" ? next(mine) : next;
+      return [...others, ...updated.map((d) => (d.market ? d : { ...d, market }))];
+    });
+  }, [onDrawingsRaw, market]);
+  const visible = useMemo(() => (drawings || []).filter((d) => !d.market || d.market === market), [drawings, market]);
+  stRef.current = { drawings: visible, all: drawings, onDrawings, onSnapshot, tool, setTool, color, selected, setSelected, t, trade, market };
 
   const indVals = useMemo(() => {
     const o = {};
@@ -534,7 +581,7 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     const pill = (text, x, y, bg) => {
       c.save(); c.font = "600 11px Inter, sans-serif";
       const w = c.measureText(text).width + 14, h = 18, r = 4;
-      const px = Math.min(x, W - w - 2);
+      const px = Math.min(x, W - w - 72);   // keep clear of the price axis
       c.beginPath(); c.moveTo(px + r, y - h / 2);
       c.arcTo(px + w, y - h / 2, px + w, y + h / 2, r); c.arcTo(px + w, y + h / 2, px, y + h / 2, r);
       c.arcTo(px, y + h / 2, px, y - h / 2, r); c.arcTo(px, y - h / 2, px + w, y - h / 2, r);
@@ -661,12 +708,17 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
       if (l == null || p == null) return;
       if (st.tool === "cursor") {
         const h = hit(x, y); st.setSelected(h ? h.d.id : null);
-        if (h) { e.stopPropagation(); e.preventDefault(); dragRef.current = { mode: h.point >= 0 ? "point" : "move", id: h.d.id, pointIdx: h.point, start: { l, p }, orig: JSON.parse(JSON.stringify(h.d.pts)) }; }
+        if (h) {
+          e.stopPropagation(); e.preventDefault();
+          st.onSnapshot && st.onSnapshot();
+          dragRef.current = { mode: h.point >= 0 ? "point" : "move", id: h.d.id, pointIdx: h.point, start: { l, p }, orig: JSON.parse(JSON.stringify(h.d.pts)) };
+        }
         paint(); return;
       }
       e.stopPropagation(); e.preventDefault();
       const single = st.tool === "hline" || st.tool === "vline";
-      const base = { id: uid(), type: st.tool, color: st.color, pts: single ? [{ l, p }] : [{ l, p }, { l, p }] };
+      st.onSnapshot && st.onSnapshot();
+      const base = { id: uid(), type: st.tool, color: st.color, market: st.market, pts: single ? [{ l, p }] : [{ l, p }, { l, p }] };
       if (single) { st.onDrawings([...(st.drawings || []), base]); st.setTool("cursor"); st.setSelected(base.id); return; }
       dragRef.current = { mode: "new", preview: base };
     };
@@ -856,7 +908,7 @@ function Dashboard({ index, onOpen, onDelete, onCreate, theme, onToggleTheme, ha
     let gw = 0, gl = 0;
     index.forEach((s) => { const st = s.stats; if (!st?.count) return; gw += (st.avgWin || 0) * st.wins; gl += (st.avgLoss || 0) * st.losses; });
     const curve = index.slice().sort((a, b) => a.createdAt - b.createdAt).reduce((a, s) => { a.push(a[a.length - 1] + (s.stats?.net || 0)); return a; }, [START_BALANCE]);
-    return { count, wins, net, pf: gl > 0 ? gw / gl : gw > 0 ? Infinity : 0, avgR: count ? rSum / count : 0, winRate: count ? (wins / count) * 100 : 0, curve };
+    return { count, wins, net, pf: gl > 0 ? gw / gl : null, avgR: count ? rSum / count : 0, winRate: count ? (wins / count) * 100 : 0, curve };
   }, [index]);
 
   return (
@@ -882,7 +934,7 @@ function Dashboard({ index, onOpen, onDelete, onCreate, theme, onToggleTheme, ha
             </div>
           </div>
           {[["Sessions", index.length], ["Trades", agg.count], ["Win rate", `${agg.winRate.toFixed(1)}%`],
-            ["Profit factor", agg.pf === Infinity ? "∞" : agg.pf.toFixed(2)], ["Avg R", agg.count ? fmtR(agg.avgR) : "—"]].map(([l, v]) => (
+            ["Profit factor", agg.pf == null ? "—" : agg.pf.toFixed(2)], ["Avg R", agg.count ? fmtR(agg.avgR) : "—"]].map(([l, v]) => (
             <div key={l}>
               <div className="pc-cap" style={{ marginBottom: 6 }}>{l}</div>
               <div className="pc-num" style={{ fontSize: 20, fontWeight: 600 }}>{v}</div>
@@ -934,7 +986,7 @@ function Dashboard({ index, onOpen, onDelete, onCreate, theme, onToggleTheme, ha
                   </div>
                   <div style={{ margin: "12px 0 10px" }}><Spark curve={st.curve} h={40} /></div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span className="pc-num" style={{ fontSize: 18, fontWeight: 600, color: (st.net || 0) >= 0 ? "var(--up)" : "var(--down)" }}>{st.count ? fmtSigned(st.net) : "—"}</span>
+                    <span className="pc-num" style={{ fontSize: 18, fontWeight: 600, color: !st.count ? "var(--dim)" : st.net > 0 ? "var(--up)" : st.net < 0 ? "var(--down)" : "var(--muted)" }}>{st.count ? fmtSigned(st.net) : "—"}</span>
                     <span className="pc-sm" style={{ color: "var(--muted)" }}>{st.count || 0} trades · {st.count ? `${st.winRate.toFixed(0)}% win` : "not started"}</span>
                   </div>
                 </div>
@@ -959,6 +1011,9 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   const [bars, setBars] = useState([]);
   const [loading, setLoading] = useState(true);
   const [synthetic, setSynthetic] = useState(false);
+  const [endOfData, setEndOfData] = useState(false);
+  const fetchingRef = useRef(false);
+  const anchorRef = useRef(null);
   const [cursor, setCursor] = useState(100);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -969,6 +1024,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   const [trade, setTrade] = useState(null);   // {dir, entry, stop, target, riskPct, qty, riskAmt, status, fromLogical}
   const [trades, setTrades] = useState([]);
   const [form, setForm] = useState({ dir: "long", entry: "", stop: "", target: "", riskPct: "1.0" });
+  const [formError, setFormError] = useState("");
   const [notes, setNotes] = useState("");
   const [journal, setJournal] = useState("");
   const [blotTab, setBlotTab] = useState("trades");
@@ -983,6 +1039,15 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   const [logScale, setLog] = useState(false);
   const [zoom, setZoom] = useState(120);
   const undoRef = useRef([]); const redoRef = useRef([]);
+
+  /* close popovers on Escape or an outside click */
+  useEffect(() => {
+    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setIndOpen(false); setRoomOpen(false); } };
+    const esc = (e) => { if (e.key === "Escape") { setIndOpen(false); setRoomOpen(false); } };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc); };
+  }, []);
 
   /* market watch */
   const [tickers, setTickers] = useState([]);
@@ -1007,8 +1072,13 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   const chg = cur && prevBar ? cur.c - prevBar.c : 0;
   const chgPct = cur && prevBar ? (chg / prevBar.c) * 100 : 0;
 
+  /* undo snapshots are taken on gesture START (see snapshotDrawings), never on
+     every mousemove — otherwise one drag fills the whole stack */
   const applyDrawings = useCallback((next) => {
-    setDrawings((prev) => { undoRef.current.push(prev); if (undoRef.current.length > 60) undoRef.current.shift(); redoRef.current = []; return typeof next === "function" ? next(prev) : next; });
+    setDrawings((prev) => (typeof next === "function" ? next(prev) : next));
+  }, []);
+  const snapshotDrawings = useCallback(() => {
+    setDrawings((prev) => { undoRef.current.push(prev); if (undoRef.current.length > 60) undoRef.current.shift(); redoRef.current = []; return prev; });
   }, []);
   const undo = () => { const p = undoRef.current.pop(); if (p) { redoRef.current.push(drawings); setDrawings(p); setSelected(null); } };
   const redo = () => { const n = redoRef.current.pop(); if (n) { undoRef.current.push(drawings); setDrawings(n); } };
@@ -1040,27 +1110,69 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   useEffect(() => {
     let alive = true;
     (async () => {
-      setLoading(true);
+      setLoading(true); setEndOfData(false); fetchingRef.current = false;
       const real = await fetchKlines(symbol, interval, meta.startMs);
       if (!alive) return;
-      if (real && real.length > 20) { setBars(real); setSynthetic(false); }
-      else { setBars(syntheticKlines(symbol, interval, meta.startMs)); setSynthetic(true); }
+      const next = real && real.length > 20 ? real : syntheticKlines(symbol, interval, meta.startMs);
+      setSynthetic(!(real && real.length > 20));
+      setBars(next);
+      /* keep the SAME MOMENT IN TIME when the market or timeframe changes,
+         instead of reusing a raw bar index that means something else now */
+      const anchor = anchorRef.current;
+      let idx = Math.min(100, next.length - 1);
+      if (anchor) {
+        let best = 0, bestD = Infinity;
+        for (let i = 0; i < next.length; i++) {
+          const d = Math.abs(next[i].t - anchor);
+          if (d < bestD) { bestD = d; best = i; }
+          if (next[i].t > anchor) break;
+        }
+        idx = Math.max(1, Math.min(best, next.length - 1));
+        anchorRef.current = null;
+      }
+      setCursor(idx);
+      checkedRef.current = idx;
       setLoading(false);
     })();
     return () => { alive = false; };
   }, [symbol, interval, meta.startMs]);
 
+  /* the only sanctioned way to change market or timeframe */
+  const switchMarket = (nextSymbol, nextInterval) => {
+    const changingSym = nextSymbol && nextSymbol !== symbol;
+    const changingIv = nextInterval && nextInterval !== interval;
+    if (!changingSym && !changingIv) return;
+    if (trade && !confirm(
+      trade.status === "open"
+        ? "You have an open position. Switching will close it at the current price. Continue?"
+        : "You have a working order. Switching will cancel it. Continue?"
+    )) return;
+    if (trade?.status === "open" && price) closeTrade(price, "market switch");
+    else if (trade) setTrade(null);
+    /* stale prices from another instrument must never carry over */
+    setForm((f) => ({ ...f, entry: "", stop: "", target: "" }));
+    setFormError("");
+    anchorRef.current = cur?.t ?? null;
+    if (changingSym) setSymbol(nextSymbol);
+    if (changingIv) setIv(nextInterval);
+  };
+
   useEffect(() => {
-    if (loading || !bars.length || cursor < bars.length - 120) return;
+    if (loading || endOfData || fetchingRef.current) return;
+    if (!bars.length || cursor < bars.length - 120) return;
+    fetchingRef.current = true;
     let alive = true;
     (async () => {
       const ns = bars[bars.length - 1].t + barMs;
       const more = synthetic ? null : await fetchKlines(symbol, interval, ns);
-      if (!alive) return;
-      setBars((b) => [...b, ...(more && more.length ? more : syntheticKlines(symbol, interval, ns))]);
+      if (!alive) { fetchingRef.current = false; return; }
+      /* if the exchange has no more bars, STOP. Never invent history. */
+      if (!more || !more.length) setEndOfData(true);
+      else setBars((b) => (b[b.length - 1].t >= more[0].t ? b : [...b, ...more]));
+      fetchingRef.current = false;
     })();
     return () => { alive = false; };
-  }, [cursor, bars, loading, synthetic, symbol, interval, barMs]);
+  }, [cursor, bars, loading, synthetic, symbol, interval, barMs, endOfData]);
 
   /* replay clock */
   const rafRef = useRef(0), accRef = useRef(0), lastRef = useRef(0);
@@ -1072,64 +1184,99 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
       const per = 1000 / speed;
       let steps = 0;
       while (accRef.current >= per && steps < 40) { accRef.current -= per; steps++; }
-      if (steps) setCursor((c) => Math.min(c + steps, bars.length - 1));
+      if (steps) setCursor((c) => {
+        const next = Math.min(c + steps, bars.length - 1);
+        if (next >= bars.length - 1 && endOfData) setPlaying(false);
+        return next;
+      });
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, speed, bars.length]);
+  }, [playing, speed, bars.length, endOfData]);
 
-  /* fill / stop / target engine */
+  /* fill / stop / target engine.
+     Walks EVERY bar between the last checked index and the cursor, so fast
+     playback and scrubbing produce the same result as stepping one bar at a
+     time. Never calls a setter from inside another setter's updater. */
   const checkedRef = useRef(-1);
+  const tradeRef = useRef(null);
+  useEffect(() => { tradeRef.current = trade; }, [trade]);
+
+  const bookTrade = useCallback((tr, exit, reason, at) => ({
+    id: uid(), symbol: tr.market ? tr.market.split("|")[0] : symbol, interval,
+    dir: tr.dir, qty: tr.qty, entry: tr.entry, exit, stop: tr.stop, target: tr.target,
+    riskAmt: tr.riskAmt, pnl: (exit - tr.entry) * tr.qty * (tr.dir === "long" ? 1 : -1),
+    reason, at, closedAt: Date.now(),
+  }), [symbol, interval]);
+
   useEffect(() => {
-    if (!trade || !cur) { checkedRef.current = cursor; return; }
-    if (cursor <= checkedRef.current) { checkedRef.current = cursor; return; }
+    if (!bars.length) return;
+    const from = checkedRef.current;
+    if (cursor <= from) { checkedRef.current = cursor; return; }
+    let t = tradeRef.current;
+    if (!t) { checkedRef.current = cursor; return; }
+
+    const closed = [];
+    for (let i = from + 1; i <= cursor && t; i++) {
+      const b = bars[i];
+      if (!b) break;
+      if (t.status === "watching") {
+        if (b.l <= t.entry && b.h >= t.entry) t = { ...t, status: "open", filledAt: b.t, entryBar: i };
+        else continue;
+      }
+      if (t.status === "open") {
+        const long = t.dir === "long";
+        const hitStop = long ? b.l <= t.stop : b.h >= t.stop;
+        const hitTgt = t.target != null && (long ? b.h >= t.target : b.l <= t.target);
+        if (hitStop || hitTgt) {
+          /* both touched in one bar: assume the stop, since intrabar order is unknowable */
+          const exit = hitStop ? t.stop : t.target;
+          const rec = bookTrade(t, exit, hitStop && hitTgt ? "stop (both touched)" : hitStop ? "stop" : "target", b.t);
+          closed.push({ ...rec, r: t.riskAmt ? rec.pnl / t.riskAmt : 0 });
+          t = null;
+        }
+      }
+    }
     checkedRef.current = cursor;
-    const long = trade.dir === "long";
-    if (trade.status === "watching") {
-      if (cur.l <= trade.entry && cur.h >= trade.entry) setTrade((t2) => (t2 ? { ...t2, status: "open", filledAt: cur.t, entryBar: cursor } : t2));
-      return;
-    }
-    if (trade.status === "open") {
-      const hitStop = long ? cur.l <= trade.stop : cur.h >= trade.stop;
-      const hitTgt = trade.target && (long ? cur.h >= trade.target : cur.l <= trade.target);
-      if (hitStop) closeTrade(trade.stop, "stop");
-      else if (hitTgt) closeTrade(trade.target, "target");
-    }
-  }, [cursor]); // eslint-disable-line
+    if (closed.length) setTrades((list) => [...closed.reverse(), ...list]);
+    if (t !== tradeRef.current) setTrade(t);
+  }, [cursor, bars, bookTrade]);
 
   const closeTrade = (exit, reason) => {
-    setTrade((tr) => {
-      if (!tr) return null;
-      const sign = tr.dir === "long" ? 1 : -1;
-      const pnl = (exit - tr.entry) * tr.qty * sign;
-      setTrades((list) => [{
-        id: uid(), symbol, interval, dir: tr.dir, qty: tr.qty, entry: tr.entry, exit,
-        stop: tr.stop, target: tr.target, riskAmt: tr.riskAmt, r: tr.riskAmt ? pnl / tr.riskAmt : 0,
-        pnl, reason, at: cur?.t, closedAt: Date.now(),
-      }, ...list]);
-      return null;
-    });
+    const tr = tradeRef.current;
+    if (!tr || !exit) return;
+    const rec = bookTrade(tr, exit, reason, cur?.t);
+    setTrades((list) => [{ ...rec, r: tr.riskAmt ? rec.pnl / tr.riskAmt : 0 }, ...list]);
+    setTrade(null);
   };
 
+  /* an empty entry field means "use the current price" — the placeholder said so */
+  const entryVal = parseFloat(form.entry) || price || 0;
   const rr = useMemo(() => {
-    const e = parseFloat(form.entry), s = parseFloat(form.stop), tg = parseFloat(form.target);
-    if (!e || !s || !tg) return null;
-    const risk = Math.abs(e - s), rew = Math.abs(tg - e);
+    const s = parseFloat(form.stop), tg = parseFloat(form.target);
+    if (!entryVal || !s || !tg) return null;
+    const risk = Math.abs(entryVal - s), rew = Math.abs(tg - entryVal);
     return risk > 0 ? rew / risk : null;
-  }, [form]);
+  }, [entryVal, form.stop, form.target]);
+
+  const setupErrors = useMemo(() => {
+    if (trade || !form.stop) return [];
+    return validateSetup({ dir: form.dir, entry: entryVal, stop: form.stop, target: form.target, riskPct: form.riskPct, equity, price });
+  }, [trade, form, entryVal, equity, price]);
 
   const armSetup = (immediate) => {
-    const e = immediate ? price : parseFloat(form.entry);
-    const s = parseFloat(form.stop), tg = parseFloat(form.target), rp = parseFloat(form.riskPct) || 1;
-    if (!e || !s) return;
+    const e = immediate ? price : entryVal;
+    const errs = validateSetup({ dir: form.dir, entry: e, stop: form.stop, target: form.target, riskPct: form.riskPct, equity, price });
+    if (errs.length) { setFormError(errs[0]); return; }
+    setFormError("");
+    const s = parseFloat(form.stop), tg = parseFloat(form.target), rp = parseFloat(form.riskPct);
     const riskAmt = equity * (rp / 100);
-    const perUnit = Math.abs(e - s);
-    if (!perUnit) return;
     setTrade({
-      dir: form.dir, entry: e, stop: s, target: tg || null, riskPct: rp,
-      qty: +(riskAmt / perUnit).toFixed(6), riskAmt,
+      dir: form.dir, entry: e, stop: s, target: Number.isNaN(tg) ? null : tg, riskPct: rp,
+      qty: +(riskAmt / Math.abs(e - s)).toFixed(6), riskAmt,
       status: immediate ? "open" : "watching", fromLogical: cursor, entryBar: cursor,
+      market: `${symbol}|${interval}`,
     });
   };
 
@@ -1142,10 +1289,10 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     setSaveState("saving");
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
-      await store.set(`bt:${meta.id}`, { id: meta.id, cursor, trades, trade, drawings, journal, notes, indicators }, false);
+      const ok = await store.set(`bt:${meta.id}`, { id: meta.id, cursor, trades, trade, drawings, journal, notes, indicators }, false);
       const st = computeStats(trades);
       onUpdateMeta(meta.id, { symbol, interval, stats: { count: st.count, wins: st.wins, losses: st.losses, net: st.net, winRate: st.winRate, avgWin: st.avgWin, avgLoss: st.avgLoss, avgR: st.avgR, maxDD: st.maxDD, curve: st.curve.slice(-60) } });
-      setSaveState("saved");
+      setSaveState(ok ? "saved" : "failed");
     }, 1200);
     return () => clearTimeout(saveT.current);
   }, [trades, trade, cursor, drawings, journal, notes, indicators, symbol, interval, restored]); // eslint-disable-line
@@ -1192,11 +1339,14 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     setRoom(doc); setRoomMsg(`Room ${code} is open — guests join as viewers.`);
   };
   const joinRoom = async () => {
+    setRoomMsg("");
     const code = joinCode.trim().toUpperCase();
-    if (code.length !== 6) { setRoomMsg("Room codes are 6 characters."); return; }
+    if (!code) { setRoomMsg("Enter a room code first."); return; }
+    if (code.length !== 6) { setRoomMsg(`"${code}" is ${code.length} characters — room codes are 6.`); return; }
+    setRoomMsg("Looking for that room…");
     if (!SHARED_ENABLED) { setRoomMsg("Live rooms need the sync backend. Set VITE_API_URL and redeploy."); return; }
     const doc = await store.get(`room:${code}`, true);
-    if (!doc) { setRoomMsg(`No open room for ${code}.`); return; }
+    if (!doc) { setRoomMsg(`No open room found for ${code}. Check the code with whoever is hosting.`); return; }
     if (doc.startMs !== meta.startMs) { setRoomMsg(`That room starts ${fmtDate(doc.startMs)}. Open a session with that start date to follow.`); return; }
     doc.participants = { ...doc.participants, [handle]: { role: doc.participants?.[handle]?.role || "viewer", ts: Date.now() } };
     await store.set(`room:${code}`, doc, true);
@@ -1214,6 +1364,8 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     await store.set(`room:${room.code}`, d, true); setRoom(d);
   };
 
+  const curMarket = `${symbol}|${interval}`;
+  const visibleDrawings = drawings.filter((d) => !d.market || d.market === curMarket).length;
   const marketList = tickers.length ? tickers : SYMBOLS.map((s) => ({ symbol: s, price: BASE_PX[s], chg: 0 }));
   const filtered = marketList.filter((m) => m.symbol.toLowerCase().includes(mktQuery.toLowerCase()));
 
@@ -1224,20 +1376,22 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
         <button onClick={onBack} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }} title="Back to dashboard"><Logo /></button>
 
         <select className="pc-in" style={{ width: "auto", fontWeight: 600, minWidth: 120 }} value={symbol}
-          disabled={!canControl} onChange={(e) => setSymbol(e.target.value)}>
+          disabled={!canControl} onChange={(e) => switchMarket(e.target.value, null)}>
           {SYMBOLS.map((s) => <option key={s}>{s}</option>)}
         </select>
 
         <span className="pc-num" style={{ fontSize: 17, fontWeight: 600 }}>{fmtPrice(price)}</span>
         <span className="pc-num pc-sm" style={{ color: chg >= 0 ? "var(--up)" : "var(--down)", fontWeight: 500 }}>
-          {chg >= 0 ? "+" : ""}{fmtPrice(Math.abs(chg))} ({chgPct >= 0 ? "+" : ""}{chgPct.toFixed(2)}%)
+          {chg >= 0 ? "+" : "−"}{fmtPrice(Math.abs(chg))} ({chgPct >= 0 ? "+" : "−"}{Math.abs(chgPct).toFixed(2)}%)
         </span>
         <span className="pc-sm" style={{ color: "var(--muted)" }}>{cur ? fmtClock(cur.t, interval) : ""}</span>
         {synthetic && <span className="pc-pill" style={{ background: "var(--accentSoft)", color: "var(--accent)" }}>simulated data</span>}
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <span className="pc-sm" style={{ color: "var(--dim)" }}>{saveState === "saving" ? "Saving…" : "Saved"}</span>
-          <button className={"pc-icon" + (roomOpen ? " on" : "")} onClick={() => setRoomOpen((o) => !o)} title="Live room" aria-label="Live room"><Svg>{Ic.users}</Svg></button>
+          <span className="pc-sm" style={{ color: saveState === "failed" ? "var(--down)" : "var(--dim)" }}>
+            {saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed — storage may be full" : "Saved"}
+          </span>
+          <span data-pop><button className={"pc-icon" + (roomOpen ? " on" : "")} onClick={() => setRoomOpen((o) => !o)} title="Live room" aria-label="Live room"><Svg>{Ic.users}</Svg></button></span>
           {room && <span className="pc-pill pc-live" style={{ background: "var(--accentSoft)", color: "var(--accent)" }}>● {room.code}</span>}
           <button className="pc-icon" onClick={onToggleTheme} title="Toggle theme" aria-label="Toggle theme"><Svg>{theme === "light" ? Ic.moon : Ic.sun}</Svg></button>
           <button className="pc-icon" onClick={onBack} title="Dashboard" aria-label="Dashboard"><Svg>{Ic.grid}</Svg></button>
@@ -1249,7 +1403,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
 
       {/* room popover */}
       {roomOpen && (
-        <div className="pc-card" style={{ position: "absolute", right: 14, top: 60, zIndex: 40, padding: 14, width: 262 }}>
+        <div className="pc-card" data-pop style={{ position: "absolute", right: 14, top: 60, zIndex: 40, padding: 14, width: 262 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span className="pc-cap">Live room</span>
             <button className="pc-icon" style={{ width: 24, height: 24 }} onClick={() => setRoomOpen(false)} aria-label="Close"><Svg s={13}>{Ic.close}</Svg></button>
@@ -1292,10 +1446,10 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
       {/* ============ TIMEFRAME STRIP ============ */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 14px", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexWrap: "wrap" }}>
         {INTERVALS.map((i) => (
-          <button key={i.id} className={"pc-tf" + (interval === i.id ? " on" : "")} disabled={!canControl} onClick={() => setIv(i.id)}>{i.label}</button>
+          <button key={i.id} className={"pc-tf" + (interval === i.id ? " on" : "")} disabled={!canControl} onClick={() => switchMarket(null, i.id)}>{i.label}</button>
         ))}
         <div style={{ width: 1, height: 20, background: "var(--border)", margin: "0 8px" }} />
-        <div style={{ position: "relative" }}>
+        <div style={{ position: "relative" }} data-pop>
           <button className="pc-btn" style={{ padding: "5px 10px", fontSize: 12 }} onClick={() => setIndOpen((o) => !o)}>
             Indicators <Svg s={13}>{Ic.chev}</Svg>
           </button>
@@ -1338,8 +1492,8 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
                 {PALETTE.map((c) => <button key={c} className={"pc-sw" + (color === c ? " on" : "")} style={{ background: `var(--${c})` }} onClick={() => setColor(c)} title={c} aria-label={`Colour ${c}`} />)}
               </div>
               <div className="pc-railsep" />
-              <button className="pc-tool" title="Clear all drawings" aria-label="Clear drawings" disabled={!canControl || !drawings.length}
-                onClick={() => { if (confirm("Remove every drawing?")) { applyDrawings([]); setSelected(null); } }}><Svg>{Tl.trash}</Svg></button>
+              <button className="pc-tool" title="Clear all drawings" aria-label="Clear drawings" disabled={!canControl || !visibleDrawings}
+                onClick={() => { if (confirm(`Remove all drawings on ${symbol} ${interval}?`)) { snapshotDrawings(); applyDrawings((prev) => prev.filter((d) => d.market && d.market !== curMarket)); setSelected(null); } }}><Svg>{Tl.trash}</Svg></button>
             </div>
 
             <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -1358,11 +1512,15 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
                 <div style={{ height: 470, display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 12 }}>Fetching {interval} bars…</div>
               ) : (
                 <Chart bars={bars} cursor={cursor} theme={theme} interval={interval} symbol={symbol} trade={trade} height={470}
-                  drawings={drawings} onDrawings={canControl ? applyDrawings : () => {}} tool={canControl ? tool : "cursor"} setTool={setTool}
+                  drawings={drawings} onDrawings={canControl ? applyDrawings : () => {}} onSnapshot={canControl ? snapshotDrawings : () => {}}
+                  tool={canControl ? tool : "cursor"} setTool={setTool}
                   color={color} selected={selected} setSelected={setSelected} indicators={indicators} logScale={logScale} zoom={zoom} />
               )}
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--dim)" }}>
-                <span>{tool === "cursor" ? (selected ? "Drag to move · handles to reshape · Delete to remove" : `${drawings.length} drawing${drawings.length === 1 ? "" : "s"}`) : `${TOOLS.find((x) => x.id === tool)?.title} · drag on the chart · Esc to cancel`}</span>
+                <span>{tool === "cursor"
+                  ? (selected ? "Drag to move · handles to reshape · Delete to remove"
+                    : `${visibleDrawings} drawing${visibleDrawings === 1 ? "" : "s"} on ${symbol} ${interval}`)
+                  : `${TOOLS.find((x) => x.id === tool)?.title} · drag on the chart · Esc to cancel`}</span>
                 <span className="pc-num">bar {cursor + 1} / {bars.length}{!canControl && ` · view only, following ${room?.host}`}</span>
               </div>
             </div>
@@ -1417,17 +1575,33 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
                     </Lbl>
                     <Lbl t="Stop loss"><input className="pc-in" value={form.stop} placeholder="—" onChange={(e) => setForm((f) => ({ ...f, stop: e.target.value }))} /></Lbl>
                     <Lbl t="Take profit"><input className="pc-in" value={form.target} placeholder="—" onChange={(e) => setForm((f) => ({ ...f, target: e.target.value }))} /></Lbl>
-                    <Lbl t="Risk % of equity"><input className="pc-in" value={form.riskPct} onChange={(e) => setForm((f) => ({ ...f, riskPct: e.target.value }))} /></Lbl>
+                    <Lbl t="Risk % of equity">
+                      <input className="pc-in" type="number" min="0.01" max="100" step="0.1" value={form.riskPct}
+                        onChange={(e) => setForm((f) => ({ ...f, riskPct: e.target.value }))} />
+                    </Lbl>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", marginTop: 6, borderTop: "1px solid var(--border)", fontSize: 13 }}>
                     <span style={{ color: "var(--muted)" }}>R:R</span>
                     <span className="pc-num" style={{ fontWeight: 600 }}>{rr ? rr.toFixed(2) : "—"}</span>
                   </div>
+                  {(setupErrors.length > 0 || formError) && (
+                    <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", borderRadius: 7, padding: "8px 10px", marginBottom: 10 }}>
+                      {(setupErrors.length ? setupErrors : [formError]).map((m, i) => (
+                        <div key={i} style={{ fontSize: 12, color: "var(--down)", lineHeight: 1.5 }}>{m}</div>
+                      ))}
+                    </div>
+                  )}
+                  {form.entry === "" && price && setupErrors.length === 0 && form.stop && (
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 8 }}>
+                      Entry blank — using the current price, {fmtPrice(price)}.
+                    </div>
+                  )}
                   <button className="pc-btn pri" style={{ width: "100%", justifyContent: "center", marginBottom: 6 }}
-                    disabled={!form.stop || !form.entry} onClick={() => armSetup(false)}>
+                    disabled={!form.stop || setupErrors.length > 0} onClick={() => armSetup(false)}>
                     <Svg s={14}>{Ic.plus}</Svg>Arm setup
                   </button>
-                  <button className="pc-btn" style={{ width: "100%", justifyContent: "center" }} disabled={!form.stop || !price} onClick={() => armSetup(true)}>Enter at market</button>
+                  <button className="pc-btn" style={{ width: "100%", justifyContent: "center" }}
+                    disabled={!form.stop || !price || setupErrors.length > 0} onClick={() => armSetup(true)}>Enter at market</button>
                 </>
               )}
             </div>
@@ -1453,7 +1627,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
             </div>
             <div className="pc-scroll" style={{ overflowY: "auto", maxHeight: 300, borderTop: "1px solid var(--border)" }}>
               {filtered.map((m) => (
-                <button key={m.symbol} className={"pc-mkt" + (m.symbol === symbol ? " on" : "")} disabled={!canControl} onClick={() => setSymbol(m.symbol)}>
+                <button key={m.symbol} className={"pc-mkt" + (m.symbol === symbol ? " on" : "")} disabled={!canControl} onClick={() => switchMarket(m.symbol, null)}>
                   <span style={{ color: m.symbol === symbol ? "var(--accent)" : "var(--dim)" }}><Svg s={14}>{Ic.star}</Svg></span>
                   <span style={{ flex: 1, fontWeight: 500, fontSize: 13 }}>{m.symbol}</span>
                   <span className="pc-num pc-sm">{fmtPrice(m.price)}</span>
@@ -1464,7 +1638,9 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
               ))}
             </div>
             <div className="pc-sm" style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", color: "var(--dim)" }}>
-              {tickers.length ? "Live 24h prices — click to switch instrument" : "Live prices unavailable"}
+              {tickers.length
+                ? `Live prices right now — your chart is replaying ${cur ? fmtDate(cur.t) : fmtDate(meta.startMs)}, so these will not match`
+                : "Live prices unavailable"}
             </div>
           </div>
 
@@ -1491,10 +1667,18 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
               <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
                 onChange={(e) => setCursor(+e.target.value)} style={{ width: "100%", accentColor: THEMES[theme].accent }} />
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, fontSize: 11, color: "var(--dim)" }} className="pc-num">
-                {bars.length > 1 && [0, .25, .5, .75, 1].map((f) => {
-                  const b = bars[Math.round(f * (bars.length - 1))];
-                  return <span key={f}>{b ? fmtClock(b.t, interval).split("  ")[1] : ""}</span>;
-                })}
+                {bars.length > 1 && (() => {
+                  const spanMs = bars[bars.length - 1].t - bars[0].t;
+                  const multiDay = spanMs > 2 * 86400000;
+                  return [0, .25, .5, .75, 1].map((f) => {
+                    const b = bars[Math.round(f * (bars.length - 1))];
+                    if (!b) return <span key={f} />;
+                    const d = new Date(b.t);
+                    const day = `${pad(d.getUTCDate())} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getUTCMonth()]}`;
+                    const hm = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+                    return <span key={f}>{multiDay ? `${day} ${String(d.getUTCFullYear()).slice(2)}` : hm}</span>;
+                  });
+                })()}
               </div>
             </div>
 
@@ -1518,7 +1702,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
                         <td>{fmtPrice(tr.entry)}</td>
                         <td>{fmtPrice(tr.exit)}</td>
                         <td>{tr.target ? (Math.abs(tr.target - tr.entry) / Math.abs(tr.entry - tr.stop)).toFixed(2) + "R" : "—"}</td>
-                        <td style={{ color: tr.pnl >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{fmtR(tr.r)}</td>
+                        <td style={{ color: tr.pnl > 0 ? "var(--up)" : tr.pnl < 0 ? "var(--down)" : "var(--muted)", fontWeight: 600 }}>{fmtR(tr.r)}</td>
                         <td style={{ color: "var(--muted)" }}>{tr.at ? fmtDate(tr.at) : "—"}</td>
                       </tr>
                     ))}
@@ -1562,7 +1746,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
             <div className="pc-h2" style={{ marginBottom: 12 }}>Performance Overview</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", marginBottom: 14 }}>
               {[["Total Trades", stats.count], ["Win Rate", stats.count ? `${stats.winRate.toFixed(1)}%` : "—"],
-                ["Profit Factor", stats.count ? (stats.profitFactor === Infinity ? "∞" : stats.profitFactor.toFixed(2)) : "—"],
+                ["Profit Factor", stats.profitFactor == null ? "—" : stats.profitFactor.toFixed(2)],
                 ["Avg R", stats.count ? fmtR(stats.avgR) : "—"]].map(([l, v]) => (
                 <div key={l} style={{ background: "var(--surface)", padding: "10px 11px" }}>
                   <div className="pc-cap" style={{ marginBottom: 4, fontSize: 10 }}>{l}</div>
@@ -1580,7 +1764,9 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
         </div>
 
         <div className="pc-sm" style={{ color: "var(--dim)", marginTop: 12, textAlign: "center" }}>
-          {synthetic ? "Live feed unavailable — running a deterministic simulated series." : `Historical klines from Binance public market data · ${bars.length} bars buffered`}
+          {synthetic
+            ? "Live feed unavailable — this session runs a deterministic SIMULATED series, not real market data."
+            : `Historical klines from Binance public market data · ${bars.length} real bars${endOfData ? " · end of available history reached" : ""}`}
         </div>
       </div>
     </div>
