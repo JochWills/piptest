@@ -158,14 +158,16 @@ const SPEEDS = [1, 2, 5, 10, 25, 50];
 const START_BALANCE = 10000;
 const MAX_LEVERAGE = 10;
 const MAX_ENTRY_DRIFT = 0.25;   // reject entries >25% from the live bar
-/* History loaded BEFORE the session start. Expressed as a target TIME span so
-   every timeframe covers a comparable date range, capped in bars so small
-   timeframes don't try to fetch a decade of one-second candles. */
-const WARMUP_MS = 45 * 86400000;   // aim for 45 days of lead-in
-const WARMUP_MAX_BARS = 800;
+/* History loaded BEFORE the moment you are looking at. A target TIME span, so
+   every timeframe reaches back over the same dates where the bar budget allows.
+   A fine timeframe physically cannot hold months of candles, so it takes what
+   it can and the chart loads more as you pan back. */
+const LOOKBACK_MS = 45 * 86400000;    // aim for 45 days of lead-in
+const LOOKBACK_MAX_BARS = 2000;
+const LOOKBACK_MIN_BARS = 200;
 const FORWARD_BARS = 1000;
-const WARMUP_MIN_BARS = 200;   // never less lead-in than before, whatever the timeframe
-const warmupBars = (id) => Math.max(WARMUP_MIN_BARS, Math.min(WARMUP_MAX_BARS, Math.ceil(WARMUP_MS / barMsOf(id))));
+const PAGE = 1000;
+const lookbackBars = (id) => Math.max(LOOKBACK_MIN_BARS, Math.min(LOOKBACK_MAX_BARS, Math.ceil(LOOKBACK_MS / barMsOf(id))));
 const CHUNK = 1000;
 const LWC_URLS = [
   "https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.2.0/lightweight-charts.standalone.production.js",
@@ -429,7 +431,7 @@ function useLWC() {
 /* ============================================================
    CHART
    ============================================================ */
-function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings, onDrawings: onDrawingsRaw, onSnapshot, tool, setTool, color, selected, setSelected, indicators, logScale, zoom }) {
+function Chart({ bars, cursor, theme, interval, symbol, trade, height, onNeedOlder, drawings, onDrawings: onDrawingsRaw, onSnapshot, tool, setTool, color, selected, setSelected, indicators, logScale, zoom }) {
   const boxRef = useRef(null), ovRef = useRef(null);
   const chartRef = useRef(null), serRef = useRef(null), volRef = useRef(null), indRefs = useRef({});
   const lastRef = useRef({ key: "", cursor: -1 });
@@ -483,7 +485,14 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
         const r = c.timeScale().getVisibleLogicalRange();
         const ref = ser.priceToCoordinate(bs[Math.min(cursorRef.current, bs.length - 1)]?.c ?? 0);
         const sig = `${r?.from?.toFixed(2)}|${r?.to?.toFixed(2)}|${ref}|${boxRef.current?.clientWidth}`;
-        if (sig !== sigRef.current) { sigRef.current = sig; paint(); }
+        if (sig !== sigRef.current) {
+          sigRef.current = sig; paint();
+          /* panned back to the beginning of what's loaded → pull older bars */
+          if (r && r.from < 12 && Date.now() - olderAskRef.current > 1500) {
+            olderAskRef.current = Date.now();
+            olderCbRef.current && olderCbRef.current();
+          }
+        }
       }
       raf = requestAnimationFrame(loop);
     };
@@ -609,6 +618,9 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
   geoRef.current = { bars, interval };
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
+  const olderCbRef = useRef(onNeedOlder);
+  olderCbRef.current = onNeedOlder;
+  const olderAskRef = useRef(0);
 
   const tsToLogical = (ts) => {
     const { bars: bs, interval: iv0 } = geoRef.current;
@@ -682,7 +694,7 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     /* trade zones */
     const tr = st.trade;
     if (tr) {
-      const x1 = toX(tr.fromLogical) ?? 0;
+      const x1 = toX(tr.fromTs != null ? tsToLogical(tr.fromTs) : tr.fromLogical) ?? 0;
       const yE = toY(tr.entry), yS = toY(tr.stop), yT = toY(tr.target);
       if (yE != null) {
         if (yT != null) { c.fillStyle = st.t.up; c.globalAlpha = .13; c.fillRect(x1, Math.min(yE, yT), W - x1, Math.abs(yT - yE)); }
@@ -1107,7 +1119,10 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   const [loading, setLoading] = useState(true);
   const [synthetic, setSynthetic] = useState(false);
   const [endOfData, setEndOfData] = useState(false);
+  const [shortBy, setShortBy] = useState(null);   // exchange's earliest bar, if later than asked
+  const [noOlder, setNoOlder] = useState(false);  // nothing further back exists
   const fetchingRef = useRef(false);
+  const olderRef = useRef(false);
   const anchorRef = useRef(null);
   const [cursor, setCursor] = useState(100);
   const [playing, setPlaying] = useState(false);
@@ -1158,6 +1173,8 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   const canControl = !room || role === "host" || role === "editor";
   const isHost = room && room.participants?.[handle]?.role === "host";
 
+  const barsRef = useRef(bars);
+  barsRef.current = bars;
   const cur = bars[Math.min(cursor, bars.length - 1)] || null;
   const prevBar = bars[Math.min(cursor, bars.length - 1) - 1] || null;
   const price = cur?.c ?? null;
@@ -1211,14 +1228,23 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
          couple of bars behind the anchor while a 1s chart has thousands —
          which is why coming back from 1s used to show ~2 candles. */
       const iv = barMsOf(interval);
-      const wu = warmupBars(interval);
-      const from = meta.startMs - wu * iv;
-      const real = await fetchKlinesPaged(symbol, interval, from, wu + FORWARD_BARS);
+      const lb = lookbackBars(interval);
+      /* Fetch around the moment being viewed, not always the session start.
+         Switching timeframe after replaying forward used to reload the window
+         around the start date and strand the cursor. */
+      const target = anchorRef.current || meta.startMs;
+      const from = target - lb * iv;
+      const real = await fetchKlinesPaged(symbol, interval, from, lb + FORWARD_BARS);
       if (!alive) return;
       const isReal = real && real.length > 20;
-      const next = isReal ? real : syntheticKlines(symbol, interval, from, wu + FORWARD_BARS);
+      const next = isReal ? real : syntheticKlines(symbol, interval, from, lb + FORWARD_BARS);
       setSynthetic(!isReal);
       setBars(next);
+      setNoOlder(false);
+      /* Did the exchange actually go back as far as we asked? For fine
+         timeframes it often cannot, and silently showing a much shorter
+         window is what made the date ranges look arbitrary. */
+      setShortBy(isReal && next.length && next[0].t > from + iv * 2 ? next[0].t : null);
 
       /* find the bar nearest a given timestamp */
       const nearest = (ts) => {
@@ -1232,8 +1258,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
       };
       /* anchor to the same MOMENT when switching market or timeframe,
          otherwise open at the session start date */
-      const anchor = anchorRef.current;
-      let idx = nearest(anchor || meta.startMs);
+      let idx = nearest(target);
       anchorRef.current = null;
       /* always leave some context on screen */
       idx = Math.max(Math.min(20, next.length - 1), Math.min(idx, next.length - 1));
@@ -1280,6 +1305,28 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     })();
     return () => { alive = false; };
   }, [cursor, bars, loading, synthetic, symbol, interval, barMs, endOfData]);
+
+  /* Pan far enough left and older candles load in, so any date is reachable on
+     any timeframe rather than being capped by the initial window. Prepending
+     shifts every bar index, so the cursor and the engine marker shift with it. */
+  const loadOlder = useCallback(async () => {
+    if (olderRef.current || noOlder || synthetic || loading) return;
+    const bs = barsRef.current;
+    if (!bs.length) return;
+    olderRef.current = true;
+    const iv = barMsOf(interval);
+    const firstT = bs[0].t;
+    const older = await fetchKlinesPaged(symbol, interval, firstT - PAGE * iv, PAGE);
+    const fresh = (older || []).filter((k) => k.t < firstT);
+    if (!fresh.length) setNoOlder(true);
+    else {
+      setBars((b) => (b.length && b[0].t === firstT ? [...fresh, ...b] : b));
+      setCursor((c) => c + fresh.length);
+      checkedRef.current += fresh.length;
+      setShortBy(null);
+    }
+    olderRef.current = false;
+  }, [symbol, interval, noOlder, synthetic, loading]);
 
   /* replay clock */
   const rafRef = useRef(0), accRef = useRef(0), lastRef = useRef(0);
@@ -1382,7 +1429,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     setTrade({
       dir: form.dir, entry: e, stop: s, target: Number.isNaN(tg) ? null : tg, riskPct: rp,
       qty: +(riskAmt / Math.abs(e - s)).toFixed(6), riskAmt,
-      status: immediate ? "open" : "watching", fromLogical: cursor, entryBar: cursor,
+      status: immediate ? "open" : "watching", fromTs: cur?.t, entryBar: cursor,
       market: `${symbol}|${interval}`,
     });
   };
@@ -1627,6 +1674,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
                 <div style={{ height: 470, display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 12 }}>Fetching {interval} bars…</div>
               ) : (
                 <Chart bars={bars} cursor={cursor} theme={theme} interval={interval} symbol={symbol} trade={trade} height={470}
+                  onNeedOlder={loadOlder}
                   drawings={drawings} onDrawings={canControl ? applyDrawings : () => {}} onSnapshot={canControl ? snapshotDrawings : () => {}}
                   tool={canControl ? tool : "cursor"} setTool={setTool}
                   color={color} selected={selected} setSelected={setSelected} indicators={indicators} logScale={logScale} zoom={zoom} />
@@ -1881,7 +1929,13 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
         <div className="pc-sm" style={{ color: "var(--dim)", marginTop: 12, textAlign: "center" }}>
           {synthetic
             ? "Live feed unavailable — this session runs a deterministic SIMULATED series, not real market data."
-            : `Historical klines from Binance public market data · ${bars.length} real bars${endOfData ? " · end of available history reached" : ""}`}
+            : <>
+                {`Binance public market data · ${bars.length} bars loaded, ${bars.length ? fmtDate(bars[0].t) : "—"} → ${bars.length ? fmtDate(bars[bars.length - 1].t) : "—"}`}
+                {shortBy && ` · Binance has no ${interval} candles before ${fmtDate(shortBy)}`}
+                {!shortBy && !noOlder && " · pan left to load more history"}
+                {noOlder && " · no earlier data available"}
+                {endOfData && " · end of available history reached"}
+              </>}
         </div>
       </div>
     </div>
