@@ -158,7 +158,14 @@ const SPEEDS = [1, 2, 5, 10, 25, 50];
 const START_BALANCE = 10000;
 const MAX_LEVERAGE = 10;
 const MAX_ENTRY_DRIFT = 0.25;   // reject entries >25% from the live bar
-const WARMUP = 200;             // bars of history loaded BEFORE the session start
+/* History loaded BEFORE the session start. Expressed as a target TIME span so
+   every timeframe covers a comparable date range, capped in bars so small
+   timeframes don't try to fetch a decade of one-second candles. */
+const WARMUP_MS = 45 * 86400000;   // aim for 45 days of lead-in
+const WARMUP_MAX_BARS = 800;
+const FORWARD_BARS = 1000;
+const WARMUP_MIN_BARS = 200;   // never less lead-in than before, whatever the timeframe
+const warmupBars = (id) => Math.max(WARMUP_MIN_BARS, Math.min(WARMUP_MAX_BARS, Math.ceil(WARMUP_MS / barMsOf(id))));
 const CHUNK = 1000;
 const LWC_URLS = [
   "https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.2.0/lightweight-charts.standalone.production.js",
@@ -181,6 +188,23 @@ async function fetchKlines(symbol, interval, startTime, limit = CHUNK) {
   }
   return null;
 }
+/* Binance caps a request at 1000 klines. Page through so lower timeframes can
+   still cover a useful stretch of history rather than a few minutes of it. */
+async function fetchKlinesPaged(symbol, interval, startTime, wanted) {
+  const iv = barMsOf(interval);
+  let out = [], t = startTime, guard = 0;
+  while (out.length < wanted && guard++ < 6) {
+    const chunk = await fetchKlines(symbol, interval, t, 1000);
+    if (!chunk || !chunk.length) break;
+    const fresh = out.length ? chunk.filter((k) => k.t > out[out.length - 1].t) : chunk;
+    if (!fresh.length) break;
+    out = out.concat(fresh);
+    if (chunk.length < 1000) break;
+    t = chunk[chunk.length - 1].t + iv;
+  }
+  return out.length ? out : null;
+}
+
 async function fetchTickers(symbols) {
   for (const host of DATA_HOSTS) {
     try {
@@ -616,7 +640,20 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
   /* a point may carry `ts` (preferred) or a legacy bare `l` */
   const ptL = (pt) => (pt.ts != null ? tsToLogical(pt.ts) : pt.l);
 
-  const toX = (l) => { const v = chartRef.current?.timeScale().logicalToCoordinate(l); return v == null ? null : v; };
+  /* Project a logical index to a pixel ourselves instead of using
+     logicalToCoordinate, which returns null once the index falls outside the
+     loaded bars — that null made the whole drawing vanish or snap to the wrong
+     place. Bars are evenly spaced by logical index, so this linear map is what
+     the library does internally, and it extrapolates cleanly past both ends. */
+  const toX = (l) => {
+    const c = chartRef.current;
+    if (!c || l == null || !Number.isFinite(l)) return null;
+    const ts = c.timeScale();
+    const r = ts.getVisibleLogicalRange();
+    if (!r || r.to === r.from) return null;
+    const w = (typeof ts.width === "function" ? ts.width() : 0) || boxRef.current?.clientWidth || 0;
+    return ((l - r.from) / (r.to - r.from)) * w;
+  };
   const toY = (p) => { const v = serRef.current?.priceToCoordinate(p); return v == null ? null : v; };
   const fromX = (x) => chartRef.current?.timeScale().coordinateToLogical(x);
   const fromY = (y) => serRef.current?.coordinateToPrice(y);
@@ -1174,11 +1211,12 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
          couple of bars behind the anchor while a 1s chart has thousands —
          which is why coming back from 1s used to show ~2 candles. */
       const iv = barMsOf(interval);
-      const from = meta.startMs - WARMUP * iv;
-      const real = await fetchKlines(symbol, interval, from);
+      const wu = warmupBars(interval);
+      const from = meta.startMs - wu * iv;
+      const real = await fetchKlinesPaged(symbol, interval, from, wu + FORWARD_BARS);
       if (!alive) return;
       const isReal = real && real.length > 20;
-      const next = isReal ? real : syntheticKlines(symbol, interval, from);
+      const next = isReal ? real : syntheticKlines(symbol, interval, from, wu + FORWARD_BARS);
       setSynthetic(!isReal);
       setBars(next);
 
@@ -1434,7 +1472,15 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
   };
 
   const curMarket = symbol;
-  const visibleDrawings = drawings.filter((d) => !d.market || d.market === curMarket).length;
+  const mine = drawings.filter((d) => !d.market || d.market === curMarket);
+  const visibleDrawings = mine.length;
+  /* a drawing whose whole time span sits outside the loaded bars can't be seen
+     on this timeframe — say so rather than letting it look broken */
+  const offRange = (!bars.length ? 0 : mine.filter((d) => {
+    const ts = d.pts.map((q) => q.ts).filter((x) => x != null);
+    if (!ts.length) return false;
+    return Math.max(...ts) < bars[0].t || Math.min(...ts) > bars[bars.length - 1].t;
+  }).length);
   const marketList = tickers.length ? tickers : SYMBOLS.map((s) => ({ symbol: s, price: BASE_PX[s], chg: 0 }));
   const filtered = marketList.filter((m) => m.symbol.toLowerCase().includes(mktQuery.toLowerCase()));
 
@@ -1588,7 +1634,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--dim)" }}>
                 <span>{tool === "cursor"
                   ? (selected ? "Drag to move · handles to reshape · Delete to remove"
-                    : `${visibleDrawings} drawing${visibleDrawings === 1 ? "" : "s"} on ${symbol}`)
+                    : `${visibleDrawings} drawing${visibleDrawings === 1 ? "" : "s"} on ${symbol}${offRange ? ` · ${offRange} outside this timeframe's date range` : ""}`)
                   : `${TOOLS.find((x) => x.id === tool)?.title} · drag on the chart · Esc to cancel`}</span>
                 <span className="pc-num">bar {cursor + 1} / {bars.length}{!canControl && ` · view only, following ${room?.host}`}</span>
               </div>
