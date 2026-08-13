@@ -453,10 +453,11 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
 
     let raf = 0;
     const loop = () => {
-      const s = serRef.current, c = chartRef.current;
-      if (s && c) {
+      const ser = serRef.current, c = chartRef.current;
+      if (ser && c) {
+        const { bars: bs } = geoRef.current;          // live, not the mount-time array
         const r = c.timeScale().getVisibleLogicalRange();
-        const ref = s.priceToCoordinate(bars[Math.min(cursor, bars.length - 1)]?.c ?? 0);
+        const ref = ser.priceToCoordinate(bs[Math.min(cursorRef.current, bs.length - 1)]?.c ?? 0);
         const sig = `${r?.from?.toFixed(2)}|${r?.to?.toFixed(2)}|${ref}|${boxRef.current?.clientWidth}`;
         if (sig !== sigRef.current) { sigRef.current = sig; paint(); }
       }
@@ -572,31 +573,45 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     paint();
   }
   /* --- time <-> logical index, so drawings survive a timeframe change ---
-     A logical index means a different moment on every timeframe. Drawings are
-     therefore stored with a timestamp (`ts`) and reprojected each paint. */
+     A logical index means a different moment on every timeframe, so drawings
+     store a timestamp (`ts`) and are reprojected on every paint.
+
+     CRITICAL: these read `bars` and `interval` from geoRef, NOT from the
+     enclosing render's variables. `paint` and the pointer handlers are created
+     once (deps []) and would otherwise keep converting against whichever
+     timeframe was loaded when the chart first mounted — which is exactly why
+     a box drawn on 30m landed in the wrong place on 4H. */
+  const geoRef = useRef({ bars: [], interval });
+  geoRef.current = { bars, interval };
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
+
   const tsToLogical = (ts) => {
-    if (!bars.length) return null;
-    if (ts <= bars[0].t) return (ts - bars[0].t) / (barMsOf(interval)) ;
-    const last = bars.length - 1;
-    if (ts >= bars[last].t) return last + (ts - bars[last].t) / barMsOf(interval);
+    const { bars: bs, interval: iv0 } = geoRef.current;
+    if (!bs.length || ts == null) return null;
+    const iv = barMsOf(iv0);
+    if (ts <= bs[0].t) return (ts - bs[0].t) / iv;
+    const last = bs.length - 1;
+    if (ts >= bs[last].t) return last + (ts - bs[last].t) / iv;
     let lo = 0, hi = last;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (bars[mid].t === ts) return mid;
-      if (bars[mid].t < ts) lo = mid + 1; else hi = mid - 1;
+      if (bs[mid].t === ts) return mid;
+      if (bs[mid].t < ts) lo = mid + 1; else hi = mid - 1;
     }
     const a = Math.max(0, hi), b = Math.min(last, lo);
-    const span = bars[b].t - bars[a].t;
-    return span > 0 ? a + (ts - bars[a].t) / span : a;
+    const span = bs[b].t - bs[a].t;
+    return span > 0 ? a + (ts - bs[a].t) / span : a;
   };
   const logicalToTs = (l) => {
-    if (!bars.length) return null;
-    const iv = barMsOf(interval);
-    if (l <= 0) return bars[0].t + l * iv;
-    const last = bars.length - 1;
-    if (l >= last) return bars[last].t + (l - last) * iv;
+    const { bars: bs, interval: iv0 } = geoRef.current;
+    if (!bs.length || l == null) return null;
+    const iv = barMsOf(iv0);
+    if (l <= 0) return bs[0].t + l * iv;
+    const last = bs.length - 1;
+    if (l >= last) return bs[last].t + (l - last) * iv;
     const i = Math.floor(l), f = l - i;
-    return bars[i].t + (bars[i + 1].t - bars[i].t) * f;
+    return bs[i].t + (bs[i + 1].t - bs[i].t) * f;
   };
   /* a point may carry `ts` (preferred) or a legacy bare `l` */
   const ptL = (pt) => (pt.ts != null ? tsToLogical(pt.ts) : pt.l);
