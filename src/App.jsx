@@ -158,6 +158,7 @@ const SPEEDS = [1, 2, 5, 10, 25, 50];
 const START_BALANCE = 10000;
 const MAX_LEVERAGE = 10;
 const MAX_ENTRY_DRIFT = 0.25;   // reject entries >25% from the live bar
+const WARMUP = 200;             // bars of history loaded BEFORE the session start
 const CHUNK = 1000;
 const LWC_URLS = [
   "https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.2.0/lightweight-charts.standalone.production.js",
@@ -337,6 +338,7 @@ const TOOLS = [
 ];
 const PALETTE = ["accent", "up", "down", "muted"];
 const Svg = ({ children, s = 16 }) => <svg width={s} height={s} viewBox="0 0 16 16" fill="none">{children}</svg>;
+const barMsOf = (id) => INTERVALS.find((i) => i.id === id)?.ms || 60000;
 
 /* ---------------- equity area chart ---------------- */
 function EquityChart({ curve, height = 130 }) {
@@ -412,7 +414,7 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
   const lwc = useLWC();
   const t = THEMES[theme];
   const dataKey = `${bars[0]?.t || 0}|${bars.length}|${interval}`;
-  const market = `${symbol}|${interval}`;
+  const market = symbol;
   const onDrawings = useCallback((next) => {
     onDrawingsRaw((prev) => {
       const others = (prev || []).filter((d) => d.market && d.market !== market);
@@ -488,14 +490,16 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     });
   }, [tool, lwc]);
 
-  /* zoom presets */
+  /* zoom presets — also re-applied whenever the dataset changes, so switching
+     timeframe keeps the same window size instead of showing whatever the
+     previous logical range happened to be */
   useEffect(() => {
     const c = chartRef.current;
-    if (!c || !bars.length) return;
+    if (!c || !bars.length || lwc !== "ready") return;
     const end = Math.min(cursor + 1, bars.length);
     if (!zoom) c.timeScale().fitContent();
     else c.timeScale().setVisibleLogicalRange({ from: Math.max(0, end - zoom), to: end + 12 });
-  }, [zoom]); // eslint-disable-line
+  }, [zoom, dataKey, lwc]); // eslint-disable-line
 
   /* volume */
   useEffect(() => {
@@ -553,7 +557,11 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     }
     lastRef.current = { key: dataKey, cursor };
     paint();
-  }, [bars, cursor, dataKey, indVals]); // eslint-disable-line
+    /* `lwc` MUST be a dependency: when the library finishes loading after this
+       component mounted, the series is created in a later effect pass and this
+       effect has to re-run or the chart stays empty until something else
+       changes. That was the "loading, then blank until I switch timeframe" bug. */
+  }, [bars, cursor, dataKey, indVals, lwc]); // eslint-disable-line
 
   function sizeOv() {
     const cv = ovRef.current, b = boxRef.current;
@@ -563,6 +571,36 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     cv.style.width = b.clientWidth + "px"; cv.style.height = b.clientHeight + "px";
     paint();
   }
+  /* --- time <-> logical index, so drawings survive a timeframe change ---
+     A logical index means a different moment on every timeframe. Drawings are
+     therefore stored with a timestamp (`ts`) and reprojected each paint. */
+  const tsToLogical = (ts) => {
+    if (!bars.length) return null;
+    if (ts <= bars[0].t) return (ts - bars[0].t) / (barMsOf(interval)) ;
+    const last = bars.length - 1;
+    if (ts >= bars[last].t) return last + (ts - bars[last].t) / barMsOf(interval);
+    let lo = 0, hi = last;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid].t === ts) return mid;
+      if (bars[mid].t < ts) lo = mid + 1; else hi = mid - 1;
+    }
+    const a = Math.max(0, hi), b = Math.min(last, lo);
+    const span = bars[b].t - bars[a].t;
+    return span > 0 ? a + (ts - bars[a].t) / span : a;
+  };
+  const logicalToTs = (l) => {
+    if (!bars.length) return null;
+    const iv = barMsOf(interval);
+    if (l <= 0) return bars[0].t + l * iv;
+    const last = bars.length - 1;
+    if (l >= last) return bars[last].t + (l - last) * iv;
+    const i = Math.floor(l), f = l - i;
+    return bars[i].t + (bars[i + 1].t - bars[i].t) * f;
+  };
+  /* a point may carry `ts` (preferred) or a legacy bare `l` */
+  const ptL = (pt) => (pt.ts != null ? tsToLogical(pt.ts) : pt.l);
+
   const toX = (l) => { const v = chartRef.current?.timeScale().logicalToCoordinate(l); return v == null ? null : v; };
   const toY = (p) => { const v = serRef.current?.priceToCoordinate(p); return v == null ? null : v; };
   const fromX = (x) => chartRef.current?.timeScale().coordinateToLogical(x);
@@ -617,7 +655,7 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
       const sel = dr.id === st.selected, hov = dr.id === hovRef.current;
       c.strokeStyle = col; c.fillStyle = col;
       c.globalAlpha = sel || hov ? 1 : .9; c.lineWidth = sel ? 2.2 : 1.5;
-      const P = dr.pts.map((p) => ({ x: toX(p.l), y: toY(p.p) }));
+      const P = dr.pts.map((p) => ({ x: toX(ptL(p)), y: toY(p.p) }));
       if (P.some((p) => p.x == null || p.y == null)) continue;
 
       if (dr.type === "hline") { c.beginPath(); c.moveTo(0, P[0].y); c.lineTo(W, P[0].y); c.stroke(); lbl(fmtPrice(dr.pts[0].p), 6, P[0].y - 10, col); }
@@ -625,7 +663,7 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
       else if (dr.type === "trend" || dr.type === "measure") {
         c.beginPath(); c.moveTo(P[0].x, P[0].y); c.lineTo(P[1].x, P[1].y); c.stroke();
         if (dr.type === "measure") {
-          const dp = dr.pts[1].p - dr.pts[0].p, dpct = (dp / dr.pts[0].p) * 100, nb = Math.round(dr.pts[1].l - dr.pts[0].l);
+          const dp = dr.pts[1].p - dr.pts[0].p, dpct = (dp / dr.pts[0].p) * 100, nb = Math.round(ptL(dr.pts[1]) - ptL(dr.pts[0]));
           c.globalAlpha = .12; c.fillRect(Math.min(P[0].x, P[1].x), Math.min(P[0].y, P[1].y), Math.abs(P[1].x - P[0].x), Math.abs(P[1].y - P[0].y)); c.globalAlpha = 1;
           lbl(`${dp >= 0 ? "+" : ""}${fmtPrice(dp)}   ${dpct >= 0 ? "+" : ""}${dpct.toFixed(2)}%   ${nb} bars`, (P[0].x + P[1].x) / 2 - 65, Math.min(P[0].y, P[1].y) - 13, col);
         }
@@ -676,7 +714,7 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
     const st = stRef.current, W = boxRef.current?.clientWidth || 0, H = boxRef.current?.clientHeight || 0;
     for (let i = (st.drawings || []).length - 1; i >= 0; i--) {
       const dr = st.drawings[i];
-      const P = dr.pts.map((p) => ({ x: toX(p.l), y: toY(p.p) }));
+      const P = dr.pts.map((p) => ({ x: toX(ptL(p)), y: toY(p.p) }));
       if (P.some((p) => p.x == null || p.y == null)) continue;
       for (let k = 0; k < P.length; k++) {
         const hx = dr.type === "hline" ? W / 2 : P[k].x, hy = dr.type === "vline" ? H / 2 : P[k].y;
@@ -718,7 +756,9 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
       e.stopPropagation(); e.preventDefault();
       const single = st.tool === "hline" || st.tool === "vline";
       st.onSnapshot && st.onSnapshot();
-      const base = { id: uid(), type: st.tool, color: st.color, market: st.market, pts: single ? [{ l, p }] : [{ l, p }, { l, p }] };
+      const mk = (li, pr) => ({ l: li, p: pr, ts: logicalToTs(li) });
+      const base = { id: uid(), type: st.tool, color: st.color, market: st.market,
+                     pts: single ? [mk(l, p)] : [mk(l, p), mk(l, p)] };
       if (single) { st.onDrawings([...(st.drawings || []), base]); st.setTool("cursor"); st.setSelected(base.id); return; }
       dragRef.current = { mode: "new", preview: base };
     };
@@ -732,13 +772,16 @@ function Chart({ bars, cursor, theme, interval, symbol, trade, height, drawings,
       e.stopPropagation(); e.preventDefault();
       const l = fromX(x), p = fromY(y);
       if (l == null || p == null) return;
-      if (drag.mode === "new") { drag.preview.pts[1] = { l, p }; paint(); }
+      if (drag.mode === "new") { drag.preview.pts[1] = { l, p, ts: logicalToTs(l) }; paint(); }
       else {
         st.onDrawings((st.drawings || []).map((dr) => {
           if (dr.id !== drag.id) return dr;
-          if (drag.mode === "point") return { ...dr, pts: dr.pts.map((q, i) => (i === drag.pointIdx ? { l, p } : q)) };
+          if (drag.mode === "point") return { ...dr, pts: dr.pts.map((q, i) => (i === drag.pointIdx ? { l, p, ts: logicalToTs(l) } : q)) };
           const dl = l - drag.start.l, dp = p - drag.start.p;
-          return { ...dr, pts: drag.orig.map((q) => ({ l: q.l + dl, p: q.p + dp })) };
+          return { ...dr, pts: drag.orig.map((q) => {
+            const nl = (q.ts != null ? tsToLogical(q.ts) : q.l) + dl;
+            return { l: nl, p: q.p + dp, ts: logicalToTs(nl) };
+          }) };
         }));
       }
     };
@@ -1111,25 +1154,36 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     let alive = true;
     (async () => {
       setLoading(true); setEndOfData(false); fetchingRef.current = false;
-      const real = await fetchKlines(symbol, interval, meta.startMs);
+      /* Load WARMUP bars BEFORE the session start. Without this, every
+         timeframe begins at the same instant, so a 1h chart has only a
+         couple of bars behind the anchor while a 1s chart has thousands —
+         which is why coming back from 1s used to show ~2 candles. */
+      const iv = barMsOf(interval);
+      const from = meta.startMs - WARMUP * iv;
+      const real = await fetchKlines(symbol, interval, from);
       if (!alive) return;
-      const next = real && real.length > 20 ? real : syntheticKlines(symbol, interval, meta.startMs);
-      setSynthetic(!(real && real.length > 20));
+      const isReal = real && real.length > 20;
+      const next = isReal ? real : syntheticKlines(symbol, interval, from);
+      setSynthetic(!isReal);
       setBars(next);
-      /* keep the SAME MOMENT IN TIME when the market or timeframe changes,
-         instead of reusing a raw bar index that means something else now */
-      const anchor = anchorRef.current;
-      let idx = Math.min(100, next.length - 1);
-      if (anchor) {
+
+      /* find the bar nearest a given timestamp */
+      const nearest = (ts) => {
         let best = 0, bestD = Infinity;
         for (let i = 0; i < next.length; i++) {
-          const d = Math.abs(next[i].t - anchor);
+          const d = Math.abs(next[i].t - ts);
           if (d < bestD) { bestD = d; best = i; }
-          if (next[i].t > anchor) break;
+          if (next[i].t > ts) break;
         }
-        idx = Math.max(1, Math.min(best, next.length - 1));
-        anchorRef.current = null;
-      }
+        return best;
+      };
+      /* anchor to the same MOMENT when switching market or timeframe,
+         otherwise open at the session start date */
+      const anchor = anchorRef.current;
+      let idx = nearest(anchor || meta.startMs);
+      anchorRef.current = null;
+      /* always leave some context on screen */
+      idx = Math.max(Math.min(20, next.length - 1), Math.min(idx, next.length - 1));
       setCursor(idx);
       checkedRef.current = idx;
       setLoading(false);
@@ -1163,7 +1217,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     fetchingRef.current = true;
     let alive = true;
     (async () => {
-      const ns = bars[bars.length - 1].t + barMs;
+      const ns = bars[bars.length - 1].t + barMsOf(interval);
       const more = synthetic ? null : await fetchKlines(symbol, interval, ns);
       if (!alive) { fetchingRef.current = false; return; }
       /* if the exchange has no more bars, STOP. Never invent history. */
@@ -1364,7 +1418,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
     await store.set(`room:${room.code}`, d, true); setRoom(d);
   };
 
-  const curMarket = `${symbol}|${interval}`;
+  const curMarket = symbol;
   const visibleDrawings = drawings.filter((d) => !d.market || d.market === curMarket).length;
   const marketList = tickers.length ? tickers : SYMBOLS.map((s) => ({ symbol: s, price: BASE_PX[s], chg: 0 }));
   const filtered = marketList.filter((m) => m.symbol.toLowerCase().includes(mktQuery.toLowerCase()));
@@ -1493,7 +1547,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
               </div>
               <div className="pc-railsep" />
               <button className="pc-tool" title="Clear all drawings" aria-label="Clear drawings" disabled={!canControl || !visibleDrawings}
-                onClick={() => { if (confirm(`Remove all drawings on ${symbol} ${interval}?`)) { snapshotDrawings(); applyDrawings((prev) => prev.filter((d) => d.market && d.market !== curMarket)); setSelected(null); } }}><Svg>{Tl.trash}</Svg></button>
+                onClick={() => { if (confirm(`Remove all drawings on ${symbol}?`)) { snapshotDrawings(); applyDrawings((prev) => prev.filter((d) => d.market && d.market !== curMarket)); setSelected(null); } }}><Svg>{Tl.trash}</Svg></button>
             </div>
 
             <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -1519,7 +1573,7 @@ function Workspace({ meta, handle, theme, onToggleTheme, onUpdateMeta, onBack })
               <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--dim)" }}>
                 <span>{tool === "cursor"
                   ? (selected ? "Drag to move · handles to reshape · Delete to remove"
-                    : `${visibleDrawings} drawing${visibleDrawings === 1 ? "" : "s"} on ${symbol} ${interval}`)
+                    : `${visibleDrawings} drawing${visibleDrawings === 1 ? "" : "s"} on ${symbol}`)
                   : `${TOOLS.find((x) => x.id === tool)?.title} · drag on the chart · Esc to cancel`}</span>
                 <span className="pc-num">bar {cursor + 1} / {bars.length}{!canControl && ` · view only, following ${room?.host}`}</span>
               </div>
