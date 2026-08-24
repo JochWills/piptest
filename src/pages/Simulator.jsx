@@ -819,45 +819,41 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         minWidth={560}
         label="Replay"
       >
-        <div style={{ padding: "9px 12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600 }}>
-              <span className={playing ? "live" : ""} style={{ width: 8, height: 8, borderRadius: 4,
+        <div style={{ padding: "6px 10px" }}>
+          {/* one row: transport, speed, scrubber, clock — keeps the bar shallow
+              so it covers as little of the chart as possible */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
+              style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
                 background: playing ? "var(--up)" : "var(--dim)" }} />
-              Replay
-            </span>
-            <div style={{ display: "flex", gap: 2 }}>
-              <button className="btn ghost" style={{ padding: "5px 8px" }} disabled={!canControl}
-                onClick={() => setCursor(0)} title="Back to the start"><Svg s={14}>{Ic.start}</Svg></button>
-              <button className="btn ghost" style={{ padding: "5px 8px" }} disabled={!canControl}
-                onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (\u2190)"><Svg s={14}>{Ic.back}</Svg></button>
-              <button className="btn pri" style={{ padding: "5px 13px" }} disabled={!canControl}
+
+            <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+              <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
+                onClick={() => setCursor(0)} title="Back to the start"><Svg s={13}>{Ic.start}</Svg></button>
+              <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
+                onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (←)"><Svg s={13}>{Ic.back}</Svg></button>
+              <button className="btn pri" style={{ padding: "4px 11px" }} disabled={!canControl}
                 onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
-                <Svg s={14}>{playing ? Ic.pause : Ic.play}</Svg>
+                <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
               </button>
-              <button className="btn ghost" style={{ padding: "5px 8px" }} disabled={!canControl}
-                onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (\u2192)"><Svg s={14}>{Ic.fwd}</Svg></button>
+              <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
+                onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
             </div>
-            <select className="in" style={{ width: 74, padding: "5px 8px" }} value={speed} disabled={!canControl}
-              onChange={(e) => setSpeed(+e.target.value)}>
-              {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}\u00d7</option>)}
+
+            <select className="in" value={speed} disabled={!canControl}
+              onChange={(e) => setSpeed(+e.target.value)}
+              title="Replay speed"
+              style={{ width: 66, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
+              {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}&times;</option>)}
             </select>
-            <span className="num sm mut" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
-              {cur ? fmtClock(cur.t, interval) + " UTC" : ""}
-            </span>
-          </div>
-          <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
-            onChange={(e) => setCursor(+e.target.value)}
-            style={{ width: "100%", marginTop: 8, accentColor: T.brand }} />
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
-            <span className="num" style={{ fontSize: 10.5, color: "var(--dim)" }}>
-              {bars.length ? fmtShort(bars[0].t) : ""}
-            </span>
-            <span className="num" style={{ fontSize: 10.5, color: "var(--dim)" }}>
-              bar {cursor + 1} / {bars.length}
-            </span>
-            <span className="num" style={{ fontSize: 10.5, color: "var(--dim)" }}>
-              {bars.length ? fmtShort(bars[bars.length - 1].t) : ""}
+
+            <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
+              onChange={(e) => setCursor(+e.target.value)}
+              title={`Bar ${cursor + 1} of ${bars.length}`}
+              style={{ flex: 1, minWidth: 90, accentColor: T.brand, margin: 0 }} />
+
+            <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
+              {cur ? fmtClock(cur.t, interval) : ""}
             </span>
           </div>
         </div>
