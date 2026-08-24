@@ -40,6 +40,18 @@ const FAQ = [
 export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T }) {
   const [openFaq, setOpenFaq] = useState(0);
 
+  /* The app routes on the hash, so an <a href="#features"> would be read as a
+     route and bounce you to the dashboard. Scroll to the section directly and
+     leave the hash alone. */
+  const scrollTo = (id) => (e) => {
+    e.preventDefault();
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const NavLink = ({ to, children, className = "sm mut" }) => (
+    <a href={`#${to}`} onClick={scrollTo(to)} className={className} style={{ cursor: "pointer" }}>{children}</a>
+  );
+
   return (
     <div>
       {/* ---------- nav ---------- */}
@@ -51,10 +63,10 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
           display: "flex", alignItems: "center", gap: 22 }}>
           <Logo size={30} />
           <nav style={{ display: "flex", gap: 20, marginLeft: 16 }} className="hide-sm">
-            <a href="#features" className="sm mut">Features</a>
-            <a href="#how" className="sm mut">How it works</a>
-            <a href="#pricing" className="sm mut">Pricing</a>
-            <a href="#faq" className="sm mut">FAQ</a>
+            <NavLink to="features">Features</NavLink>
+            <NavLink to="how">How it works</NavLink>
+            <NavLink to="pricing">Pricing</NavLink>
+            <NavLink to="faq">FAQ</NavLink>
           </nav>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
             <button className="btn ghost" onClick={onToggleTheme} aria-label="Toggle theme" style={{ padding: "6px 9px" }}>
@@ -81,7 +93,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
           </p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 }}>
             <button className="btn pri lg" onClick={onGetStarted}>Start practising free</button>
-            <a href="#how" className="btn outline lg">See how it works</a>
+            <a href="#how" onClick={scrollTo("how")} className="btn outline lg">See how it works</a>
           </div>
           <div className="sm mut">No card required · Free tier stays free</div>
 
@@ -200,7 +212,9 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
           <Logo size={26} />
           <span className="sm mut">© {new Date().getFullYear()} PipTest</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 18 }} className="sm mut">
-            <a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a>
+            <NavLink to="features">Features</NavLink>
+            <NavLink to="pricing">Pricing</NavLink>
+            <NavLink to="faq">FAQ</NavLink>
           </div>
         </div>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 20px 30px" }}>

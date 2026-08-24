@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Card, Field, Stat, Empty, Modal, Svg, Ic } from "../components/ui.jsx";
 import Logo from "../components/Logo.jsx";
+import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import ReplayChart, { TOOLS, INDICATORS } from "../chart/ReplayChart.jsx";
 import { SYMBOLS, INTERVALS, SPEEDS, barMsOf } from "../theme.js";
 import { loadWindow, fetchPaged, fetchTickers, nearestIndex, syntheticKlines } from "../lib/market.js";
@@ -69,6 +70,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [roomMsg, setRoomMsg] = useState("");
   const pushRef = useRef(0), appliedRef = useRef(0);
 
+  const [barPos, setBarPos] = useState(() => defaultBarPos());
+  const [barCollapsed, setBarCollapsed] = useState(false);
   const [restored, setRestored] = useState(false);
   const [saveState, setSaveState] = useState("saved");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -113,6 +116,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         if (body.indicators) setIndicators(body.indicators);
         if (body.symbol) setSymbol(body.symbol);
         if (body.interval) setIv(body.interval);
+      }
+      const prefs = await store.get(K.prefs);
+      if (prefs?.replayBar) {
+        setBarPos({
+          x: Math.min(Math.max(8, prefs.replayBar.x), Math.max(8, window.innerWidth - 360)),
+          y: Math.min(Math.max(8, prefs.replayBar.y), Math.max(8, window.innerHeight - 90)),
+        });
+        setBarCollapsed(!!prefs.replayBar.collapsed);
       }
       setRestored(true);
     })();
@@ -281,6 +292,18 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     }, 1000);
     return () => clearTimeout(saveT.current);
   }, [trades, trade, cursor, drawings, notes, indicators, symbol, interval, restored]); // eslint-disable-line
+
+  /* remember where the replay bar was left */
+  const barSaveT = useRef(null);
+  useEffect(() => {
+    if (!restored) return;
+    clearTimeout(barSaveT.current);
+    barSaveT.current = setTimeout(async () => {
+      const prefs = (await store.get(K.prefs)) || {};
+      await store.set(K.prefs, { ...prefs, replayBar: { ...barPos, collapsed: barCollapsed } });
+    }, 500);
+    return () => clearTimeout(barSaveT.current);
+  }, [barPos, barCollapsed, restored]);
 
   /* ================= rooms ================= */
   const pushRoom = useCallback(async (extra = {}) => {
@@ -626,38 +649,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             </div>
           </div>
 
-          {/* ---- replay transport ---- */}
-          <div style={{ borderTop: "1px solid var(--border)", background: "var(--surface)", padding: "10px 14px", flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-              <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600 }}>
-                <span className={playing ? "live" : ""} style={{ width: 8, height: 8, borderRadius: 4,
-                  background: playing ? "var(--up)" : "var(--dim)" }} />
-                Replay
-              </span>
-              <div style={{ display: "flex", gap: 2 }}>
-                <button className="btn ghost" style={{ padding: "6px 9px" }} disabled={!canControl}
-                  onClick={() => setCursor(0)} title="To start"><Svg s={15}>{Ic.start}</Svg></button>
-                <button className="btn ghost" style={{ padding: "6px 9px" }} disabled={!canControl}
-                  onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (←)"><Svg s={15}>{Ic.back}</Svg></button>
-                <button className="btn pri" style={{ padding: "6px 12px" }} disabled={!canControl}
-                  onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
-                  <Svg s={15}>{playing ? Ic.pause : Ic.play}</Svg>
-                </button>
-                <button className="btn ghost" style={{ padding: "6px 9px" }} disabled={!canControl}
-                  onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (→)"><Svg s={15}>{Ic.fwd}</Svg></button>
-              </div>
-              <select className="in" style={{ width: 78 }} value={speed} disabled={!canControl}
-                onChange={(e) => setSpeed(+e.target.value)}>
-                {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
-              </select>
-              <span className="num sm mut" style={{ marginLeft: "auto" }}>
-                {cur ? fmtClock(cur.t, interval) + " UTC" : ""}
-              </span>
-            </div>
-            <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
-              onChange={(e) => setCursor(+e.target.value)}
-              style={{ width: "100%", accentColor: T.brand }} />
-          </div>
+          {/* the replay transport now floats — rendered near the end of this
+              component so it can sit anywhere over the workspace */}
 
           {/* ---- blotter ---- */}
           <div style={{ borderTop: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
@@ -816,6 +809,59 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           </div>
         </aside>
       </div>
+
+      {/* ================= floating replay bar ================= */}
+      <FloatingBar
+        pos={barPos}
+        onPos={setBarPos}
+        collapsed={barCollapsed}
+        onToggleCollapse={() => setBarCollapsed((c) => !c)}
+        minWidth={560}
+        label="Replay"
+      >
+        <div style={{ padding: "9px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 600 }}>
+              <span className={playing ? "live" : ""} style={{ width: 8, height: 8, borderRadius: 4,
+                background: playing ? "var(--up)" : "var(--dim)" }} />
+              Replay
+            </span>
+            <div style={{ display: "flex", gap: 2 }}>
+              <button className="btn ghost" style={{ padding: "5px 8px" }} disabled={!canControl}
+                onClick={() => setCursor(0)} title="Back to the start"><Svg s={14}>{Ic.start}</Svg></button>
+              <button className="btn ghost" style={{ padding: "5px 8px" }} disabled={!canControl}
+                onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (\u2190)"><Svg s={14}>{Ic.back}</Svg></button>
+              <button className="btn pri" style={{ padding: "5px 13px" }} disabled={!canControl}
+                onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
+                <Svg s={14}>{playing ? Ic.pause : Ic.play}</Svg>
+              </button>
+              <button className="btn ghost" style={{ padding: "5px 8px" }} disabled={!canControl}
+                onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (\u2192)"><Svg s={14}>{Ic.fwd}</Svg></button>
+            </div>
+            <select className="in" style={{ width: 74, padding: "5px 8px" }} value={speed} disabled={!canControl}
+              onChange={(e) => setSpeed(+e.target.value)}>
+              {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}\u00d7</option>)}
+            </select>
+            <span className="num sm mut" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
+              {cur ? fmtClock(cur.t, interval) + " UTC" : ""}
+            </span>
+          </div>
+          <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
+            onChange={(e) => setCursor(+e.target.value)}
+            style={{ width: "100%", marginTop: 8, accentColor: T.brand }} />
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+            <span className="num" style={{ fontSize: 10.5, color: "var(--dim)" }}>
+              {bars.length ? fmtShort(bars[0].t) : ""}
+            </span>
+            <span className="num" style={{ fontSize: 10.5, color: "var(--dim)" }}>
+              bar {cursor + 1} / {bars.length}
+            </span>
+            <span className="num" style={{ fontSize: 10.5, color: "var(--dim)" }}>
+              {bars.length ? fmtShort(bars[bars.length - 1].t) : ""}
+            </span>
+          </div>
+        </div>
+      </FloatingBar>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
 

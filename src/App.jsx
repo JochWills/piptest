@@ -20,10 +20,16 @@ import { fmtShort } from "./lib/trading.js";
    #/settings.
    ============================================================ */
 
+/* Only these are routes. Anything else in the hash (an in-page anchor such as
+   #features) is left alone and treated as the landing page, so marketing links
+   scroll instead of navigating. */
+const ROUTES = ["home", "auth", "sim", "dashboard", "journal", "analytics", "settings"];
+
 const parseHash = () => {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
   const [page, arg] = h.split("/");
-  return { page: page || "", arg: arg || null };
+  if (!ROUTES.includes(page)) return { page: "", arg: null };
+  return { page, arg: arg || null };
 };
 
 export default function App() {
