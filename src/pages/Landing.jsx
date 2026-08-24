@@ -34,7 +34,7 @@ const FAQ = [
   { q: "How is this different from a demo account?", a: "A demo account moves in real time — a week of price action takes a week. PipTest compresses that into an afternoon, and lets you replay the same session as many times as you like." },
   { q: "Can I share a session with my trading group?", a: "That's the point. Start a room, share the six-character code, and everyone watches your chart live. You control who can draw on it." },
   { q: "What about forex?", a: "Crypto is live today. Forex is next — the data pipeline is the only piece outstanding, since free tick-level FX history needs its own ingest." },
-  { q: "Does it cost anything?", a: "The free tier is genuinely usable — not a three-day trial. Paid tiers add more saved sessions, longer history and larger rooms." },
+  { q: "Does it cost anything?", a: "PipTest is free while it’s in early access. If paid plans arrive later you’ll hear well before anything changes, and everything you’ve built stays yours." },
 ];
 
 export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T }) {
@@ -65,7 +65,6 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
           <nav style={{ display: "flex", gap: 20, marginLeft: 16 }} className="hide-sm">
             <NavLink to="features">Features</NavLink>
             <NavLink to="how">How it works</NavLink>
-            <NavLink to="pricing">Pricing</NavLink>
             <NavLink to="faq">FAQ</NavLink>
           </nav>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
@@ -95,7 +94,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
             <button className="btn pri lg" onClick={onGetStarted}>Start practising free</button>
             <a href="#how" onClick={scrollTo("how")} className="btn outline lg">See how it works</a>
           </div>
-          <div className="sm mut">No card required · Free tier stays free</div>
+          <div className="sm mut">No card required · Free while in early access</div>
 
           <div style={{ marginTop: 48 }}>
             <MockScreen T={T} />
@@ -158,15 +157,6 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         </div>
       </section>
 
-      {/* ---------- pricing ---------- */}
-      <section id="pricing" style={{ maxWidth: 1180, margin: "0 auto", padding: "72px 20px" }}>
-        <div style={{ textAlign: "center", marginBottom: 44 }}>
-          <span className="cap">Pricing</span>
-          <h2 style={{ margin: "10px 0 12px" }}>Start free. Upgrade when it's paying for itself.</h2>
-        </div>
-        <PricingTable onPick={onGetStarted} />
-      </section>
-
       {/* ---------- faq ---------- */}
       <section id="faq" style={{ background: "var(--surface2)", borderTop: "1px solid var(--border)" }}>
         <div style={{ maxWidth: 780, margin: "0 auto", padding: "72px 20px" }}>
@@ -200,7 +190,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         <div style={{ maxWidth: 780, margin: "0 auto", padding: "76px 20px", textAlign: "center" }}>
           <LogoMark size={46} />
           <h2 style={{ margin: "20px 0 12px" }}>The market already happened.<br />You may as well practise on it.</h2>
-          <p className="mut" style={{ marginBottom: 26, fontSize: 15.5 }}>Free to start, and your first session takes about a minute to set up.</p>
+          <p className="mut" style={{ marginBottom: 26, fontSize: 15.5 }}>Free to use, and your first session takes about a minute to set up.</p>
           <button className="btn pri lg" onClick={onGetStarted}>Create your first session</button>
         </div>
       </section>
@@ -213,7 +203,6 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
           <span className="sm mut">© {new Date().getFullYear()} PipTest</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 18 }} className="sm mut">
             <NavLink to="features">Features</NavLink>
-            <NavLink to="pricing">Pricing</NavLink>
             <NavLink to="faq">FAQ</NavLink>
           </div>
         </div>
@@ -227,50 +216,6 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
       </footer>
 
       <style>{`@media (max-width: 820px) { .hide-sm { display: none !important; } }`}</style>
-    </div>
-  );
-}
-
-/* ---------- pricing ---------- */
-export function PricingTable({ onPick, compact }) {
-  const tiers = [
-    { name: "Free", price: "$0", per: "forever", cta: "Start free", features: [
-      "3 saved sessions", "Crypto markets, all timeframes", "Full drawing tools", "Trade journal and stats", "Join shared rooms",
-    ] },
-    { name: "Trader", price: "$14", per: "per month", featured: true, cta: "Start free trial", features: [
-      "Unlimited sessions", "Host rooms up to 10 people", "Prop-firm challenge mode", "Full analytics breakdowns", "Tag and filter your book", "Export trades to CSV",
-    ] },
-    { name: "Desk", price: "$39", per: "per month", cta: "Talk to us", features: [
-      "Everything in Trader", "Rooms up to 50 people", "Shared team journal", "Group performance view", "Priority support",
-    ] },
-  ];
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit,minmax(${compact ? 240 : 280}px,1fr))`, gap: 16, alignItems: "start" }}>
-      {tiers.map((t) => (
-        <Card key={t.name} style={{
-          padding: 24, position: "relative",
-          borderColor: t.featured ? "var(--brand)" : "var(--border)",
-          borderWidth: t.featured ? 2 : 1,
-        }}>
-          {t.featured && (
-            <span className="pill b" style={{ position: "absolute", top: -11, left: 24 }}>Most popular</span>
-          )}
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>{t.name}</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 7, marginBottom: 18 }}>
-            <span className="num" style={{ fontSize: 34, fontWeight: 700 }}>{t.price}</span>
-            <span className="sm mut">{t.per}</span>
-          </div>
-          <button className={"btn " + (t.featured ? "pri" : "outline")} style={{ width: "100%", marginBottom: 18 }} onClick={onPick}>{t.cta}</button>
-          <div style={{ display: "grid", gap: 9 }}>
-            {t.features.map((f) => (
-              <div key={f} style={{ display: "flex", gap: 9, alignItems: "flex-start", fontSize: 13.5 }}>
-                <span style={{ color: "var(--brand)", flexShrink: 0, marginTop: 1 }}><Svg s={14}>{Ic.check}</Svg></span>
-                <span className="mut">{f}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ))}
     </div>
   );
 }

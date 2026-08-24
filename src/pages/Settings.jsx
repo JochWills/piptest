@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Svg, Ic, Modal } from "../components/ui.jsx";
-import { PricingTable } from "./Landing.jsx";
 import { DEFAULT_TAGS } from "../theme.js";
 import { SHARED_ENABLED } from "../lib/store.js";
 
@@ -86,11 +85,18 @@ export default function Settings({ account, onSaveAccount, tags, onSaveTags, onW
         </Card>
 
         <Card style={{ padding: 20 }}>
-          <h3 style={{ fontSize: 16, marginBottom: 4 }}>Plan</h3>
-          <p className="sm mut" style={{ marginBottom: 18 }}>
-            You're on the free plan — {sessions.length} session{sessions.length === 1 ? "" : "s"} and {trades.length} logged trade{trades.length === 1 ? "" : "s"}.
+          <h3 style={{ fontSize: 16, marginBottom: 4 }}>Usage</h3>
+          <p className="sm mut" style={{ marginBottom: 16, lineHeight: 1.6 }}>
+            PipTest is free while it's in early access — everything is unlocked.
           </p>
-          <PricingTable compact onPick={() => {}} />
+          <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
+            {[["Sessions", sessions.length], ["Trades logged", trades.length], ["Setup tags", tags.length]].map(([l, v]) => (
+              <div key={l}>
+                <div className="cap" style={{ marginBottom: 4 }}>{l}</div>
+                <div className="num" style={{ fontSize: 20, fontWeight: 600 }}>{v}</div>
+              </div>
+            ))}
+          </div>
         </Card>
 
         <Card style={{ padding: 20, borderColor: "color-mix(in srgb, var(--down) 40%, var(--border))" }}>
