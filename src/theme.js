@@ -8,6 +8,11 @@
 
 export const BRAND = "#2563EB";
 
+/* Wordmark colours. "pip" is near-black navy on light backgrounds, but that
+   would disappear on the dark theme, so it flips to the light ink there.
+   "test" keeps the same blue in both. */
+export const LOGO_BLUE = "#1668F5";
+
 export const THEMES = {
   dark: {
     bg: "#0B0D11", bg2: "#0F1216",
@@ -17,6 +22,7 @@ export const THEMES = {
     brand: BRAND, brandHover: "#3B7BF0", brandSoft: "#12203C", brandInk: "#FFFFFF",
     up: "#22C55E", upSoft: "#0F2A1B", down: "#EF4444", downSoft: "#2C1416",
     grid: "#171C24", shadow: "none",
+    logoInk: "#F2F5FA", logoBlue: LOGO_BLUE,
     heroGlow: "radial-gradient(1200px 600px at 50% -10%, rgba(37,99,235,.18), transparent 70%)",
   },
   light: {
@@ -27,6 +33,7 @@ export const THEMES = {
     brand: BRAND, brandHover: "#1D4FD7", brandSoft: "#EAF1FE", brandInk: "#FFFFFF",
     up: "#16A34A", upSoft: "#E7F8EE", down: "#DC2626", downSoft: "#FDECEC",
     grid: "#EDF0F4", shadow: "0 1px 2px rgba(13,17,23,.06)",
+    logoInk: "#0A1A3C", logoBlue: LOGO_BLUE,
     heroGlow: "radial-gradient(1200px 600px at 50% -10%, rgba(37,99,235,.10), transparent 70%)",
   },
 };

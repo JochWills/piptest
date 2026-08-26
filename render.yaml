@@ -22,9 +22,10 @@ services:
   - type: web
     name: piptest-admin
     runtime: static
-    rootDir: admin
-    buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
+    # No rootDir: for a static site staticPublishPath is resolved from the
+    # repo root, so setting both is what produces a "Not Found" page.
+    buildCommand: cd admin && npm install && npm run build
+    staticPublishPath: ./admin/dist
     envVars:
       - key: VITE_API_URL
         sync: false        # same API as the main site

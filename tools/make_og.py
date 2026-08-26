@@ -23,6 +23,7 @@ BRAND   = (37, 99, 235)
 UP      = (34, 197, 94)
 DOWN    = (239, 68, 68)
 BORDER  = (35, 41, 53)
+LOGO_BLUE = (22, 104, 245)
 
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts"
 def font(name, size):
@@ -107,24 +108,12 @@ def logo_mark(draw, cx, cy, size):
 
 
 def wordmark(draw, x, baseline_y, size):
-    """'piptest' with a dotless i and the dot in brand blue."""
+    """'pip' in near-white, 'test' in brand blue — matching the logo."""
     f = font("Medium", size)
-    draw.text((x, baseline_y), "p", font=f, fill=INK, anchor="ls")
-    x += draw.textlength("p", font=f)
-
-    stem = "\u0131"
-    w_stem = draw.textlength(stem, font=f)
-    draw.text((x, baseline_y), stem, font=f, fill=INK, anchor="ls")
-    d = size * S * 0.15
-    gap = size * S * 0.085
-    x_height = size * S * 0.548
-    dot_cx = x + w_stem / 2
-    dot_bot = baseline_y - x_height - gap
-    draw.ellipse([dot_cx - d / 2, dot_bot - d, dot_cx + d / 2, dot_bot], fill=BRAND)
-    x += w_stem
-
-    draw.text((x, baseline_y), "ptest", font=f, fill=INK, anchor="ls")
-    return x + draw.textlength("ptest", font=f)
+    draw.text((x, baseline_y), "pip", font=f, fill=INK, anchor="ls")
+    x += draw.textlength("pip", font=f)
+    draw.text((x, baseline_y), "test", font=f, fill=LOGO_BLUE, anchor="ls")
+    return x + draw.textlength("test", font=f)
 
 
 def build(width, height, square=False):

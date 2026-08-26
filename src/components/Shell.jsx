@@ -10,7 +10,7 @@ const NAV = [
   { id: "settings",  label: "Settings",  icon: Ic.gear },
 ];
 
-export default function Shell({ page, onNav, account, theme, onToggleTheme, onSignOut, children, wide }) {
+export default function Shell({ page, onNav, onHome, account, theme, onToggleTheme, onSignOut, children, wide }) {
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <aside className="shell-side" style={{
@@ -18,7 +18,8 @@ export default function Shell({ page, onNav, account, theme, onToggleTheme, onSi
         background: "var(--surface)", padding: "16px 12px",
         display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh",
       }}>
-        <button onClick={() => onNav("dashboard")}
+        {/* the logo goes home, the way a logo does everywhere else */}
+        <button onClick={onHome} title="Back to the PipTest home page"
           style={{ background: "none", border: "none", padding: "2px 6px 20px", cursor: "pointer", textAlign: "left" }}>
           <Logo size={28} />
         </button>
@@ -57,6 +58,8 @@ export default function Shell({ page, onNav, account, theme, onToggleTheme, onSi
               </div>
             </span>
           </div>
+          <button className="btn ghost" style={{ width: "100%", justifyContent: "flex-start", padding: "7px 9px", marginBottom: 6, fontSize: 12.5 }}
+            onClick={onHome}>← Home page</button>
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn ghost" style={{ flex: 1, padding: "6px 8px" }} onClick={onToggleTheme}
               title="Toggle theme" aria-label="Toggle theme">

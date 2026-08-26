@@ -422,8 +422,21 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       {/* ================= top bar ================= */}
       <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", height: 56,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, flexWrap: "wrap" }}>
-        <button onClick={onExit} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }} title="Back to dashboard">
-          <Logo size={27} />
+        {/* the logo doubles as the way out — labelled, because an icon
+            alone left people with no obvious route back */}
+        <button onClick={onExit} title="Back to your dashboard"
+          style={{ display: "flex", alignItems: "center", gap: 9, background: "transparent",
+            border: "1px solid transparent", borderRadius: 9, padding: "5px 10px 5px 6px",
+            cursor: "pointer", fontFamily: "inherit", color: "var(--muted)" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}>
+          <Logo size={27} showText={false} />
+          <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 500 }}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+              <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Dashboard
+          </span>
         </button>
         <div className="vsep" style={{ height: 24 }} />
 

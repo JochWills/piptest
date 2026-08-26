@@ -294,6 +294,7 @@ export default function App() {
     <Shell
       page={page}
       onNav={(p) => (p === "simulator" ? (sessions[0] ? go("sim", sessions[0].id) : go("dashboard")) : go(p))}
+      onHome={() => go("")}
       account={account} theme={theme} onToggleTheme={toggleTheme} onSignOut={signOut}
     >
       {page === "dashboard" && (
