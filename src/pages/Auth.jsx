@@ -1,41 +1,79 @@
 import React, { useState } from "react";
 import Logo from "../components/Logo.jsx";
-import { Card, Field, Svg, Ic } from "../components/ui.jsx";
+import { Card, Field } from "../components/ui.jsx";
+import { API_ENABLED } from "../lib/api.js";
 
 /* ============================================================
-   Auth
+   Auth — real accounts
 
-   Local-only for now: an account is a display name plus a
-   handle kept in this browser. When a real backend lands, this
-   is the one screen that changes — everything downstream reads
-   the account object, not the auth mechanism.
+   Validation mirrors the server's rules so mistakes are caught
+   before a round trip, but the server re-checks everything: a
+   client-side rule is a courtesy, never a control.
    ============================================================ */
 
-export default function Auth({ mode = "signup", onDone, onBack, onSwitch }) {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const HANDLE_RE = /^[a-zA-Z0-9_]{3,18}$/;
+
+function strength(pw) {
+  let s = 0;
+  if (pw.length >= 8) s++;
+  if (pw.length >= 12) s++;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) s++;
+  if (/\d/.test(pw)) s++;
+  if (/[^A-Za-z0-9]/.test(pw)) s++;
+  return Math.min(s, 4);
+}
+const LABELS = ["Too short", "Weak", "Fair", "Good", "Strong"];
+
+export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, doLogin, doRegister }) {
   const isSignup = mode === "signup";
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [handle, setHandle] = useState("");
-  const [email, setEmail] = useState("");
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  const submit = () => {
-    const h = handle.trim().replace(/[^a-zA-Z0-9_]/g, "").slice(0, 18);
-    if (!h) { setErr("Pick a handle — it's how you appear in shared rooms."); return; }
-    if (isSignup && !name.trim()) { setErr("What should we call you?"); return; }
-    onDone({
-      name: name.trim() || h,
-      handle: h,
-      email: email.trim(),
-      plan: "free",
-      createdAt: Date.now(),
-    });
+  const st = strength(password);
+
+  const validate = () => {
+    if (!EMAIL_RE.test(email.trim())) return "Enter a valid email address.";
+    if (password.length < 8) return "Password must be at least 8 characters.";
+    if (isSignup) {
+      if (!name.trim()) return "What should we call you?";
+      if (!HANDLE_RE.test(handle.trim())) return "Handle must be 3–18 characters: letters, numbers or underscores.";
+    }
+    return "";
   };
+
+  const submit = async () => {
+    const v = validate();
+    if (v) { setErr(v); return; }
+    setErr(""); setBusy(true);
+    try {
+      const user = isSignup
+        ? await doRegister({ email: email.trim(), password, name: name.trim(), handle: handle.trim() })
+        : await doLogin({ email: email.trim(), password });
+      onSignedIn(user);
+    } catch (e) {
+      setErr(e?.message || "Something went wrong. Try again.");
+    } finally { setBusy(false); }
+  };
+
+  /* suggest a handle from the name, but let it be overridden */
+  const onName = (v) => {
+    setName(v);
+    if (!handle || handle === suggest(name)) setHandle(suggest(v));
+  };
+  const suggest = (v) => v.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 18);
 
   return (
     <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 420 }}>
-        <div style={{ textAlign: "center", marginBottom: 26 }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+      <div style={{ width: "100%", maxWidth: 430 }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+            aria-label="Back to the home page">
             <Logo size={34} />
           </button>
         </div>
@@ -44,35 +82,81 @@ export default function Auth({ mode = "signup", onDone, onBack, onSwitch }) {
           <h2 style={{ fontSize: 22, marginBottom: 6 }}>{isSignup ? "Create your account" : "Welcome back"}</h2>
           <p className="sm mut" style={{ marginBottom: 22, lineHeight: 1.6 }}>
             {isSignup
-              ? "No card, no trial timer. Your sessions save to this browser."
-              : "Enter the handle you set up with."}
+              ? "Free while PipTest is in early access. Your sessions follow you to any device."
+              : "Sign in to pick up where you left off."}
           </p>
+
+          {!API_ENABLED && (
+            <div style={{ background: "var(--brandSoft)", border: "1px solid var(--brand)", borderRadius: 8,
+              padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: "var(--brand)", lineHeight: 1.55 }}>
+              This build has no API configured, so accounts run locally in this browser only.
+              Set VITE_API_URL and redeploy to enable real sign-in.
+            </div>
+          )}
 
           <div style={{ display: "grid", gap: 14 }}>
             {isSignup && (
               <Field label="Display name">
-                <input className="in" value={name} placeholder="Josh" onChange={(e) => setName(e.target.value)} />
+                <input className="in" value={name} placeholder="Josh Williams" autoComplete="name"
+                  onChange={(e) => onName(e.target.value)} />
               </Field>
             )}
-            <Field label="Handle" hint={isSignup ? "Letters, numbers and underscores. Shown to others in shared rooms." : undefined}>
-              <input className="in" value={handle} placeholder="josh_pe" maxLength={18}
-                onChange={(e) => setHandle(e.target.value)}
+
+            <Field label="Email">
+              <input className="in" type="email" value={email} placeholder="you@example.com"
+                autoComplete="email" onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && submit()} />
             </Field>
+
             {isSignup && (
-              <Field label="Email" hint="Optional for now — used later for saving across devices.">
-                <input className="in" value={email} placeholder="you@example.com" onChange={(e) => setEmail(e.target.value)} />
+              <Field label="Handle" hint="How you appear to others in shared rooms.">
+                <input className="in" value={handle} placeholder="josh_pe" maxLength={18}
+                  autoComplete="username" onChange={(e) => setHandle(e.target.value)} />
               </Field>
+            )}
+
+            <Field label="Password">
+              <div style={{ display: "flex", gap: 6 }}>
+                <input className="in" type={show ? "text" : "password"} value={password}
+                  placeholder={isSignup ? "At least 8 characters" : ""}
+                  autoComplete={isSignup ? "new-password" : "current-password"}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submit()} />
+                <button className="btn" style={{ padding: "0 11px", fontSize: 12 }}
+                  onClick={() => setShow((s) => !s)} type="button"
+                  aria-label={show ? "Hide password" : "Show password"}>
+                  {show ? "Hide" : "Show"}
+                </button>
+              </div>
+            </Field>
+
+            {isSignup && password.length > 0 && (
+              <div>
+                <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+                  {[0, 1, 2, 3].map((i) => (
+                    <span key={i} style={{
+                      flex: 1, height: 3, borderRadius: 2,
+                      background: i < st
+                        ? (st <= 1 ? "var(--down)" : st === 2 ? "#F59E0B" : "var(--up)")
+                        : "var(--surface3)",
+                    }} />
+                  ))}
+                </div>
+                <span className="sm mut" style={{ fontSize: 11.5 }}>{LABELS[st]}</span>
+              </div>
             )}
           </div>
 
           {err && (
             <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", color: "var(--down)",
-              borderRadius: 8, padding: "9px 11px", fontSize: 13, marginTop: 14 }}>{err}</div>
+              borderRadius: 8, padding: "10px 12px", fontSize: 12.5, marginTop: 16, lineHeight: 1.55 }}>
+              {err}
+            </div>
           )}
 
-          <button className="btn pri" style={{ width: "100%", marginTop: 18, padding: 11 }} onClick={submit}>
-            {isSignup ? "Create account" : "Continue"}
+          <button className="btn pri" style={{ width: "100%", marginTop: 18, padding: 11 }}
+            disabled={busy} onClick={submit}>
+            {busy ? "One moment…" : isSignup ? "Create account" : "Sign in"}
           </button>
 
           <div className="sm mut" style={{ textAlign: "center", marginTop: 16 }}>
@@ -81,9 +165,12 @@ export default function Auth({ mode = "signup", onDone, onBack, onSwitch }) {
           </div>
         </Card>
 
-        <div className="sm mut" style={{ textAlign: "center", marginTop: 18, lineHeight: 1.6 }}>
-          Accounts are stored in this browser for now.<br />Clearing site data will clear your sessions.
-        </div>
+        {isSignup && (
+          <p className="sm mut" style={{ textAlign: "center", marginTop: 18, lineHeight: 1.6, maxWidth: 380, margin: "18px auto 0" }}>
+            By creating an account you accept that PipTest is a practice tool — simulated results
+            are not a prediction of live performance.
+          </p>
+        )}
       </div>
     </div>
   );

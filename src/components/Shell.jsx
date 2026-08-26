@@ -8,6 +8,8 @@ const NAV = [
   { id: "journal",   label: "Journal",   icon: Ic.book },
   { id: "analytics", label: "Analytics", icon: Ic.chart },
   { id: "settings",  label: "Settings",  icon: Ic.gear },
+  /* admin-only; the server enforces the role regardless of what's rendered */
+  { id: "admin",     label: "Admin",     icon: Ic.users, admin: true },
 ];
 
 export default function Shell({ page, onNav, account, theme, onToggleTheme, onSignOut, children, wide }) {
@@ -24,7 +26,7 @@ export default function Shell({ page, onNav, account, theme, onToggleTheme, onSi
         </button>
 
         <nav style={{ display: "grid", gap: 2 }}>
-          {NAV.map((n) => (
+          {NAV.filter((n) => !n.admin || account?.role === "admin").map((n) => (
             <button key={n.id} onClick={() => onNav(n.id)}
               style={{
                 display: "flex", alignItems: "center", gap: 10, width: "100%",
@@ -52,7 +54,9 @@ export default function Shell({ page, onNav, account, theme, onToggleTheme, onSi
               <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {account?.name || "Guest"}
               </div>
-              <div className="sm mut" style={{ fontSize: 11.5 }}>{account?.plan === "free" ? "Free plan" : account?.plan}</div>
+              <div className="sm mut" style={{ fontSize: 11.5 }}>
+                {account?.role === "admin" ? "Admin" : account?.plan === "free" ? "Free plan" : account?.plan}
+              </div>
             </span>
           </div>
           <div style={{ display: "flex", gap: 6 }}>

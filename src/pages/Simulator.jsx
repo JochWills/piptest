@@ -10,7 +10,9 @@ import {
   evaluateChallenge, fmtPrice, fmtMoney, fmtSigned, fmtR, fmtClock, fmtShort, dec,
   START_BALANCE, uid, makeCode,
 } from "../lib/trading.js";
-import { store, K, SHARED_ENABLED } from "../lib/store.js";
+import { store, K } from "../lib/store.js";
+import * as data from "../lib/data.js";
+import { API_ENABLED } from "../lib/api.js";
 
 const TOOL_ICONS = {
   cursor:  <path d="M4 3l8.5 6.6-3.8.7L10.4 14 9 14.7 7.2 10.9 4.3 12.6z" fill="currentColor" />,
@@ -106,7 +108,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   /* ================= restore ================= */
   useEffect(() => {
     (async () => {
-      const body = await store.get(K.session(meta.id));
+      const body = await data.getSessionState(meta.id);
       if (body) {
         setCursor(body.cursor ?? 100);
         setTrades(body.trades || []);
@@ -275,7 +277,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     setSaveState("saving");
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
-      const ok = await store.set(K.session(meta.id), {
+      const ok = await data.saveSessionState(meta.id, {
         id: meta.id, cursor, trades, trade, drawings, notes, indicators, symbol, interval,
       });
       const st = computeStats(trades);
@@ -307,23 +309,23 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
   /* ================= rooms ================= */
   const pushRoom = useCallback(async (extra = {}) => {
-    if (!room || !canControl || !SHARED_ENABLED) return;
+    if (!room || !canControl || !API_ENABLED) return;
     const now = Date.now();
     if (!extra.force && now - pushRef.current < 700) return;
     pushRef.current = now;
     const doc = { ...room, symbol, interval, cursor, playing, speed, drawings, updatedBy: account.handle, updatedAt: now, ...extra };
     delete doc.force;
     setRoom(doc);
-    await store.set(K.room(room.code), doc, true);
+    await data.roomPut(room.code, doc);
   }, [room, canControl, symbol, interval, cursor, playing, speed, drawings, account.handle]);
 
   useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, speed, drawings, symbol, interval]); // eslint-disable-line
 
   useEffect(() => {
-    if (!room?.code || !SHARED_ENABLED) return;
+    if (!room?.code || !API_ENABLED) return;
     let alive = true;
     const poll = async () => {
-      const doc = await store.get(K.room(room.code), true);
+      const doc = await data.roomGet(room.code);
       if (!alive || !doc) return;
       if (doc.updatedBy === account.handle || (doc.updatedAt || 0) <= appliedRef.current) {
         setRoom((r) => ({ ...r, participants: doc.participants })); return;
@@ -342,41 +344,41 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   }, [room?.code, account.handle]); // eslint-disable-line
 
   const hostRoom = async () => {
-    if (!SHARED_ENABLED) { setRoomMsg("Live rooms need the sync service. Set VITE_API_URL and redeploy."); return; }
+    if (!API_ENABLED) { setRoomMsg("Live rooms need the API. Set VITE_API_URL and redeploy."); return; }
     const code = makeCode();
     const doc = { code, host: account.handle, symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now() } },
       drawings, cursor, playing: false, speed, updatedBy: account.handle, updatedAt: Date.now() };
-    if (!(await store.set(K.room(code), doc, true))) { setRoomMsg("Couldn't open the room. Try again."); return; }
+    if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
   };
   const joinRoom = async () => {
     setRoomMsg("");
-    if (!SHARED_ENABLED) { setRoomMsg("Live rooms need the sync service."); return; }
+    if (!API_ENABLED) { setRoomMsg("Live rooms need the API."); return; }
     const code = joinCode.trim().toUpperCase();
     if (!code) { setRoomMsg("Enter a room code first."); return; }
     if (code.length !== 6) { setRoomMsg(`"${code}" is ${code.length} characters — codes are 6.`); return; }
     setRoomMsg("Looking for that room…");
-    const doc = await store.get(K.room(code), true);
+    const doc = await data.roomGet(code);
     if (!doc) { setRoomMsg(`No open room found for ${code}.`); return; }
     doc.participants = { ...doc.participants, [account.handle]: { role: doc.participants?.[account.handle]?.role || "viewer", ts: Date.now() } };
-    await store.set(K.room(code), doc, true);
+    await data.roomPut(code, doc);
     appliedRef.current = 0; setRoom(doc); setRoomMsg(`Joined ${code} as viewer.`);
   };
   const leaveRoom = async () => {
-    if (room && SHARED_ENABLED) {
-      const d = await store.get(K.room(room.code), true);
-      if (d?.participants) { delete d.participants[account.handle]; await store.set(K.room(room.code), d, true); }
+    if (room && API_ENABLED) {
+      const d = await data.roomGet(room.code);
+      if (d?.participants) { delete d.participants[account.handle]; await data.roomPut(room.code, d); }
     }
     setRoom(null); setRoomMsg("");
   };
   const setRole = async (who, r) => {
     if (!isHost) return;
-    const d = await store.get(K.room(room.code), true);
+    const d = await data.roomGet(room.code);
     if (!d) return;
     d.participants[who] = { ...d.participants[who], role: r };
     d.updatedBy = account.handle; d.updatedAt = Date.now();
-    await store.set(K.room(room.code), d, true);
+    await data.roomPut(room.code, d);
     setRoom(d);
   };
 

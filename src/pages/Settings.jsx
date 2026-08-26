@@ -2,20 +2,26 @@ import React, { useState } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Svg, Ic, Modal } from "../components/ui.jsx";
 import { DEFAULT_TAGS } from "../theme.js";
-import { SHARED_ENABLED } from "../lib/store.js";
+import { API_ENABLED } from "../lib/api.js";
 
-export default function Settings({ account, onSaveAccount, tags, onSaveTags, onWipe, sessions, trades }) {
+export default function Settings({ account, onSaveAccount, onChangePassword, tags, onSaveTags, onWipe, onSignOut, sessions, trades }) {
   const [name, setName] = useState(account.name || "");
   const [handle, setHandle] = useState(account.handle || "");
   const [newTag, setNewTag] = useState("");
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const saveProfile = () => {
-    const h = handle.trim().replace(/[^a-zA-Z0-9_]/g, "").slice(0, 18);
-    if (!h) return;
-    onSaveAccount({ ...account, name: name.trim() || h, handle: h });
-    setSaved(true); setTimeout(() => setSaved(false), 1800);
+  const [profErr, setProfErr] = useState("");
+  const saveProfile = async () => {
+    const h = handle.trim();
+    if (!/^[a-zA-Z0-9_]{3,18}$/.test(h)) {
+      setProfErr("Handle must be 3\u201318 characters: letters, numbers or underscores."); return;
+    }
+    setProfErr("");
+    try {
+      await onSaveAccount({ name: name.trim() || h, handle: h });
+      setSaved(true); setTimeout(() => setSaved(false), 1800);
+    } catch (e) { setProfErr(e?.message || "Couldn't save your profile."); }
   };
 
   const addTag = () => {
@@ -40,11 +46,23 @@ export default function Settings({ account, onSaveAccount, tags, onSaveTags, onW
               <input className="in" value={handle} maxLength={18} onChange={(e) => setHandle(e.target.value)} />
             </Field>
           </div>
+          {profErr && (
+            <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", color: "var(--down)",
+              borderRadius: 8, padding: "9px 11px", fontSize: 12.5, marginTop: 12 }}>{profErr}</div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
             <button className="btn pri" onClick={saveProfile}>Save profile</button>
             {saved && <span className="sm" style={{ color: "var(--up)" }}>Saved</span>}
           </div>
+          {account?.email && (
+            <p className="sm mut" style={{ marginTop: 14 }}>
+              Signed in as {account.email}
+              {account.role === "admin" && <span className="pill b" style={{ marginLeft: 8 }}>admin</span>}
+            </p>
+          )}
         </Card>
+
+        {API_ENABLED && <PasswordCard onChangePassword={onChangePassword} onSignOut={onSignOut} />}
 
         <Card style={{ padding: 20 }}>
           <h3 style={{ fontSize: 16, marginBottom: 4 }}>Setup tags</h3>
@@ -75,12 +93,12 @@ export default function Settings({ account, onSaveAccount, tags, onSaveTags, onW
         <Card style={{ padding: 20 }}>
           <h3 style={{ fontSize: 16, marginBottom: 4 }}>Live rooms</h3>
           <p className="sm mut" style={{ marginBottom: 14, lineHeight: 1.6 }}>
-            {SHARED_ENABLED
-              ? "The sync service is connected. You can host rooms and share your chart."
-              : "Rooms need the sync service. Set VITE_API_URL on the site and redeploy — see TRADINGVIEW.md and the README."}
+            {API_ENABLED
+              ? "Connected. You can host rooms and share your chart live."
+              : "Rooms need the API. Set VITE_API_URL on the static site and redeploy — see BACKEND.md."}
           </p>
-          <span className={"pill " + (SHARED_ENABLED ? "g" : "n")}>
-            {SHARED_ENABLED ? "Connected" : "Not configured"}
+          <span className={"pill " + (API_ENABLED ? "g" : "n")}>
+            {API_ENABLED ? "Connected" : "Not configured"}
           </span>
         </Card>
 
@@ -121,5 +139,53 @@ export default function Settings({ account, onSaveAccount, tags, onSaveTags, onW
         </div>
       </Modal>
     </div>
+  );
+}
+
+
+/* Changing a password revokes every other session, so the user is
+   signed out here too — otherwise this tab holds a token the
+   server has already invalidated. */
+function PasswordCard({ onChangePassword, onSignOut }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    if (next.length < 8) { setErr("New password must be at least 8 characters."); return; }
+    setErr(""); setBusy(true);
+    try {
+      await onChangePassword({ current, next });
+      setMsg("Password changed. Signing you out of every device…");
+      setTimeout(onSignOut, 1600);
+    } catch (e) {
+      setErr(e?.message || "Couldn't change your password.");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card style={{ padding: 20 }}>
+      <h3 style={{ fontSize: 16, marginBottom: 4 }}>Password</h3>
+      <p className="sm mut" style={{ marginBottom: 16, lineHeight: 1.6 }}>
+        Changing this signs you out everywhere, including this tab.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 480 }}>
+        <Field label="Current password">
+          <input className="in" type="password" value={current} autoComplete="current-password"
+            onChange={(e) => setCurrent(e.target.value)} />
+        </Field>
+        <Field label="New password">
+          <input className="in" type="password" value={next} autoComplete="new-password"
+            onChange={(e) => setNext(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+        </Field>
+      </div>
+      {err && <div style={{ color: "var(--down)", fontSize: 12.5, marginTop: 12 }}>{err}</div>}
+      {msg && <div style={{ color: "var(--up)", fontSize: 12.5, marginTop: 12 }}>{msg}</div>}
+      <button className="btn" style={{ marginTop: 14 }} disabled={busy || !current || !next} onClick={submit}>
+        {busy ? "Changing…" : "Change password"}
+      </button>
+    </Card>
   );
 }

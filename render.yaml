@@ -1,4 +1,8 @@
+# Database lives on Supabase, not Render — Render's free Postgres is
+# deleted 30 days after creation. See BACKEND.md.
+
 services:
+  # ---------- the website ----------
   - type: web
     name: piptest
     runtime: static
@@ -6,14 +10,15 @@ services:
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_URL
-        sync: false        # set to your sync service URL to enable live rooms
+        sync: false        # https://api.piptest.com
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
 
+  # ---------- the API ----------
   - type: web
-    name: piptest-sync
+    name: piptest-api
     runtime: node
     rootDir: server
     plan: free
@@ -21,5 +26,17 @@ services:
     startCommand: npm start
     healthCheckPath: /healthz
     envVars:
+      - key: DATABASE_URL
+        sync: false                  # Supabase session pooler string
+      - key: JWT_SECRET
+        generateValue: true          # Render generates a strong random value
       - key: ALLOWED_ORIGIN
-        sync: false        # set to https://yourdomain.com
+        sync: false                  # https://piptest.com,https://www.piptest.com
+      - key: ADMIN_EMAILS
+        sync: false                  # your email — unlocks the admin dashboard
+      - key: COOKIE_CROSS_SITE
+        sync: false                  # "true" only if the API is NOT on piptest.com
+      - key: COOKIE_DOMAIN
+        sync: false                  # ".piptest.com" when using api.piptest.com
+      - key: NODE_ENV
+        value: production
