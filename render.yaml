@@ -16,6 +16,27 @@ services:
         source: /*
         destination: /index.html
 
+  # ---------- the admin console ----------
+  # Separate site on its own origin, so the code that lists every user
+  # never ships to a visitor's browser. Gated on the admin role by the API.
+  - type: web
+    name: piptest-admin
+    runtime: static
+    rootDir: admin
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false        # same API as the main site
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+
   # ---------- the API ----------
   - type: web
     name: piptest-api

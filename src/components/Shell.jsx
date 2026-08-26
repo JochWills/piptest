@@ -8,8 +8,6 @@ const NAV = [
   { id: "journal",   label: "Journal",   icon: Ic.book },
   { id: "analytics", label: "Analytics", icon: Ic.chart },
   { id: "settings",  label: "Settings",  icon: Ic.gear },
-  /* admin-only; the server enforces the role regardless of what's rendered */
-  { id: "admin",     label: "Admin",     icon: Ic.users, admin: true },
 ];
 
 export default function Shell({ page, onNav, account, theme, onToggleTheme, onSignOut, children, wide }) {
@@ -26,7 +24,7 @@ export default function Shell({ page, onNav, account, theme, onToggleTheme, onSi
         </button>
 
         <nav style={{ display: "grid", gap: 2 }}>
-          {NAV.filter((n) => !n.admin || account?.role === "admin").map((n) => (
+          {NAV.map((n) => (
             <button key={n.id} onClick={() => onNav(n.id)}
               style={{
                 display: "flex", alignItems: "center", gap: 10, width: "100%",

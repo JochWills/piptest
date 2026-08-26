@@ -378,6 +378,48 @@ router.patch("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => 
   res.json({ user: publicUser(rows[0]) });
 });
 
+/* full picture of one account, for the admin console */
+router.get("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  const { rows } = await q(
+    `SELECT id, email, handle, name, role, status, plan, created_at, last_login_at
+       FROM users WHERE id=$1`, [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "not_found" });
+
+  const [sessions, trades, events] = await Promise.all([
+    q(`SELECT id, name, symbol, interval, stats, updated_at
+         FROM bt_sessions WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 20`, [req.params.id]),
+    q(`SELECT count(*)::int AS n,
+              coalesce(sum(pnl),0)::float AS pnl,
+              coalesce(sum(r),0)::float   AS total_r,
+              count(*) FILTER (WHERE pnl > 0)::int AS wins
+         FROM trades WHERE user_id=$1`, [req.params.id]),
+    q(`SELECT type, created_at FROM events WHERE user_id=$1 ORDER BY id DESC LIMIT 20`, [req.params.id]),
+  ]);
+
+  res.json({
+    user: publicUser(rows[0]),
+    sessions: sessions.rows.map((r) => ({
+      id: r.id, name: r.name, symbol: r.symbol, interval: r.interval,
+      stats: r.stats || {}, updatedAt: r.updated_at,
+    })),
+    trades: trades.rows[0],
+    events: events.rows,
+  });
+});
+
+/* Deleting cascades to sessions, trades and tokens. There is no undo,
+   so the console asks for the handle to be typed before calling this. */
+router.delete("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({ error: "self_delete", message: "You can't delete your own account from here." });
+  }
+  const { rows } = await q("SELECT handle FROM users WHERE id=$1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "not_found" });
+  await q("DELETE FROM users WHERE id=$1", [req.params.id]);
+  await logEvent(req.user.id, "admin_delete_user", { handle: rows[0].handle }, reqIp(req));
+  res.json({ ok: true });
+});
+
 router.get("/admin/events", requireAuth, requireAdmin, async (req, res) => {
   const limit = Math.min(200, Number(req.query.limit) || 60);
   const { rows } = await q(

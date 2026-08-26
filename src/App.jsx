@@ -9,7 +9,6 @@ import Simulator from "./pages/Simulator.jsx";
 import Journal from "./pages/Journal.jsx";
 import Analytics from "./pages/Analytics.jsx";
 import Settings from "./pages/Settings.jsx";
-import Admin from "./pages/Admin.jsx";
 import { store, K } from "./lib/store.js";
 import { api, API_ENABLED, setToken, refresh, onAuthLost } from "./lib/api.js";
 import * as data from "./lib/data.js";
@@ -23,7 +22,7 @@ import { fmtShort } from "./lib/trading.js";
    development and the current deploy keep working.
    ============================================================ */
 
-const ROUTES = ["home", "auth", "sim", "dashboard", "journal", "analytics", "settings", "admin"];
+const ROUTES = ["home", "auth", "sim", "dashboard", "journal", "analytics", "settings"];
 
 const parseHash = () => {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
@@ -258,6 +257,7 @@ export default function App() {
     return wrap(
       <Landing
         theme={theme} T={T} onToggleTheme={toggleTheme}
+        account={account} onSignOut={signOut} onNav={go}
         onGetStarted={() => { if (account) go("dashboard"); else { setAuthMode("signup"); go("auth"); } }}
         onSignIn={() => { if (account) go("dashboard"); else { setAuthMode("signin"); go("auth"); } }}
       />
@@ -288,8 +288,7 @@ export default function App() {
     );
   }
 
-  let page = ["dashboard", "journal", "analytics", "settings", "admin"].includes(route.page) ? route.page : "dashboard";
-  if (page === "admin" && account.role !== "admin") page = "dashboard";
+  const page = ["dashboard", "journal", "analytics", "settings"].includes(route.page) ? route.page : "dashboard";
 
   return wrap(
     <Shell
@@ -305,7 +304,6 @@ export default function App() {
         <Journal trades={trades} tags={tags} onUpdateTrade={updateTrade} onExport={exportCsv} />
       )}
       {page === "analytics" && <Analytics trades={trades} />}
-      {page === "admin" && <Admin me={account} />}
       {page === "settings" && (
         <Settings account={account} sessions={sessions} trades={trades} tags={tags}
           onSaveAccount={async (patch) => {

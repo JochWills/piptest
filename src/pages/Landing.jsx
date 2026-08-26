@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Logo, { LogoMark } from "../components/Logo.jsx";
 import { Card, Svg, Ic } from "../components/ui.jsx";
 
@@ -37,8 +37,15 @@ const FAQ = [
   { q: "Does it cost anything?", a: "PipTest is free while it’s in early access. If paid plans arrive later you’ll hear well before anything changes, and everything you’ve built stays yours." },
 ];
 
-export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T }) {
+export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T, account, onSignOut, onNav }) {
   const [openFaq, setOpenFaq] = useState(0);
+  const [menu, setMenu] = useState(false);
+
+  useEffect(() => {
+    const away = (e) => { if (!e.target.closest?.("[data-menu]")) setMenu(false); };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, []);
 
   /* The app routes on the hash, so an <a href="#features"> would be read as a
      route and bounce you to the dashboard. Scroll to the section directly and
@@ -71,8 +78,47 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
             <button className="btn ghost" onClick={onToggleTheme} aria-label="Toggle theme" style={{ padding: "6px 9px" }}>
               <Svg>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
             </button>
-            <button className="btn" onClick={onSignIn}>Sign in</button>
-            <button className="btn pri" onClick={onGetStarted}>Start free</button>
+
+            {account ? (
+              <>
+                <button className="btn pri" onClick={() => onNav("dashboard")}>Open PipTest</button>
+                <span data-menu style={{ position: "relative" }}>
+                  <button onClick={() => setMenu((m) => !m)} aria-label="Account menu"
+                    style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                      background: "transparent", border: "1px solid var(--border)", borderRadius: 999,
+                      padding: "4px 10px 4px 4px", fontFamily: "inherit", color: "var(--ink)" }}>
+                    <Avatar account={account} />
+                    <span className="sm" style={{ fontWeight: 600, maxWidth: 110, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name || account.handle}</span>
+                    <Svg s={13} style={{ color: "var(--muted)" }}>{Ic.chev}</Svg>
+                  </button>
+
+                  {menu && (
+                    <div className="card" data-menu style={{ position: "absolute", right: 0, top: 46, zIndex: 60, width: 232, padding: 6 }}>
+                      <div style={{ padding: "8px 10px 10px", borderBottom: "1px solid var(--border)", marginBottom: 6 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5 }}>{account.name || account.handle}</div>
+                        <div className="sm mut" style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {account.email || "@" + account.handle}
+                        </div>
+                      </div>
+                      {[["dashboard", "Dashboard"], ["journal", "Journal"],
+                        ["analytics", "Analytics"], ["settings", "Settings"]].map(([id, label]) => (
+                        <button key={id} className="btn ghost" style={{ width: "100%", justifyContent: "flex-start", padding: "8px 10px" }}
+                          onClick={() => { setMenu(false); onNav(id); }}>{label}</button>
+                      ))}
+                      <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+                      <button className="btn ghost" style={{ width: "100%", justifyContent: "flex-start", padding: "8px 10px", color: "var(--down)" }}
+                        onClick={() => { setMenu(false); onSignOut(); }}>Sign out</button>
+                    </div>
+                  )}
+                </span>
+              </>
+            ) : (
+              <>
+                <button className="btn" onClick={onSignIn}>Sign in</button>
+                <button className="btn pri" onClick={onGetStarted}>Start free</button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -91,10 +137,14 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
             hundreds of times without risking a cent — alone, or on the same chart as your trading group.
           </p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 }}>
-            <button className="btn pri lg" onClick={onGetStarted}>Start practising free</button>
+            <button className="btn pri lg" onClick={onGetStarted}>
+              {account ? "Go to your dashboard" : "Start practising free"}
+            </button>
             <a href="#how" onClick={scrollTo("how")} className="btn outline lg">See how it works</a>
           </div>
-          <div className="sm mut">No card required · Free while in early access</div>
+          <div className="sm mut">
+            {account ? `Signed in as @${account.handle}` : "No card required · Free while in early access"}
+          </div>
 
           <div style={{ marginTop: 48 }}>
             <MockScreen T={T} />
@@ -190,8 +240,12 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         <div style={{ maxWidth: 780, margin: "0 auto", padding: "76px 20px", textAlign: "center" }}>
           <LogoMark size={46} />
           <h2 style={{ margin: "20px 0 12px" }}>The market already happened.<br />You may as well practise on it.</h2>
-          <p className="mut" style={{ marginBottom: 26, fontSize: 15.5 }}>Free to use, and your first session takes about a minute to set up.</p>
-          <button className="btn pri lg" onClick={onGetStarted}>Create your first session</button>
+          <p className="mut" style={{ marginBottom: 26, fontSize: 15.5 }}>
+            {account ? "Your sessions are waiting." : "Free to use, and your first session takes about a minute to set up."}
+          </p>
+          <button className="btn pri lg" onClick={onGetStarted}>
+            {account ? "Back to your dashboard" : "Create your first session"}
+          </button>
         </div>
       </section>
 
@@ -264,5 +318,18 @@ function MockScreen({ T }) {
         <line x1={pad + bw * 47.6} y1={pad} x2={pad + bw * 47.6} y2={H - pad} stroke={T.brand} strokeWidth="1.4" strokeDasharray="4 4" />
       </svg>
     </Card>
+  );
+}
+
+
+function Avatar({ account }) {
+  const initials = (account.name || account.handle || "?")
+    .split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  return (
+    <span style={{
+      width: 26, height: 26, borderRadius: 999, flexShrink: 0,
+      background: "var(--brandSoft)", color: "var(--brand)",
+      display: "grid", placeItems: "center", fontWeight: 700, fontSize: 11,
+    }}>{initials}</span>
   );
 }

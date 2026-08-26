@@ -702,8 +702,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         </section>
 
         {/* ---- right: order ticket ---- */}
-        <aside className="sim-right" style={{ borderLeft: "1px solid var(--border)", background: "var(--surface)",
-          overflowY: "auto", minHeight: 0 }} className2="scroll">
+        <aside className="sim-right" style={{ borderLeft: "1px solid var(--border)", background: "var(--surface)", overflowY: "auto", minHeight: 0 }}>
           <div style={{ padding: 14 }}>
             <div className="cap" style={{ marginBottom: 12 }}>Setup</div>
 
