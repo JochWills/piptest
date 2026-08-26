@@ -147,6 +147,6 @@ export const adminEmails = () =>
 
 export const publicUser = (u) => ({
   id: u.id, email: u.email, handle: u.handle, name: u.name,
-  role: u.role, status: u.status, plan: u.plan,
+  role: u.role, status: u.status, plan: u.plan, avatar: u.avatar || null,
   createdAt: u.created_at, lastLoginAt: u.last_login_at,
 });

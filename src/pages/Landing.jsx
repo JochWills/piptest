@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Logo, { LogoMark } from "../components/Logo.jsx";
 import { Card, Svg, Ic } from "../components/ui.jsx";
+import Avatar from "../components/Avatar.jsx";
 
 /* ============================================================
    Landing — the page that has to earn the signup
@@ -87,7 +88,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
                     style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                       background: "transparent", border: "1px solid var(--border)", borderRadius: 999,
                       padding: "4px 10px 4px 4px", fontFamily: "inherit", color: "var(--ink)" }}>
-                    <Avatar account={account} />
+                    <Avatar value={account.avatar} handle={account.handle} size={26} />
                     <span className="sm" style={{ fontWeight: 600, maxWidth: 110, overflow: "hidden",
                       textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name || account.handle}</span>
                     <Svg s={13} style={{ color: "var(--muted)" }}>{Ic.chev}</Svg>
@@ -322,14 +323,4 @@ function MockScreen({ T }) {
 }
 
 
-function Avatar({ account }) {
-  const initials = (account.name || account.handle || "?")
-    .split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  return (
-    <span style={{
-      width: 26, height: 26, borderRadius: 999, flexShrink: 0,
-      background: "var(--brandSoft)", color: "var(--brand)",
-      display: "grid", placeItems: "center", fontWeight: 700, fontSize: 11,
-    }}>{initials}</span>
-  );
-}
+

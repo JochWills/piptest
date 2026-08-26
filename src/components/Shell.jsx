@@ -1,6 +1,7 @@
 import React from "react";
 import Logo, { LogoMark } from "./Logo.jsx";
 import { Svg, Ic } from "./ui.jsx";
+import Avatar from "./Avatar.jsx";
 
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: Ic.grid },
@@ -45,10 +46,7 @@ export default function Shell({ page, onNav, onHome, account, theme, onToggleThe
 
         <div style={{ marginTop: "auto", paddingTop: 14, borderTop: "1px solid var(--border)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 4px 10px" }}>
-            <span style={{
-              width: 28, height: 28, borderRadius: 8, background: "var(--brandSoft)", color: "var(--brand)",
-              display: "grid", placeItems: "center", fontWeight: 700, fontSize: 12, flexShrink: 0,
-            }}>{(account?.handle || "?").slice(0, 2).toUpperCase()}</span>
+            <Avatar value={account?.avatar} handle={account?.handle || ""} size={28} />
             <span style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {account?.name || "Guest"}

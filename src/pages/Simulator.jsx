@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Card, Field, Stat, Empty, Modal, Svg, Ic } from "../components/ui.jsx";
 import Logo from "../components/Logo.jsx";
+import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import ReplayChart, { TOOLS, INDICATORS } from "../chart/ReplayChart.jsx";
 import { SYMBOLS, INTERVALS, SPEEDS, barMsOf } from "../theme.js";
@@ -347,7 +348,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (!API_ENABLED) { setRoomMsg("Live rooms need the API. Set VITE_API_URL and redeploy."); return; }
     const code = makeCode();
     const doc = { code, host: account.handle, symbol, interval, startMs: meta.startMs,
-      participants: { [account.handle]: { role: "host", ts: Date.now() } },
+      participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
       drawings, cursor, playing: false, speed, updatedBy: account.handle, updatedAt: Date.now() };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
@@ -361,7 +362,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     setRoomMsg("Looking for that room…");
     const doc = await data.roomGet(code);
     if (!doc) { setRoomMsg(`No open room found for ${code}.`); return; }
-    doc.participants = { ...doc.participants, [account.handle]: { role: doc.participants?.[account.handle]?.role || "viewer", ts: Date.now() } };
+    doc.participants = { ...doc.participants,
+      [account.handle]: { role: doc.participants?.[account.handle]?.role || "viewer",
+                          ts: Date.now(), avatar: account.avatar || null } };
     await data.roomPut(code, doc);
     appliedRef.current = 0; setRoom(doc); setRoomMsg(`Joined ${code} as viewer.`);
   };
@@ -1005,7 +1008,8 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
           </div>
           <div style={{ display: "grid", gap: 6 }}>
             {Object.entries(room.participants || {}).map(([who, info]) => (
-              <div key={who} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <div key={who} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Avatar value={info.avatar} handle={who} size={22} />
                 <span className="sm" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {who}{who === account.handle ? " (you)" : ""}
                 </span>

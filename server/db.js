@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS users (
   role          text NOT NULL DEFAULT 'user',      -- user | admin
   status        text NOT NULL DEFAULT 'active',    -- active | disabled
   plan          text NOT NULL DEFAULT 'free',
+  -- "fox:4" — an icon id and a colour index, about 6 bytes.
+  -- Cheaper than image uploads by four orders of magnitude, and
+  -- there is nothing to store, resize or moderate.
+  avatar        text,
   created_at    timestamptz NOT NULL DEFAULT now(),
   last_login_at timestamptz
 );
@@ -134,6 +138,8 @@ CREATE TABLE IF NOT EXISTS kv (
 
 export async function migrate() {
   await q(SCHEMA);
+  /* added after the first release, so bring existing tables forward */
+  await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar text");
   console.log("schema ready");
 }
 

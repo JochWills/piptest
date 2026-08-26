@@ -223,8 +223,13 @@ router.get("/me", requireAuth, async (req, res) => {
   res.json({ user: publicUser(rows[0]) });
 });
 
+const AVATAR_RE = /^[a-z]{2,12}:\d{1,2}$/;
+
 router.patch("/me", requireAuth, async (req, res) => {
-  const { name, handle } = req.body || {};
+  const { name, handle, avatar } = req.body || {};
+  if (avatar !== undefined && avatar !== null && !AVATAR_RE.test(avatar)) {
+    return res.status(400).json({ error: "invalid", message: "That avatar isn't valid." });
+  }
   if (handle !== undefined && !HANDLE_RE.test(handle || "")) {
     return res.status(400).json({ error: "invalid", message: "Handle must be 3–18 characters: letters, numbers or underscores." });
   }
@@ -233,8 +238,10 @@ router.patch("/me", requireAuth, async (req, res) => {
     if (dupe.rowCount) return res.status(409).json({ error: "taken", message: "That handle is already taken." });
   }
   const { rows } = await q(
-    `UPDATE users SET name = COALESCE($1, name), handle = COALESCE($2, handle) WHERE id=$3 RETURNING *`,
-    [name?.trim() || null, handle?.trim() || null, req.user.id]
+    `UPDATE users SET name = COALESCE($1, name), handle = COALESCE($2, handle),
+                      avatar = COALESCE($3, avatar)
+      WHERE id=$4 RETURNING *`,
+    [name?.trim() || null, handle?.trim() || null, avatar || null, req.user.id]
   );
   res.json({ user: publicUser(rows[0]) });
 });
@@ -419,7 +426,7 @@ router.get("/admin/users", requireAuth, requireAdmin, async (req, res) => {
      stable if the table gains a column, and never risks leaking
      password_hash into a response. */
   const cols = `u.id, u.email, u.handle, u.name, u.role, u.status, u.plan,
-                u.created_at, u.last_login_at`;
+                u.avatar, u.created_at, u.last_login_at`;
   const filter = search
     ? `WHERE u.email ILIKE $1 OR u.handle ILIKE $1 OR u.name ILIKE $1`
     : "";
@@ -478,7 +485,7 @@ router.patch("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => 
 /* full picture of one account, for the admin console */
 router.get("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
   const { rows } = await q(
-    `SELECT id, email, handle, name, role, status, plan, created_at, last_login_at
+    `SELECT id, email, handle, name, role, status, plan, avatar, created_at, last_login_at
        FROM users WHERE id=$1`, [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: "not_found" });
 

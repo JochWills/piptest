@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { api, setToken, refresh, API_ENABLED } from "./api.js";
+import Avatar from "./Avatar.jsx";
 
 /* ============================================================
    PipTest Console
@@ -366,8 +367,13 @@ function Users({ me }) {
               {rows.map((u) => (
                 <tr key={u.id}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{u.name}</div>
-                    <div className="sm mut" style={{ fontSize: 11.5 }}>@{u.handle}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <Avatar value={u.avatar} handle={u.handle} size={26} />
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{u.name}</div>
+                        <div className="sm mut" style={{ fontSize: 11.5 }}>@{u.handle}</div>
+                      </div>
+                    </div>
                   </td>
                   <td className="mut" style={{ fontSize: 12.5 }}>{u.email}</td>
                   <td><span className={"pill " + (u.role === "admin" ? "b" : "n")}>{u.role}</span></td>
@@ -443,7 +449,9 @@ function UserDrawer({ id, me, onClose, onChanged }) {
 
         {u && (
           <div style={{ padding: 20, display: "grid", gap: 18 }}>
-            <div className="card" style={{ padding: 16 }}>
+            <div className="card" style={{ padding: 16, display: "flex", gap: 14, alignItems: "flex-start" }}>
+              <Avatar value={u.avatar} handle={u.handle} size={46} />
+              <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 15 }}>{u.name}</div>
               <div className="sm mut" style={{ marginTop: 3 }}>{u.email}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
@@ -454,6 +462,7 @@ function UserDrawer({ id, me, onClose, onChanged }) {
               <div className="sm mut" style={{ marginTop: 12, lineHeight: 1.7 }}>
                 Joined {fmtDate(u.createdAt)}<br />
                 Last seen {ago(u.lastLoginAt)}
+              </div>
               </div>
             </div>
 

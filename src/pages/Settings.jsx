@@ -1,13 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Svg, Ic, Modal } from "../components/ui.jsx";
 import { DEFAULT_TAGS } from "../theme.js";
 import { API_ENABLED } from "../lib/api.js";
+import Avatar from "../components/Avatar.jsx";
+import { AVATAR_ICONS, AVATAR_COLORS, encodeAvatar, decodeAvatar } from "../lib/avatars.js";
 
 export default function Settings({ account, onSaveAccount, onChangePassword, tags, onSaveTags, onWipe, onSignOut, sessions, trades }) {
   const [name, setName] = useState(account.name || "");
   const [handle, setHandle] = useState(account.handle || "");
   const [newTag, setNewTag] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -38,6 +41,18 @@ export default function Settings({ account, onSaveAccount, onChangePassword, tag
         <Card style={{ padding: 20 }}>
           <h3 style={{ fontSize: 16, marginBottom: 4 }}>Profile</h3>
           <p className="sm mut" style={{ marginBottom: 16 }}>Your handle is what others see in shared rooms.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+            <Avatar value={account.avatar} handle={account.handle} size={56} />
+            <div>
+              <button className="btn" onClick={() => setPickerOpen(true)}>Change avatar</button>
+              <div className="sm mut" style={{ marginTop: 6 }}>
+                {decodeAvatar(account.avatar, account.handle).isDefault
+                  ? "Picked for you from your handle — change it any time."
+                  : "This is how you appear in shared rooms."}
+              </div>
+            </div>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Display name">
               <input className="in" value={name} onChange={(e) => setName(e.target.value)} />
@@ -127,6 +142,13 @@ export default function Settings({ account, onSaveAccount, onChangePassword, tag
         </Card>
       </div>
 
+      <AvatarPicker
+        open={pickerOpen}
+        account={account}
+        onClose={() => setPickerOpen(false)}
+        onSave={async (value) => { await onSaveAccount({ avatar: value }); setPickerOpen(false); }}
+      />
+
       <Modal open={confirmWipe} onClose={() => setConfirmWipe(false)} title="Delete everything?" width={440}>
         <p className="sm mut" style={{ lineHeight: 1.7, marginBottom: 18 }}>
           This removes {sessions.length} session{sessions.length === 1 ? "" : "s"}, {trades.length} trade
@@ -187,5 +209,83 @@ function PasswordCard({ onChangePassword, onSignOut }) {
         {busy ? "Changing…" : "Change password"}
       </button>
     </Card>
+  );
+}
+
+
+/* ------------------------------------------------------------
+   AvatarPicker
+
+   Icon and colour are chosen separately, so 32 icons and 10
+   colours give 320 combinations from a list short enough to scan.
+   The preview updates as you go, and nothing is saved until you
+   confirm.
+   ------------------------------------------------------------ */
+function AvatarPicker({ open, account, onClose, onSave }) {
+  const current = decodeAvatar(account.avatar, account.handle);
+  const [icon, setIcon] = useState(current.icon.id);
+  const [color, setColor] = useState(current.color.id);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      const c = decodeAvatar(account.avatar, account.handle);
+      setIcon(c.icon.id); setColor(c.color.id);
+    }
+  }, [open, account.avatar, account.handle]);
+
+  if (!open) return null;
+  const preview = encodeAvatar(icon, color);
+
+  return (
+    <Modal open={open} onClose={onClose} title="Choose your avatar" width={520}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+        <Avatar value={preview} size={64} />
+        <div>
+          <div style={{ fontWeight: 600 }}>{account.name || account.handle}</div>
+          <div className="sm mut" style={{ marginTop: 3 }}>@{account.handle}</div>
+        </div>
+      </div>
+
+      <span className="cap" style={{ display: "block", marginBottom: 9 }}>Colour</span>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+        {AVATAR_COLORS.map((c) => (
+          <button key={c.id} onClick={() => setColor(c.id)} title={c.name} aria-label={c.name}
+            style={{
+              width: 30, height: 30, borderRadius: "50%", cursor: "pointer", padding: 0,
+              background: c.bg,
+              border: color === c.id ? "2px solid var(--ink)" : "2px solid transparent",
+              outline: color === c.id ? "2px solid var(--brand)" : "none", outlineOffset: 1,
+            }} />
+        ))}
+      </div>
+
+      <span className="cap" style={{ display: "block", marginBottom: 9 }}>Icon</span>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(46px,1fr))", gap: 7 }}>
+        {AVATAR_ICONS.map((i) => (
+          <button key={i.id} onClick={() => setIcon(i.id)} title={i.label} aria-label={i.label}
+            style={{
+              aspectRatio: "1", display: "grid", placeItems: "center", cursor: "pointer",
+              fontSize: 21, lineHeight: 1, borderRadius: 9,
+              background: icon === i.id ? "var(--brandSoft)" : "var(--surface2)",
+              border: "1px solid " + (icon === i.id ? "var(--brand)" : "var(--border)"),
+            }}>{i.char}</button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 9, marginTop: 22 }}>
+        <button className="btn pri" disabled={busy}
+          onClick={async () => { setBusy(true); await onSave(preview); setBusy(false); }}>
+          {busy ? "Saving…" : "Save avatar"}
+        </button>
+        <button className="btn" onClick={onClose}>Cancel</button>
+      </div>
+
+      <p className="sm mut" style={{ marginTop: 16, lineHeight: 1.6 }}>
+        Avatars are stored as a short code rather than an image, so they cost
+        almost nothing and load instantly. Emoji are drawn by your device, so
+        yours may look slightly different on someone else's screen.
+      </p>
+    </Modal>
   );
 }

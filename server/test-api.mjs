@@ -96,6 +96,16 @@ try {
   r = await call("/api/admin/users", { token: adminToken });
   ok(r.status === 200 && r.body.users.length >= 2, "admin can list users");
 
+  console.log("\n=== avatars ===");
+  r = await call("/api/me", { token: userToken });
+  ok(r.body.user.avatar === null, "new account has no avatar set (falls back to one derived from the handle)");
+  r = await call("/api/me", { method: "PATCH", token: userToken, body: { avatar: "fox:4" } });
+  ok(r.status === 200 && r.body.user.avatar === "fox:4", "a valid avatar code saves");
+  r = await call("/api/me", { method: "PATCH", token: userToken, body: { avatar: "<script>alert(1)</script>" } });
+  ok(r.status === 400, "a malformed avatar code is refused");
+  r = await call("/api/me", { method: "PATCH", token: userToken, body: { name: "Josh W" } });
+  ok(r.body.user.avatar === "fox:4", "editing the name leaves the avatar alone");
+
   console.log("\n=== data ownership ===");
   await call("/api/sessions/s1", { method: "PUT", token: userToken,
     body: { name: "Mine", symbol: "BTCUSDT", interval: "30m", startMs: 1741852800000, stats: {} } });
