@@ -233,14 +233,14 @@ export default function App() {
   /* ---------- render ---------- */
   if (!booted) {
     return (
-      <div className="pt" style={vars}><style>{GLOBAL_CSS}</style>
+      <div className="pt" data-theme={theme} style={vars}><style>{GLOBAL_CSS}</style>
         <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--dim)" }}>Loading…</div>
       </div>
     );
   }
 
   const wrap = (children) => (
-    <div className="pt" style={vars}>
+    <div className="pt" data-theme={theme} style={vars}>
       <style>{GLOBAL_CSS}</style>
       {children}
       <ImportModal offer={importOffer} onClose={() => setImportOffer(null)} onImport={async () => {

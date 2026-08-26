@@ -3,15 +3,20 @@ import React from "react";
 /* ============================================================
    Logo
 
-   Wordmark is Sora at 550 — the closest match to the brand
-   artwork out of thirteen candidates, scored by overlap against
-   the original. It gets the details right: the flat-topped "t"
-   with a curved foot, the squared-off aperture on the "e", and
-   the rectangular dot on the "i".
+   The wordmark is the brand artwork itself, exported to PNG with
+   a transparent background — so the letterforms are exactly the
+   original rather than a font that merely resembles it.
 
-   Using a real font rather than traced outlines means it scales
-   and sits on the baseline properly at any size.
+   Two variants exist because the navy "pip" would disappear on
+   the dark theme. Both are in the DOM and CSS shows the right
+   one, keyed off data-theme on the app root. That avoids passing
+   a theme prop down to every place a logo appears, and means no
+   flash while an image swaps.
+
+   Regenerate with: python3 tools/make_wordmark.py
    ============================================================ */
+
+export const WORDMARK_RATIO = 3.9808;   // must match the generated assets
 
 export function LogoMark({ size = 32, brand = "var(--brand)", ink = "var(--ink)" }) {
   return (
@@ -30,20 +35,21 @@ export function LogoMark({ size = 32, brand = "var(--brand)", ink = "var(--ink)"
   );
 }
 
-/* "pip" takes --logoInk, which is the brand navy on light backgrounds and
-   near-white on dark, since the navy would otherwise disappear. "test"
-   keeps the same blue in both. */
-export function Wordmark({ size = 22 }) {
+export function Wordmark({ size = 22, style }) {
+  /* `size` is a nominal type size; the artwork including the p descender
+     measures about 82% of it, which keeps it optically level with the mark. */
+  const h = Math.round(size * 0.82);
+  const common = {
+    height: h, width: Math.round(h * WORDMARK_RATIO),
+    alt: "PipTest", draggable: false,
+    style: { display: "block", ...style },
+  };
   return (
-    <span
-      style={{
-        fontFamily: "Sora, Poppins, Inter, system-ui, sans-serif",
-        fontWeight: 550, fontSize: size, lineHeight: 1,
-        letterSpacing: "-0.012em", display: "inline-block", whiteSpace: "nowrap",
-      }}
-    >
-      <span style={{ color: "var(--logoInk)" }}>pip</span>
-      <span style={{ color: "var(--logoBlue)" }}>test</span>
+    <span style={{ display: "inline-flex", alignItems: "center" }}>
+      <img className="wm wm-light" src="/wordmark-light.png"
+        srcSet="/wordmark-light.png 1x, /wordmark-light@3x.png 3x" {...common} />
+      <img className="wm wm-dark" src="/wordmark-dark.png"
+        srcSet="/wordmark-dark.png 1x, /wordmark-dark@3x.png 3x" {...common} />
     </span>
   );
 }
@@ -52,7 +58,7 @@ export default function Logo({ size = 30, showText = true, gap = 9 }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap }}>
       <LogoMark size={size} />
-      {showText && <Wordmark size={size * 0.78} />}
+      {showText && <Wordmark size={size * 0.8} />}
     </span>
   );
 }

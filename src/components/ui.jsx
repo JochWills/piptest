@@ -1,7 +1,7 @@
 import React from "react";
 
 export const GLOBAL_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@400..700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -87,6 +87,14 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
 .grid-stats { display: grid; gap: 1px; background: var(--border);
   border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .stat { background: var(--surface); padding: 13px 15px; }
+
+/* Wordmark: both variants ship, CSS picks the one that suits the theme.
+   Keyed off data-theme rather than a prop so every logo everywhere follows
+   the theme with no plumbing and no swap flicker. */
+.wm { user-select: none; }
+.wm-dark { display: none; }
+[data-theme="dark"] .wm-light { display: none; }
+[data-theme="dark"] .wm-dark  { display: block; }
 
 .link { color: var(--brand); cursor: pointer; }
 .link:hover { text-decoration: underline; }

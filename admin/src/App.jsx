@@ -10,7 +10,7 @@ import { api, setToken, refresh, API_ENABLED } from "./api.js";
    ============================================================ */
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0}
 :root{
@@ -128,9 +128,8 @@ export default function App() {
       <header style={{ display: "flex", alignItems: "center", gap: 14, padding: "0 20px", height: 60,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", position: "sticky", top: 0, zIndex: 20 }}>
         <Mark />
-        <span style={{ fontFamily: "Sora, Inter, sans-serif", fontWeight: 550, fontSize: 19, letterSpacing: "-0.012em" }}>
-          <span style={{ color: "var(--logoInk)" }}>pip</span><span style={{ color: "var(--logoBlue)" }}>test</span>
-        </span>
+        <img src="/wordmark-dark.png" srcSet="/wordmark-dark.png 1x, /wordmark-dark@3x.png 3x"
+          alt="PipTest" height={17} width={Math.round(17 * 3.9808)} draggable={false} style={{ display: "block" }} />
         <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         <span className="pill a">internal</span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
@@ -187,9 +186,8 @@ function Login({ onIn }) {
       <div style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 22 }}>
           <Mark size={30} />
-          <span style={{ fontFamily: "Sora, Inter, sans-serif", fontWeight: 550, fontSize: 22, letterSpacing: "-0.012em" }}>
-            <span style={{ color: "var(--logoInk)" }}>pip</span><span style={{ color: "var(--logoBlue)" }}>test</span>
-          </span>
+          <img src="/wordmark-dark.png" srcSet="/wordmark-dark.png 1x, /wordmark-dark@3x.png 3x"
+            alt="PipTest" height={21} width={Math.round(21 * 3.9808)} draggable={false} style={{ display: "block" }} />
           <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         </div>
         <div className="card" style={{ padding: 26 }}>

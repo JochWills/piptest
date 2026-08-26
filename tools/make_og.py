@@ -107,25 +107,16 @@ def logo_mark(draw, cx, cy, size):
     candle(43.5, 14, 42, 18.5, 37.5, INK)
 
 
-def sora(size, weight=550):
-    """Sora, the wordmark face. Shipped in tools/fonts so the card can be
-    regenerated without a network call."""
+def wordmark(draw, x, bottom_y, height):
+    """Paste the dark-variant artwork, so the card is the real logo rather
+    than type that resembles it."""
     here = os.path.dirname(os.path.abspath(__file__))
-    f = ImageFont.truetype(os.path.join(here, "fonts", "Sora.ttf"), size * S)
-    try:
-        f.set_variation_by_axes([weight])
-    except Exception:
-        pass
-    return f
-
-
-def wordmark(draw, x, baseline_y, size):
-    """'pip' in near-white, 'test' in the brand blue."""
-    f = sora(size)
-    draw.text((x, baseline_y), "pip", font=f, fill=INK, anchor="ls")
-    x += draw.textlength("pip", font=f)
-    draw.text((x, baseline_y), "test", font=f, fill=LOGO_BLUE, anchor="ls")
-    return x + draw.textlength("test", font=f)
+    art = Image.open(os.path.join(here, "..", "public", "wordmark-dark@3x.png")).convert("RGBA")
+    h = int(height * S)
+    w = round(h * art.width / art.height)
+    art = art.resize((w, h), Image.LANCZOS)
+    draw._image.paste(art, (int(x), int(bottom_y - h)), art)
+    return x + w
 
 
 def build(width, height, square=False):
@@ -142,7 +133,7 @@ def build(width, height, square=False):
     # --- brand lockup ---
     mark = int(58 * S)
     logo_mark(d, pad + mark / 2, pad + mark / 2, mark)
-    wordmark(d, pad + mark + int(16 * S), pad + mark * 0.80, 38)
+    wordmark(d, pad + mark + int(16 * S), pad + mark * 0.98, 34)
 
     # --- headline ---
     hsize = 58 if not square else 50
