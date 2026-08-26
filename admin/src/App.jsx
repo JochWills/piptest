@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { api, setToken, refresh, API_ENABLED } from "./api.js";
-import WordmarkPaths from "./WordmarkPaths.jsx";
 
 /* ============================================================
    PipTest Console
@@ -11,7 +10,7 @@ import WordmarkPaths from "./WordmarkPaths.jsx";
    ============================================================ */
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@400..700&family=JetBrains+Mono:wght@400;500&display=swap');
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0}
 :root{
@@ -129,7 +128,9 @@ export default function App() {
       <header style={{ display: "flex", alignItems: "center", gap: 14, padding: "0 20px", height: 60,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", position: "sticky", top: 0, zIndex: 20 }}>
         <Mark />
-        <WordmarkPaths height={15} />
+        <span style={{ fontFamily: "Sora, Inter, sans-serif", fontWeight: 550, fontSize: 19, letterSpacing: "-0.012em" }}>
+          <span style={{ color: "var(--logoInk)" }}>pip</span><span style={{ color: "var(--logoBlue)" }}>test</span>
+        </span>
         <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         <span className="pill a">internal</span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
@@ -186,7 +187,9 @@ function Login({ onIn }) {
       <div style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 22 }}>
           <Mark size={30} />
-          <WordmarkPaths height={17} />
+          <span style={{ fontFamily: "Sora, Inter, sans-serif", fontWeight: 550, fontSize: 22, letterSpacing: "-0.012em" }}>
+            <span style={{ color: "var(--logoInk)" }}>pip</span><span style={{ color: "var(--logoBlue)" }}>test</span>
+          </span>
           <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         </div>
         <div className="card" style={{ padding: 26 }}>

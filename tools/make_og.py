@@ -107,34 +107,25 @@ def logo_mark(draw, cx, cy, size):
     candle(43.5, 14, 42, 18.5, 37.5, INK)
 
 
-def wordmark(draw, x, baseline_y, size):
-    """Draw the traced wordmark, so the card matches the app exactly rather
-    than approximating the letterforms with a substitute font."""
-    import json, os
+def sora(size, weight=550):
+    """Sora, the wordmark face. Shipped in tools/fonts so the card can be
+    regenerated without a network call."""
     here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(here, "wordmark.json")) as f:
-        wm = json.load(f)
+    f = ImageFont.truetype(os.path.join(here, "fonts", "Sora.ttf"), size * S)
+    try:
+        f.set_variation_by_axes([weight])
+    except Exception:
+        pass
+    return f
 
-    scale = (size * S) / wm["h"]
-    top = baseline_y - wm["h"] * scale        # baseline_y is the artwork's bottom
 
-    def group(polys, colour):
-        # even-odd: XOR each contour so counters punch through
-        mask = Image.new("1", (W, H), 0)
-        md = ImageDraw.Draw(mask)
-        for poly in polys:
-            one = Image.new("1", (W, H), 0)
-            ImageDraw.Draw(one).polygon(
-                [(x + px * scale, top + py * scale) for px, py in poly], fill=1)
-            mask = ImageChops.logical_xor(mask, one)
-        layer = Image.new("RGB", (W, H), colour)
-        return mask, layer
-
-    for polys, colour in ((wm["pip"], INK), (wm["test"], LOGO_BLUE)):
-        mask, layer = group(polys, colour)
-        draw._image.paste(layer, (0, 0), mask)
-
-    return x + wm["w"] * scale
+def wordmark(draw, x, baseline_y, size):
+    """'pip' in near-white, 'test' in the brand blue."""
+    f = sora(size)
+    draw.text((x, baseline_y), "pip", font=f, fill=INK, anchor="ls")
+    x += draw.textlength("pip", font=f)
+    draw.text((x, baseline_y), "test", font=f, fill=LOGO_BLUE, anchor="ls")
+    return x + draw.textlength("test", font=f)
 
 
 def build(width, height, square=False):
@@ -151,7 +142,7 @@ def build(width, height, square=False):
     # --- brand lockup ---
     mark = int(58 * S)
     logo_mark(d, pad + mark / 2, pad + mark / 2, mark)
-    wordmark(d, pad + mark + int(20 * S), pad + mark * 0.80, 30)
+    wordmark(d, pad + mark + int(16 * S), pad + mark * 0.80, 38)
 
     # --- headline ---
     hsize = 58 if not square else 50

@@ -1,13 +1,16 @@
 import React from "react";
-import WordmarkPaths from "./WordmarkPaths.jsx";
 
 /* ============================================================
    Logo
 
-   Both halves are SVG so they stay crisp at any size and can
-   adapt to the theme. The wordmark is traced from the original
-   artwork (see tools/trace_wordmark.py) rather than set in a
-   substitute font, so the letterforms are exact.
+   Wordmark is Sora at 550 — the closest match to the brand
+   artwork out of thirteen candidates, scored by overlap against
+   the original. It gets the details right: the flat-topped "t"
+   with a curved foot, the squared-off aperture on the "e", and
+   the rectangular dot on the "i".
+
+   Using a real font rather than traced outlines means it scales
+   and sits on the baseline properly at any size.
    ============================================================ */
 
 export function LogoMark({ size = 32, brand = "var(--brand)", ink = "var(--ink)" }) {
@@ -27,17 +30,29 @@ export function LogoMark({ size = 32, brand = "var(--brand)", ink = "var(--ink)"
   );
 }
 
-export function Wordmark({ size = 22, ...rest }) {
-  /* `size` is a nominal cap height; the traced artwork measures
-     ~72% of that, which keeps it optically level with the mark. */
-  return <WordmarkPaths height={size * 0.72} {...rest} />;
+/* "pip" takes --logoInk, which is the brand navy on light backgrounds and
+   near-white on dark, since the navy would otherwise disappear. "test"
+   keeps the same blue in both. */
+export function Wordmark({ size = 22 }) {
+  return (
+    <span
+      style={{
+        fontFamily: "Sora, Poppins, Inter, system-ui, sans-serif",
+        fontWeight: 550, fontSize: size, lineHeight: 1,
+        letterSpacing: "-0.012em", display: "inline-block", whiteSpace: "nowrap",
+      }}
+    >
+      <span style={{ color: "var(--logoInk)" }}>pip</span>
+      <span style={{ color: "var(--logoBlue)" }}>test</span>
+    </span>
+  );
 }
 
-export default function Logo({ size = 30, showText = true, gap = 10 }) {
+export default function Logo({ size = 30, showText = true, gap = 9 }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap }}>
       <LogoMark size={size} />
-      {showText && <Wordmark size={size * 0.74} />}
+      {showText && <Wordmark size={size * 0.78} />}
     </span>
   );
 }
