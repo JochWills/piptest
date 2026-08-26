@@ -60,5 +60,13 @@ services:
         sync: false                  # "true" only if the API is NOT on piptest.com
       - key: COOKIE_DOMAIN
         sync: false                  # ".piptest.com" when using api.piptest.com
+      - key: RESEND_API_KEY
+        sync: false                  # from resend.com — enables reset emails
+      - key: MAIL_FROM
+        sync: false                  # PipTest <noreply@send.piptest.com>
+      - key: MAIL_REPLY_TO
+        sync: false                  # info@piptest.com — where replies land
+      - key: APP_URL
+        sync: false                  # https://piptest.com — where reset links point
       - key: NODE_ENV
         value: production

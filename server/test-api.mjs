@@ -121,10 +121,49 @@ try {
   r = await call("/api/kv/users", { method: "PUT", token: userToken, body: { value: { evil: true } } });
   ok(r.status === 400, "non-room keys refused, so kv can't be used as scratch storage");
 
+  console.log("\n=== password reset ===");
+  // capture the link the mailer would have sent
+  const sentMail = [];
+  const origLog = console.log;
+  console.log = (...a) => { sentMail.push(a.join(" ")); origLog(...a); };
+
+  r = await call("/api/auth/forgot", { method: "POST", body: { email: "josh@piptest.com" } });
+  const genericMsg = r.body.message;
+  ok(r.status === 200, "forgot accepts a known email");
+  r = await call("/api/auth/forgot", { method: "POST", body: { email: "nobody@nowhere.com" } });
+  ok(r.status === 200 && r.body.message === genericMsg,
+     "unknown email returns the identical message (no account enumeration)");
+  console.log = origLog;
+
+  const link = sentMail.join("\n").match(/#\/reset\/([A-Za-z0-9_-]+)/);
+  ok(!!link, "a reset link was generated");
+  const token = link ? link[1] : "nope";
+
+  r = await call(`/api/auth/reset/${token}`);
+  ok(r.status === 200 && r.body.valid === true, "token validates before the form is shown");
+  ok(/^jo.*@piptest\.com$/.test(r.body.email || ""), `email is masked in the check response (${r.body.email})`);
+
+  r = await call("/api/auth/reset", { method: "POST", body: { token: "not-a-real-token", password: "brand-new-pass" } });
+  ok(r.status === 400, "a bogus token is refused");
+
+  r = await call("/api/auth/reset", { method: "POST", body: { token, password: "short" } });
+  ok(r.status === 400, "a too-short new password is refused");
+
+  r = await call("/api/auth/reset", { method: "POST", body: { token, password: "brand-new-pass-9" } });
+  ok(r.status === 200, "valid token + strong password resets it");
+
+  r = await call("/api/auth/reset", { method: "POST", body: { token, password: "another-pass-9" } });
+  ok(r.status === 400, "the same token cannot be used twice");
+
+  r = await call("/api/auth/login", { method: "POST", body: { email: "josh@piptest.com", password: "correct-horse-8" } });
+  ok(r.status === 401, "the old password no longer works");
+  r = await call("/api/auth/login", { method: "POST", body: { email: "josh@piptest.com", password: "brand-new-pass-9" } });
+  ok(r.status === 200, "the new password works");
+
   console.log("\n=== disabling a user ===");
   r = await call("/api/admin/users/" + userId, { method: "PATCH", token: adminToken, body: { status: "disabled" } });
   ok(r.status === 200 && r.body.user.status === "disabled", "admin can disable an account");
-  r = await call("/api/auth/login", { method: "POST", body: { email: "josh@piptest.com", password: "correct-horse-8" } });
+  r = await call("/api/auth/login", { method: "POST", body: { email: "josh@piptest.com", password: "brand-new-pass-9" } });
   ok(r.status === 403, "disabled account cannot sign in");
 } catch (e) {
   console.log("\nERROR:", e.message);

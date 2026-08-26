@@ -102,6 +102,18 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 CREATE INDEX IF NOT EXISTS trades_user_idx ON trades (user_id, closed_ts DESC);
 
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  used_at    timestamptz,
+  ip         text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS resets_hash_idx ON password_resets (token_hash);
+CREATE INDEX IF NOT EXISTS resets_user_idx ON password_resets (user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS events (
   id         bigserial PRIMARY KEY,
   user_id    uuid REFERENCES users(id) ON DELETE SET NULL,
@@ -138,6 +150,7 @@ export function startSweeper() {
     try {
       await q("DELETE FROM kv WHERE updated_at < now() - interval '12 hours'");
       await q("DELETE FROM refresh_tokens WHERE expires_at < now() - interval '7 days'");
+      await q("DELETE FROM password_resets WHERE expires_at < now() - interval '2 days'");
     } catch (e) { /* ignore */ }
   };
   run();

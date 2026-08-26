@@ -5,8 +5,10 @@
    No handler trusts an id from the client to decide ownership.
    ============================================================ */
 
+import crypto from "node:crypto";
 import express from "express";
 import rateLimit from "express-rate-limit";
+import { sendMail, resetEmail, passwordChangedEmail, MAIL_ENABLED } from "./mailer.js";
 import { q, logEvent } from "./db.js";
 import {
   hashPassword, verifyPassword, signAccess, issueRefresh, rotateRefresh,
@@ -40,6 +42,18 @@ const authLimiter = rateLimit({
   message: { error: "too_many_attempts", message: "Too many attempts. Try again in a few minutes." },
 });
 const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: true, legacyHeaders: false });
+
+/* Reset requests are cheap for us and expensive for a victim's inbox,
+   so they're limited harder than ordinary auth traffic. */
+const resetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, limit: 8,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: "too_many_attempts", message: "Too many reset requests. Try again later." },
+});
+
+const RESET_TTL_MIN = 60;
+const APP_URL = (process.env.APP_URL || "https://piptest.com").replace(/\/$/, "");
+const hashToken = (t) => crypto.createHash("sha256").update(t).digest("hex");
 
 /* =====================================================
    AUTH
@@ -115,6 +129,89 @@ router.post("/auth/logout", async (req, res) => {
   await revokeRefresh(req.cookies?.[REFRESH_COOKIE]);
   clearRefreshCookie(res);
   res.json({ ok: true });
+});
+
+/* ---------- forgotten password ----------
+   The response is identical whether or not the address is
+   registered. Anything else turns this endpoint into a way to
+   discover who has an account. */
+router.post("/auth/forgot", resetLimiter, async (req, res) => {
+  const email = (req.body?.email || "").trim();
+  const generic = {
+    ok: true,
+    message: "If that email has an account, a reset link is on its way. Check your spam folder too.",
+  };
+  if (!EMAIL_RE.test(email)) return res.json(generic);
+
+  const { rows } = await q("SELECT * FROM users WHERE lower(email)=lower($1)", [email]);
+  const user = rows[0];
+  if (!user || user.status !== "active") {
+    await logEvent(null, "reset_requested_unknown", { email: email.slice(0, 120) }, reqIp(req));
+    return res.json(generic);
+  }
+
+  /* one live token at a time — an older link stops working the moment
+     a newer one is issued */
+  await q("UPDATE password_resets SET used_at = now() WHERE user_id=$1 AND used_at IS NULL", [user.id]);
+
+  const raw = crypto.randomBytes(32).toString("base64url");
+  await q(
+    `INSERT INTO password_resets (user_id, token_hash, expires_at, ip)
+     VALUES ($1,$2, now() + ($3 || ' minutes')::interval, $4)`,
+    [user.id, hashToken(raw), String(RESET_TTL_MIN), reqIp(req)]
+  );
+
+  const url = `${APP_URL}/#/reset/${raw}`;
+  const mail = resetEmail({ name: user.name || user.handle, url, minutes: RESET_TTL_MIN });
+  const sent = await sendMail({ to: user.email, ...mail });
+  await logEvent(user.id, "reset_requested", { delivered: sent.ok, reason: sent.reason || null }, reqIp(req));
+
+  res.json(generic);
+});
+
+/* Lets the reset page tell a bad link from a good one before asking
+   for a new password. Reveals nothing beyond validity. */
+router.get("/auth/reset/:token", async (req, res) => {
+  const { rows } = await q(
+    `SELECT pr.id, u.email FROM password_resets pr JOIN users u ON u.id = pr.user_id
+      WHERE pr.token_hash=$1 AND pr.used_at IS NULL AND pr.expires_at > now()`,
+    [hashToken(req.params.token)]);
+  if (!rows[0]) return res.status(404).json({ valid: false });
+  /* mask the address so a leaked link doesn't also leak the account */
+  const [name, domain] = rows[0].email.split("@");
+  const masked = `${name.slice(0, 2)}${"•".repeat(Math.max(1, name.length - 2))}@${domain}`;
+  res.json({ valid: true, email: masked });
+});
+
+router.post("/auth/reset", resetLimiter, async (req, res) => {
+  const { token = "", password = "" } = req.body || {};
+  if (password.length < 8) {
+    return res.status(400).json({ error: "invalid", message: "Password must be at least 8 characters." });
+  }
+  const { rows } = await q(
+    `SELECT pr.id, pr.user_id, u.name, u.email
+       FROM password_resets pr JOIN users u ON u.id = pr.user_id
+      WHERE pr.token_hash=$1 AND pr.used_at IS NULL AND pr.expires_at > now()`,
+    [hashToken(token)]);
+  const row = rows[0];
+  if (!row) {
+    return res.status(400).json({
+      error: "invalid_token",
+      message: "That reset link has expired or already been used. Request a new one.",
+    });
+  }
+
+  await q("UPDATE users SET password_hash=$1 WHERE id=$2", [hashPassword(password), row.user_id]);
+  await q("UPDATE password_resets SET used_at = now() WHERE id=$1", [row.id]);
+  /* the old password may be compromised, so drop every existing session */
+  await revokeAllForUser(row.user_id);
+  clearRefreshCookie(res);
+  await logEvent(row.user_id, "password_reset", {}, reqIp(req));
+
+  const note = passwordChangedEmail({ name: row.name });
+  sendMail({ to: row.email, ...note });   // best effort, don't hold the response
+
+  res.json({ ok: true, message: "Password updated. Sign in with your new password." });
 });
 
 /* =====================================================
@@ -418,6 +515,14 @@ router.delete("/admin/users/:id", requireAuth, requireAdmin, async (req, res) =>
   await q("DELETE FROM users WHERE id=$1", [req.params.id]);
   await logEvent(req.user.id, "admin_delete_user", { handle: rows[0].handle }, reqIp(req));
   res.json({ ok: true });
+});
+
+router.get("/admin/mail", requireAuth, requireAdmin, async (_req, res) => {
+  const { rows } = await q(
+    `SELECT pr.created_at, pr.expires_at, pr.used_at, u.handle, u.email
+       FROM password_resets pr JOIN users u ON u.id = pr.user_id
+      ORDER BY pr.created_at DESC LIMIT 40`);
+  res.json({ mailEnabled: MAIL_ENABLED, resets: rows });
 });
 
 router.get("/admin/events", requireAuth, requireAdmin, async (req, res) => {

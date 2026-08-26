@@ -4,6 +4,7 @@ import { GLOBAL_CSS, Modal } from "./components/ui.jsx";
 import Shell from "./components/Shell.jsx";
 import Landing from "./pages/Landing.jsx";
 import Auth from "./pages/Auth.jsx";
+import Reset from "./pages/Reset.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Simulator from "./pages/Simulator.jsx";
 import Journal from "./pages/Journal.jsx";
@@ -22,7 +23,7 @@ import { fmtShort } from "./lib/trading.js";
    development and the current deploy keep working.
    ============================================================ */
 
-const ROUTES = ["home", "auth", "sim", "dashboard", "journal", "analytics", "settings"];
+const ROUTES = ["home", "auth", "reset", "sim", "dashboard", "journal", "analytics", "settings"];
 
 const parseHash = () => {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
@@ -261,6 +262,16 @@ export default function App() {
         onGetStarted={() => { if (account) go("dashboard"); else { setAuthMode("signup"); go("auth"); } }}
         onSignIn={() => { if (account) go("dashboard"); else { setAuthMode("signin"); go("auth"); } }}
       />
+    );
+  }
+
+  /* A reset link is opened by someone who can't sign in, so this route has to
+     come before the auth gate. */
+  if (route.page === "reset") {
+    return wrap(
+      <Reset token={route.arg || ""}
+        onDone={() => { setAuthMode("signin"); go("auth"); }}
+        onBack={() => { setAuthMode("signin"); go("auth"); }} />
     );
   }
 

@@ -161,6 +161,63 @@ practice.
 
 ---
 
+## Password reset
+
+Live and automatic. `#/reset/<token>` is the page a reset link opens.
+
+### Turn on email (5 minutes)
+
+Without an email provider the flow still works, but the link is printed to the
+Render logs instead of being sent — usable in a pinch, not something to launch on.
+
+Resend only **sends**. It is not a mailbox and receives nothing, so your existing
+`info@piptest.com` on GoDaddy is unaffected.
+
+1. Sign up at **resend.com** (free tier is ~3,000 emails/month)
+2. **Domains → Add domain**. Accept the default sending subdomain,
+   **`send.piptest.com`** — not the root domain.
+3. Add the records it gives you (an MX, an SPF TXT and a DKIM TXT) at GoDaddy,
+   **all on the `send` subdomain**.
+4. Wait for it to verify, then **API Keys → Create**
+5. On **piptest-api** in Render, add:
+
+| Key | Value |
+|---|---|
+| `RESEND_API_KEY` | the key from step 4 |
+| `MAIL_FROM` | `PipTest <noreply@send.piptest.com>` |
+| `MAIL_REPLY_TO` | `info@piptest.com` |
+| `APP_URL` | `https://piptest.com` |
+
+`APP_URL` is what the link in the email points at — get it wrong and every
+reset link 404s.
+
+**Why the subdomain matters.** All of Resend's records land on
+`send.piptest.com`, so the root domain's MX and SPF — which point at GoDaddy —
+are never touched. Do **not** add a Resend SPF include to the root: it isn't
+needed and risks breaking the mail you already receive. It also keeps sending
+reputation separate, so a bad run of transactional mail can't hurt deliverability
+for `info@`.
+
+**`MAIL_REPLY_TO` is worth setting.** People reply to password-reset emails
+asking for help. Without it those replies vanish into a no-reply address.
+
+### How it behaves
+
+- Requesting a reset always returns the same message, whether or not the
+  address is registered. Anything else turns the endpoint into a way to
+  discover who has an account.
+- Tokens are 256 bits of randomness; only their SHA-256 hash is stored.
+- Valid for 60 minutes, usable once. Requesting a new one invalidates the old.
+- Completing a reset revokes every refresh token, so any device using a
+  stolen password is signed out.
+- A confirmation email follows, which is how someone finds out if their
+  account was reset by somebody else.
+- Limited to 8 requests per IP per hour — a reset endpoint is cheap for us
+  and expensive for a victim's inbox.
+
+Admin → the console's `/api/admin/mail` endpoint lists recent reset requests
+and whether mail is configured, so you can help by hand if delivery fails.
+
 ## Tests
 
 ```bash
@@ -197,16 +254,8 @@ VITE_API_URL=http://localhost:3001 npm run dev
 
 ## What's deliberately not built yet
 
-**Email verification and password reset.** Both need an email provider. Until
-then a forgotten password means fixing it by hand — fine at this size, not fine
-at a few hundred users. This is the first thing to add.
-
-Worth knowing: **Supabase also has a built-in Auth product** that includes
-verification and reset emails for free. We aren't using it — PipTest has its own
-auth, already written and tested, and switching would mean rewriting sign-in and
-the admin user management. But if password-reset emails become urgent, adopting
-Supabase Auth is a legitimate shortcut rather than building the email flow
-yourself.
+**Email verification.** Anyone can sign up with an address they don't own.
+Not urgent while PipTest is free, but needed before anything is charged for.
 
 **Rooms still poll.** They're durable now and survive a restart, but the client
 polls every 1.5s. Swap to WebSockets before you have real concurrent users.

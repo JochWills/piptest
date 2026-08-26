@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Logo from "../components/Logo.jsx";
 import { Card, Field } from "../components/ui.jsx";
-import { API_ENABLED } from "../lib/api.js";
+import { api, API_ENABLED } from "../lib/api.js";
 
 /* ============================================================
    Auth — real accounts
@@ -27,6 +27,7 @@ const LABELS = ["Too short", "Weak", "Fair", "Good", "Strong"];
 
 export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, doLogin, doRegister }) {
   const isSignup = mode === "signup";
+  const [forgot, setForgot] = useState(false);   // the "email me a link" panel
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -78,6 +79,9 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
           </button>
         </div>
 
+        {forgot ? (
+          <ForgotPanel initialEmail={email} onBack={() => setForgot(false)} />
+        ) : (
         <Card style={{ padding: 28 }}>
           <h2 style={{ fontSize: 22, marginBottom: 6 }}>{isSignup ? "Create your account" : "Welcome back"}</h2>
           <p className="sm mut" style={{ marginBottom: 22, lineHeight: 1.6 }}>
@@ -130,6 +134,12 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
               </div>
             </Field>
 
+            {!isSignup && API_ENABLED && (
+              <div style={{ textAlign: "right", marginTop: -6 }}>
+                <span className="link sm" onClick={() => setForgot(true)}>Forgot your password?</span>
+              </div>
+            )}
+
             {isSignup && password.length > 0 && (
               <div>
                 <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
@@ -164,6 +174,7 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
             <span className="link" onClick={onSwitch}>{isSignup ? "Sign in" : "Create one"}</span>
           </div>
         </Card>
+        )}
 
         {isSignup && (
           <p className="sm mut" style={{ textAlign: "center", marginTop: 18, lineHeight: 1.6, maxWidth: 380, margin: "18px auto 0" }}>
@@ -173,5 +184,68 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
         )}
       </div>
     </div>
+  );
+}
+
+
+/* ------------------------------------------------------------
+   ForgotPanel
+
+   The confirmation reads the same whether or not the address is
+   registered, because the server behaves the same way. Saying
+   "no such account" would turn this into a way to discover who
+   has one.
+   ------------------------------------------------------------ */
+function ForgotPanel({ initialEmail, onBack }) {
+  const [email, setEmail] = useState(initialEmail || "");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    if (!EMAIL_RE.test(email.trim())) { setErr("Enter a valid email address."); return; }
+    setErr(""); setBusy(true);
+    try { await api.forgot({ email: email.trim() }); setSent(true); }
+    catch (e) { setErr(e?.message || "Couldn't send that right now. Try again shortly."); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Card style={{ padding: 28 }}>
+      {sent ? (
+        <>
+          <h2 style={{ fontSize: 21, marginBottom: 8 }}>Check your inbox</h2>
+          <p className="sm mut" style={{ lineHeight: 1.7, marginBottom: 20 }}>
+            If <b style={{ color: "var(--ink)" }}>{email.trim()}</b> has an account, a reset link
+            is on its way. It works once and expires in an hour. Check your spam folder if it
+            hasn't arrived in a couple of minutes.
+          </p>
+          <button className="btn" style={{ width: "100%" }} onClick={onBack}>Back to sign in</button>
+        </>
+      ) : (
+        <>
+          <h2 style={{ fontSize: 21, marginBottom: 6 }}>Reset your password</h2>
+          <p className="sm mut" style={{ marginBottom: 20, lineHeight: 1.6 }}>
+            Enter your email and we'll send a link to set a new one.
+          </p>
+          <Field label="Email">
+            <input className="in" type="email" value={email} autoComplete="email"
+              placeholder="you@example.com" onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submit()} />
+          </Field>
+          {err && (
+            <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", color: "var(--down)",
+              borderRadius: 8, padding: "10px 12px", fontSize: 12.5, marginTop: 14 }}>{err}</div>
+          )}
+          <button className="btn pri" style={{ width: "100%", marginTop: 18, padding: 11 }}
+            disabled={busy || !email} onClick={submit}>
+            {busy ? "Sending…" : "Email me a reset link"}
+          </button>
+          <div className="sm mut" style={{ textAlign: "center", marginTop: 16 }}>
+            <span className="link" onClick={onBack}>Back to sign in</span>
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
