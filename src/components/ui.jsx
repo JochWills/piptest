@@ -88,6 +88,87 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
   border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .stat { background: var(--surface); padding: 13px 15px; }
 
+/* ============================================================
+   App shell — sidebar on desktop, bottom bar on phones.
+
+   Kept here rather than as inline styles so the media query can
+   actually override it.
+   ============================================================ */
+.shell { display: flex; min-height: 100vh; }
+
+.shell-top { display: none; }                 /* phones only */
+.shell-topbrand { background: none; border: none; padding: 0; cursor: pointer; }
+.shell-topright { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.shell-iconbtn { padding: 6px 8px; }
+
+.shell-side {
+  width: 216px; flex-shrink: 0;
+  border-right: 1px solid var(--border); background: var(--surface);
+  padding: 16px 12px; display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+}
+.shell-brand { background: none; border: none; padding: 2px 6px 20px; cursor: pointer; text-align: left; }
+.shell-nav { display: grid; gap: 2px; }
+.shell-navbtn {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 11px; border-radius: 8px; cursor: pointer;
+  font-family: inherit; font-size: 13.5px; font-weight: 500; text-align: left;
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+}
+.shell-navbtn:hover { background: var(--surface2); color: var(--ink); }
+.shell-navbtn.on { background: var(--surface3); border-color: var(--border); color: var(--ink); }
+.shell-navbtn.on .shell-navicon { color: var(--brand); }
+.shell-navicon { display: flex; color: inherit; }
+
+.shell-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
+.shell-user { display: flex; align-items: center; gap: 9px; padding: 6px 4px 10px; }
+.shell-userinfo { min-width: 0; display: block; }
+.shell-username { display: block; font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-userplan { display: block; font-size: 11.5px; color: var(--muted); }
+.shell-home { width: 100%; justify-content: flex-start; padding: 7px 9px; margin-bottom: 6px; font-size: 12.5px; }
+.shell-footbtns { display: flex; gap: 6px; }
+.shell-footbtns .btn { flex: 1; padding: 6px 8px; }
+
+.shell-main { flex: 1; min-width: 0; }
+.shell-inner { max-width: 1240px; margin: 0 auto; padding: 24px 24px 60px; }
+.shell-inner.wide { max-width: none; padding: 0; }
+
+.pagehead { display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.pagehead-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 860px) {
+  .shell { flex-direction: column; }
+
+  .shell-top {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 14px; height: 54px; flex-shrink: 0;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 40;
+  }
+
+  /* sidebar becomes a bottom tab bar */
+  .shell-side {
+    position: fixed; top: auto; bottom: 0; left: 0; right: 0;
+    width: 100%; height: auto; flex-direction: row; align-items: center;
+    border-right: none; border-top: 1px solid var(--border);
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom)); z-index: 60;
+  }
+  .shell-brand, .shell-foot { display: none; }
+  .shell-nav { display: flex; width: 100%; justify-content: space-around; gap: 0; }
+  .shell-navbtn {
+    flex-direction: column; gap: 3px; padding: 7px 4px;
+    font-size: 10.5px; text-align: center; border-radius: 10px;
+  }
+  .shell-navbtn.on { background: var(--brandSoft); border-color: transparent; color: var(--brand); }
+  .shell-navlabel { line-height: 1; }
+
+  /* clear of the tab bar, including the home indicator */
+  .shell-inner { padding: 18px 16px calc(84px + env(safe-area-inset-bottom)); }
+  .pagehead h2 { font-size: 22px; }
+}
+
 /* Wordmark: both variants ship, CSS picks the one that suits the theme.
    Keyed off data-theme rather than a prop so every logo everywhere follows
    the theme with no plumbing and no swap flicker. */
