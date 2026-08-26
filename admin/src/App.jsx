@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { api, setToken, refresh, API_ENABLED } from "./api.js";
+import WordmarkPaths from "./WordmarkPaths.jsx";
 
 /* ============================================================
    PipTest Console
@@ -16,7 +17,7 @@ body{margin:0}
 :root{
   --bg:#0B0D11; --surface:#151920; --surface2:#1B2029; --surface3:#232935;
   --border:#232935; --ink:#EAEDF2; --muted:#98A2B3; --dim:#5F6875;
-  --brand:#2563EB; --brandSoft:#12203C; --logoInk:#F2F5FA; --logoBlue:#1668F5;
+  --brand:#2563EB; --brandSoft:#12203C; --logoInk:#F4F7FC; --logoBlue:#1370FD;
   --up:#22C55E; --upSoft:#0F2A1B; --down:#EF4444; --downSoft:#2C1416;
   --amber:#F59E0B;
 }
@@ -128,9 +129,7 @@ export default function App() {
       <header style={{ display: "flex", alignItems: "center", gap: 14, padding: "0 20px", height: 60,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", position: "sticky", top: 0, zIndex: 20 }}>
         <Mark />
-        <span style={{ letterSpacing: "-.005em", fontFamily: "Poppins, Inter, sans-serif", fontWeight: 500, fontSize: 17 }}>
-          <span style={{ color: "var(--logoInk)" }}>pip</span><span style={{ color: "var(--logoBlue)" }}>test</span>
-        </span>
+        <WordmarkPaths height={15} />
         <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         <span className="pill a">internal</span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
@@ -187,9 +186,7 @@ function Login({ onIn }) {
       <div style={{ width: "100%", maxWidth: 380 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 22 }}>
           <Mark size={30} />
-          <span style={{ letterSpacing: "-.005em", fontFamily: "Poppins, Inter, sans-serif", fontWeight: 500, fontSize: 19 }}>
-            <span style={{ color: "var(--logoInk)" }}>pip</span><span style={{ color: "var(--logoBlue)" }}>test</span>
-          </span>
+          <WordmarkPaths height={17} />
           <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         </div>
         <div className="card" style={{ padding: 26 }}>

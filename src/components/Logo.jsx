@@ -1,11 +1,13 @@
 import React from "react";
+import WordmarkPaths from "./WordmarkPaths.jsx";
 
 /* ============================================================
    Logo
 
-   The mark is SVG rather than the PNG so it stays crisp at any
-   size and survives the light theme — the PNG's white candles
-   would vanish on white.
+   Both halves are SVG so they stay crisp at any size and can
+   adapt to the theme. The wordmark is traced from the original
+   artwork (see tools/trace_wordmark.py) rather than set in a
+   substitute font, so the letterforms are exact.
    ============================================================ */
 
 export function LogoMark({ size = 32, brand = "var(--brand)", ink = "var(--ink)" }) {
@@ -25,26 +27,10 @@ export function LogoMark({ size = 32, brand = "var(--brand)", ink = "var(--ink)"
   );
 }
 
-/* ------------------------------------------------------------
-   Wordmark: "pip" in near-black navy, "test" in blue.
-
-   The navy would be unreadable on the dark theme, so it uses the
-   --logoInk token, which flips to a near-white there. The blue is
-   the same in both.
-   ------------------------------------------------------------ */
-export function Wordmark({ size = 22 }) {
-  return (
-    <span
-      style={{
-        fontFamily: "Poppins, Inter, system-ui, sans-serif",
-        fontWeight: 500, fontSize: size, lineHeight: 1,
-        letterSpacing: "-0.005em", display: "inline-block", whiteSpace: "nowrap",
-      }}
-    >
-      <span style={{ color: "var(--logoInk)" }}>pip</span>
-      <span style={{ color: "var(--logoBlue)" }}>test</span>
-    </span>
-  );
+export function Wordmark({ size = 22, ...rest }) {
+  /* `size` is a nominal cap height; the traced artwork measures
+     ~72% of that, which keeps it optically level with the mark. */
+  return <WordmarkPaths height={size * 0.72} {...rest} />;
 }
 
 export default function Logo({ size = 30, showText = true, gap = 10 }) {

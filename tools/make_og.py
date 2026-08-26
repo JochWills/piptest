@@ -10,7 +10,7 @@ without needing a headless browser.
 Writes public/og.png (1200x630) and public/og-square.png (1000x1000).
 """
 import math, os
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageChops
 
 S = 2                      # supersample factor
 W, H = 1200 * S, 630 * S
@@ -23,7 +23,7 @@ BRAND   = (37, 99, 235)
 UP      = (34, 197, 94)
 DOWN    = (239, 68, 68)
 BORDER  = (35, 41, 53)
-LOGO_BLUE = (22, 104, 245)
+LOGO_BLUE = (19, 112, 253)
 
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts"
 def font(name, size):
@@ -108,12 +108,33 @@ def logo_mark(draw, cx, cy, size):
 
 
 def wordmark(draw, x, baseline_y, size):
-    """'pip' in near-white, 'test' in brand blue — matching the logo."""
-    f = font("Medium", size)
-    draw.text((x, baseline_y), "pip", font=f, fill=INK, anchor="ls")
-    x += draw.textlength("pip", font=f)
-    draw.text((x, baseline_y), "test", font=f, fill=LOGO_BLUE, anchor="ls")
-    return x + draw.textlength("test", font=f)
+    """Draw the traced wordmark, so the card matches the app exactly rather
+    than approximating the letterforms with a substitute font."""
+    import json, os
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "wordmark.json")) as f:
+        wm = json.load(f)
+
+    scale = (size * S) / wm["h"]
+    top = baseline_y - wm["h"] * scale        # baseline_y is the artwork's bottom
+
+    def group(polys, colour):
+        # even-odd: XOR each contour so counters punch through
+        mask = Image.new("1", (W, H), 0)
+        md = ImageDraw.Draw(mask)
+        for poly in polys:
+            one = Image.new("1", (W, H), 0)
+            ImageDraw.Draw(one).polygon(
+                [(x + px * scale, top + py * scale) for px, py in poly], fill=1)
+            mask = ImageChops.logical_xor(mask, one)
+        layer = Image.new("RGB", (W, H), colour)
+        return mask, layer
+
+    for polys, colour in ((wm["pip"], INK), (wm["test"], LOGO_BLUE)):
+        mask, layer = group(polys, colour)
+        draw._image.paste(layer, (0, 0), mask)
+
+    return x + wm["w"] * scale
 
 
 def build(width, height, square=False):
@@ -130,7 +151,7 @@ def build(width, height, square=False):
     # --- brand lockup ---
     mark = int(58 * S)
     logo_mark(d, pad + mark / 2, pad + mark / 2, mark)
-    wordmark(d, pad + mark + int(18 * S), pad + mark * 0.70, 40)
+    wordmark(d, pad + mark + int(20 * S), pad + mark * 0.80, 30)
 
     # --- headline ---
     hsize = 58 if not square else 50
