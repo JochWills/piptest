@@ -39,10 +39,13 @@ export function Wordmark({ size = 22, style }) {
   /* `size` is a nominal type size; the artwork including the p descender
      measures about 82% of it, which keeps it optically level with the mark. */
   const h = Math.round(size * 0.82);
+  /* No inline `display` here: an inline style beats a stylesheet rule, so it
+     would override the CSS that hides the variant we don't want and both
+     would render. Display is handled entirely in the .wm rules. */
   const common = {
     height: h, width: Math.round(h * WORDMARK_RATIO),
     alt: "PipTest", draggable: false,
-    style: { display: "block", ...style },
+    style,
   };
   return (
     <span style={{ display: "inline-flex", alignItems: "center" }}>

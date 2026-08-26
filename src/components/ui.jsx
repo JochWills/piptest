@@ -91,7 +91,7 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
 /* Wordmark: both variants ship, CSS picks the one that suits the theme.
    Keyed off data-theme rather than a prop so every logo everywhere follows
    the theme with no plumbing and no swap flicker. */
-.wm { user-select: none; }
+.wm { user-select: none; display: block; }
 .wm-dark { display: none; }
 [data-theme="dark"] .wm-light { display: none; }
 [data-theme="dark"] .wm-dark  { display: block; }
