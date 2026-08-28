@@ -268,6 +268,7 @@ export const Ic = {
   gear: <><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8 3.5 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></>,
   target: <><circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /></>,
   logout: <path d="M6 3.2H3.4v9.6H6M9.3 5.4 11.9 8l-2.6 2.6M11.9 8H6" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
+  chat: <path d="M2.5 3.6h11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.4l-3.1 2.8V11H2.5a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.35" fill="none" strokeLinejoin="round" strokeLinecap="round" />,
 };
 
 export const Svg = ({ children, s = 16, style }) => (

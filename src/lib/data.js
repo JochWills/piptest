@@ -69,6 +69,11 @@ export async function roomPut(code, doc) {
   if (!remote) return false;
   try { await api.kvPut(`room:${code}`, doc); return true; } catch (e) { return false; }
 }
+export async function roomDelete(code) {
+  if (!remote) return false;
+  /* wipes the whole room doc — including chat — from the kv table */
+  try { await api.kvDel(`room:${code}`); return true; } catch (e) { return false; }
+}
 
 /* ---------- migration ----------
    When someone signs in for the first time on a browser that has

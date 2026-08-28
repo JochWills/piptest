@@ -71,7 +71,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [roomOpen, setRoomOpen] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [roomMsg, setRoomMsg] = useState("");
-  const pushRef = useRef(0), appliedRef = useRef(0);
+  const pushRef = useRef(0), appliedRef = useRef(0), missRef = useRef(0);
+
+  /* ---------- room chat ----------
+     Lives inside the room doc itself (kv row), so it's gone the
+     moment the room is deleted — nothing to separately expire. */
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatText, setChatText] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+  const chatSeenRef = useRef(0);
 
   const [barPos, setBarPos] = useState(() => defaultBarPos());
   const [barCollapsed, setBarCollapsed] = useState(false);
@@ -325,11 +334,21 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   useEffect(() => {
     if (!room?.code || !API_ENABLED) return;
     let alive = true;
+    missRef.current = 0;
     const poll = async () => {
       const doc = await data.roomGet(room.code);
-      if (!alive || !doc) return;
+      if (!alive) return;
+      if (!doc) {
+        /* a failed fetch also comes back empty, so don't treat one miss as
+           "closed" — only act once it's been gone for a few polls straight */
+        if (++missRef.current >= 3) {
+          setRoom(null); setChatOpen(false); setRoomMsg("The host closed this room.");
+        }
+        return;
+      }
+      missRef.current = 0;
       if (doc.updatedBy === account.handle || (doc.updatedAt || 0) <= appliedRef.current) {
-        setRoom((r) => ({ ...r, participants: doc.participants })); return;
+        setRoom((r) => ({ ...r, participants: doc.participants, messages: doc.messages })); return;
       }
       appliedRef.current = doc.updatedAt || 0;
       setRoom(doc);
@@ -344,13 +363,25 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => { alive = false; clearInterval(id); };
   }, [room?.code, account.handle]); // eslint-disable-line
 
+  /* unread badge on the chat toggle while the panel is closed */
+  useEffect(() => {
+    const msgs = room?.messages || [];
+    if (chatOpen) { chatSeenRef.current = msgs.length; setChatUnread(0); return; }
+    if (msgs.length > chatSeenRef.current) {
+      const added = msgs.slice(chatSeenRef.current).filter((m) => m.from !== account.handle);
+      if (added.length) setChatUnread((n) => n + added.length);
+      chatSeenRef.current = msgs.length;
+    }
+  }, [room?.messages, chatOpen]); // eslint-disable-line
+
   const hostRoom = async () => {
     if (!API_ENABLED) { setRoomMsg("Live rooms need the API. Set VITE_API_URL and redeploy."); return; }
     const code = makeCode();
     const doc = { code, host: account.handle, symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      drawings, cursor, playing: false, speed, updatedBy: account.handle, updatedAt: Date.now() };
+      drawings, cursor, playing: false, speed, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
+    chatSeenRef.current = 0; setChatUnread(0);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
   };
   const joinRoom = async () => {
@@ -366,14 +397,22 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       [account.handle]: { role: doc.participants?.[account.handle]?.role || "viewer",
                           ts: Date.now(), avatar: account.avatar || null } };
     await data.roomPut(code, doc);
-    appliedRef.current = 0; setRoom(doc); setRoomMsg(`Joined ${code} as viewer.`);
+    appliedRef.current = 0; chatSeenRef.current = doc.messages?.length || 0; setChatUnread(0);
+    setRoom(doc); setRoomMsg(`Joined ${code} as viewer.`);
   };
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
       const d = await data.roomGet(room.code);
       if (d?.participants) { delete d.participants[account.handle]; await data.roomPut(room.code, d); }
     }
-    setRoom(null); setRoomMsg("");
+    setRoom(null); setRoomMsg(""); setChatOpen(false);
+  };
+  /* host-only: ends the room for everyone and wipes the kv row — chat
+     messages live inside that same doc, so they're gone with it */
+  const closeRoom = async () => {
+    if (!room || !isHost) return;
+    await data.roomDelete(room.code);
+    setRoom(null); setRoomMsg("Room closed."); setChatOpen(false);
   };
   const setRole = async (who, r) => {
     if (!isHost) return;
@@ -383,6 +422,24 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     d.updatedBy = account.handle; d.updatedAt = Date.now();
     await data.roomPut(room.code, d);
     setRoom(d);
+  };
+  const sendChat = async () => {
+    const text = chatText.trim();
+    if (!text || !room || chatBusy) return;
+    setChatBusy(true);
+    setChatText("");
+    try {
+      const d = (await data.roomGet(room.code)) || room;
+      const msg = { id: uid(), from: account.handle, avatar: account.avatar || null,
+        text: text.slice(0, 500), ts: Date.now() };
+      d.messages = [...(d.messages || []), msg].slice(-200);
+      d.updatedBy = account.handle; d.updatedAt = Date.now();
+      await data.roomPut(room.code, d);
+      chatSeenRef.current = d.messages.length;
+      setRoom(d);
+    } finally {
+      setChatBusy(false);
+    }
   };
 
   /* ================= hotkeys ================= */
@@ -412,7 +469,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   }, [canControl, bars.length, selected, drawings]); // eslint-disable-line
 
   useEffect(() => {
-    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setIndOpen(false); setRoomOpen(false); } };
+    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setIndOpen(false); setRoomOpen(false); setChatOpen(false); } };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
   }, []);
@@ -470,8 +527,28 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               title="Live room" aria-label="Live room" style={{ padding: "6px 9px" }}>
               <Svg s={15}>{Ic.users}</Svg>
             </button>
-            {roomOpen && <RoomPanel {...{ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, setRole, onClose: () => setRoomOpen(false) }} />}
+            {roomOpen && <RoomPanel {...{ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose: () => setRoomOpen(false) }} />}
           </span>
+          {room && (
+            <span data-pop style={{ position: "relative" }}>
+              <button className={"btn ghost " + (chatOpen ? "on" : "")} onClick={() => setChatOpen((o) => !o)}
+                title="Room chat" aria-label="Room chat" style={{ padding: "6px 9px", position: "relative" }}>
+                <Svg s={15}>{Ic.chat}</Svg>
+                {chatUnread > 0 && !chatOpen && (
+                  <span className="num" style={{ position: "absolute", top: -4, right: -4, minWidth: 15, height: 15,
+                    borderRadius: 999, background: "var(--down)", color: "#fff", fontSize: 9.5, fontWeight: 700,
+                    display: "grid", placeItems: "center", padding: "0 3px", lineHeight: 1 }}>
+                    {chatUnread > 9 ? "9+" : chatUnread}
+                  </span>
+                )}
+              </button>
+              {chatOpen && (
+                <ChatPanel room={room} account={account} messages={room.messages || []}
+                  chatText={chatText} setChatText={setChatText} onSend={sendChat} busy={chatBusy}
+                  onClose={() => setChatOpen(false)} />
+              )}
+            </span>
+          )}
           {room && <span className="pill b live">● {room.code}</span>}
           <button className="btn ghost" onClick={onToggleTheme} style={{ padding: "6px 9px" }} aria-label="Toggle theme">
             <Svg s={15}>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
@@ -978,7 +1055,7 @@ function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel }) {
   );
 }
 
-function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, setRole, onClose }) {
+function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose }) {
   return (
     <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 15, width: 272 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -1004,7 +1081,10 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
               <div className="num" style={{ fontSize: 21, fontWeight: 700, letterSpacing: ".08em" }}>{room.code}</div>
               <div className="sm mut">host {room.host}</div>
             </div>
-            <button className="btn" onClick={leaveRoom}>Leave</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              {isHost && <button className="btn" onClick={closeRoom}>Close</button>}
+              <button className="btn" onClick={leaveRoom}>Leave</button>
+            </div>
           </div>
           <div style={{ display: "grid", gap: 6 }}>
             {Object.entries(room.participants || {}).map(([who, info]) => (
@@ -1025,10 +1105,65 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
           </div>
           <div className="sm mut" style={{ marginTop: 10, lineHeight: 1.55 }}>
             Playback and drawings sync to everyone. Trades stay individual.
+            {isHost ? " Closing the room ends it for everyone and clears the chat." : ""}
           </div>
         </>
       )}
       {roomMsg && <div className="sm" style={{ color: "var(--brand)", marginTop: 11, lineHeight: 1.5 }}>{roomMsg}</div>}
+    </div>
+  );
+}
+
+function ChatPanel({ room, account, messages, chatText, setChatText, onSend, busy, onClose }) {
+  const listRef = useRef(null);
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
+  return (
+    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60,
+      width: 300, height: 380, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+        padding: "12px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        <span className="cap">Room chat · {room.code}</span>
+        <button className="btn ghost" style={{ padding: "2px 7px" }} onClick={onClose} aria-label="Close">✕</button>
+      </div>
+
+      <div ref={listRef} className="scroll" style={{ flex: 1, overflowY: "auto", padding: "10px 12px",
+        display: "flex", flexDirection: "column", gap: 10 }}>
+        {!messages.length && (
+          <div className="sm mut" style={{ textAlign: "center", marginTop: 26, lineHeight: 1.6, padding: "0 10px" }}>
+            No messages yet — say hi. Chat is temporary and clears when the room closes.
+          </div>
+        )}
+        {messages.map((m) => {
+          const mine = m.from === account.handle;
+          return (
+            <div key={m.id} style={{ display: "flex", gap: 6, alignItems: "flex-end",
+              flexDirection: mine ? "row-reverse" : "row" }}>
+              {!mine && <Avatar value={m.avatar} handle={m.from} size={20} />}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start", maxWidth: "78%" }}>
+                {!mine && <span className="sm mut" style={{ marginBottom: 2, fontSize: 11 }}>{m.from}</span>}
+                <span style={{ padding: "7px 10px", borderRadius: 12, fontSize: 13, lineHeight: 1.4,
+                  wordBreak: "break-word", background: mine ? "var(--brand)" : "var(--surface3)",
+                  color: mine ? "var(--brandInk)" : "var(--ink)" }}>
+                  {m.text}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <form onSubmit={(e) => { e.preventDefault(); onSend(); }}
+        style={{ display: "flex", gap: 6, padding: 10, borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+        <input className="in" value={chatText} maxLength={500} placeholder="Message the room…" autoComplete="off"
+          onChange={(e) => setChatText(e.target.value)} disabled={busy} />
+        <button className="btn pri" type="submit" disabled={busy || !chatText.trim()} style={{ padding: "8px 12px", flexShrink: 0 }}>
+          Send
+        </button>
+      </form>
     </div>
   );
 }
