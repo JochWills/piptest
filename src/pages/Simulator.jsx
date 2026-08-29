@@ -644,31 +644,24 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       )}
 
       {/* ================= main ================= */}
-      <div className="sim-main" style={{ display: "grid", gridTemplateColumns: "232px minmax(0,1fr) 292px", gap: 0, flex: 1, minHeight: 0 }}>
+      <div className="sim-main" style={{ display: "grid", gridTemplateColumns: "156px minmax(0,1fr) 292px", gap: 0, flex: 1, minHeight: 0 }}>
 
         {/* ---- left: ad slot ----
             Market watch (and its watchlist editor) was retired — no live
             ticker polling here any more, so it can't compete with actual
             candle-loading for Twelve Data's shared daily quota, and this
-            rail is now entirely the ad's. Still a fixed 160×600 ("wide
-            skyscraper") rather than stretched to the rail's ~200px usable
-            width: real ad networks serve that exact pixel box, not a
-            responsive one, so sizing it any other way would just need
-            undoing once a real creative lands. Swap the dashed
-            placeholder for the real <img>/<iframe> then; the centering
-            wrapper around it can stay as-is. */}
+            rail is now entirely the ad's. PIP Affiliates' 120×600
+            skyscraper creative, fixed pixel size rather than stretched to
+            the rail's ~200px usable width, same as any other ad network:
+            they serve that exact box, not a responsive one. */}
         <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
           padding: 14, overflowY: "auto", minHeight: 0 }}>
-          <div style={{ width: 160, height: 600, flexShrink: 0, borderRadius: 8,
-            border: "1px dashed var(--border)", background: "var(--surface2)",
-            display: "grid", placeItems: "center", textAlign: "center",
-            color: "var(--dim)", fontSize: 12, lineHeight: 1.6, padding: 10 }}>
-            <div>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Ad space</div>
-              160 × 600
-            </div>
-          </div>
+          <a href="https://clicks.pipaffiliates.com/c?m=131252&c=1297452" target="_blank" rel="noopener"
+            referrerPolicy="no-referrer-when-downgrade" style={{ flexShrink: 0 }}>
+            <img src="https://ads.pipaffiliates.com/i/131252?c=1297452" width={120} height={600}
+              referrerPolicy="no-referrer-when-downgrade" alt="Advertisement" style={{ display: "block", borderRadius: 8 }} />
+          </a>
         </aside>
 
         {/* ---- centre: chart ---- */}
