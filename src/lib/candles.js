@@ -1,12 +1,12 @@
 /* ============================================================
    candles.js — picks a feed by symbol, same shape either way
 
-   Simulator.jsx imports loadWindow/fetchPaged/fetchTickers from here
-   rather than straight from market.js (Binance only) now that a
-   second source exists: same function names and return shapes,
-   routed to Binance (browser-side, market.js) or Twelve Data
-   (through our own API — see server/twelvedata.js for why) based on
-   each symbol's `source` in theme.js.
+   Simulator.jsx imports loadWindow/fetchPaged from here rather than
+   straight from market.js (Binance only) now that a second source
+   exists: same function names and return shapes, routed to Binance
+   (browser-side, market.js) or Twelve Data (through our own API —
+   see server/twelvedata.js for why) based on each symbol's `source`
+   in theme.js.
 
    Twelve Data's free tier is generous enough per call (up to 5,000
    candles) that this doesn't need the elaborate small-window/widen-
@@ -20,14 +20,11 @@
    landing a scroll-back request right on a Friday close could look
    like "no more history" when Thursday's candles are right there.
 
-   Live quotes for Twelve Data symbols exist, but deliberately don't
-   piggyback on Binance's 45s ticker poll — confirmed a quote batch
-   costs one credit PER SYMBOL requested, so polling all of them that
-   often would burn most of the shared daily budget on a nice-to-have,
-   competing with the actual backtesting candle requests. Simulator.jsx
-   polls these on their own, longer cadence, and only for symbols on
-   the current watchlist — see server/twelvedata.js's quote cache for
-   the rest of the reasoning.
+   No live tickers here — Market Watch (the only thing that ever
+   showed them) was retired, and a live quote costs one Twelve Data
+   credit PER SYMBOL, so nothing should be polling that on its own
+   account. If a ticker feature comes back, resist wiring it back in
+   here without deciding fresh how often it's allowed to poll.
    ============================================================ */
 
 import { SYMBOLS, barMsOf } from "../theme.js";
@@ -75,24 +72,6 @@ export async function fetchPaged(symbol, interval, startTime, wanted, maxPages) 
   return sourceOf(symbol) === "TwelveData"
     ? twelveDataFetchPaged(symbol, interval, startTime, wanted)
     : binance.fetchPaged(symbol, interval, startTime, wanted, maxPages);
-}
-
-async function twelveDataQuotes(symbolIds) {
-  if (!API_ENABLED || !symbolIds.length) return [];
-  try {
-    const { quotes } = await api.twelveDataQuotes(symbolIds.join(","));
-    return Object.entries(quotes || {}).map(([symbol, q]) => ({ symbol, price: q.price, chg: q.chg }));
-  } catch (e) { return []; }
-}
-
-export async function fetchTickers(symbolIds) {
-  const binanceIds = symbolIds.filter((id) => sourceOf(id) !== "TwelveData");
-  const tdIds = symbolIds.filter((id) => sourceOf(id) === "TwelveData");
-  const [b, t] = await Promise.all([
-    binanceIds.length ? binance.fetchTickers(binanceIds) : Promise.resolve([]),
-    twelveDataQuotes(tdIds),
-  ]);
-  return [...(b || []), ...(t || [])];
 }
 
 export const syntheticKlines = binance.syntheticKlines;

@@ -15,7 +15,7 @@ import {
   revokeRefresh, revokeAllForUser, setRefreshCookie, clearRefreshCookie,
   REFRESH_COOKIE, requireAuth, requireAdmin, reqIp, adminEmails, publicUser,
 } from "./auth.js";
-import { TWELVE_DATA_SYMBOLS, loadTwelveDataCandles, loadTwelveDataQuotes } from "./twelvedata.js";
+import { TWELVE_DATA_SYMBOLS, loadTwelveDataCandles } from "./twelvedata.js";
 
 export const router = express.Router();
 
@@ -424,18 +424,6 @@ router.get("/market/twelvedata/candles", requireAuth, marketLimiter, async (req,
     res.json({ candles });
   } catch (e) {
     console.error("twelvedata candles failed:", e.message);
-    res.status(502).json({ error: "upstream_failed", message: "Twelve Data is unreachable right now — try again shortly." });
-  }
-});
-
-router.get("/market/twelvedata/quotes", requireAuth, marketLimiter, async (req, res) => {
-  const symbols = (req.query.symbols || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!symbols.length) return res.json({ quotes: {} });
-  try {
-    const quotes = await loadTwelveDataQuotes(symbols);
-    res.json({ quotes });
-  } catch (e) {
-    console.error("twelvedata quotes failed:", e.message);
     res.status(502).json({ error: "upstream_failed", message: "Twelve Data is unreachable right now — try again shortly." });
   }
 });

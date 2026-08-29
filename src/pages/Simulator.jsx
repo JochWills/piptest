@@ -5,7 +5,7 @@ import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import ReplayChart, { TOOLS, INDICATORS } from "../chart/ReplayChart.jsx";
 import { SYMBOLS, INTERVALS, SPEEDS, barMsOf } from "../theme.js";
-import { loadWindow, fetchPaged, fetchTickers, nearestIndex, syntheticKlines } from "../lib/candles.js";
+import { loadWindow, fetchPaged, nearestIndex, syntheticKlines } from "../lib/candles.js";
 import {
   validateSetup, buildSetup, runEngine, bookTrade, openPnl, computeStats, rrOf,
   evaluateChallenge, fmtPrice, fmtMoney, fmtSigned, fmtR, fmtClock, fmtShort, dec,
@@ -38,10 +38,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [synthetic, setSynthetic] = useState(false);
   const [shortFrom, setShortFrom] = useState(null);
   const [noOlder, setNoOlder] = useState(false);
-  const [tickers, setTickers] = useState([]);
-  const [watchlist, setWatchlist] = useState([meta.symbol]);
-  const [wlOpen, setWlOpen] = useState(false);
-  const [wlQuery, setWlQuery] = useState("");
   const fetchingRef = useRef(false), olderRef = useRef(false), anchorRef = useRef(null);
 
   /* ---------- replay ---------- */
@@ -150,7 +146,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         if (body.indicators) setIndicators(body.indicators);
         if (body.symbol) setSymbol(body.symbol);
         if (body.interval) setIv(body.interval);
-        if (Array.isArray(body.watchlist) && body.watchlist.length) setWatchlist(body.watchlist);
       }
       const prefs = await store.get(K.prefs);
       if (prefs?.replayBar) {
@@ -180,35 +175,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     })();
     return () => { alive = false; };
   }, [symbol, interval, meta.startMs]);
-
-  /* two separate polls, not one: Binance is fast and free, so crypto
-     stays snappy at 45s. Twelve Data quotes share a tight, disclosed
-     daily budget with actual candle-loading, so those poll far less
-     often and only for symbols actually on this watchlist — not the
-     full catalog — see lib/candles.js and server/twelvedata.js. */
-  const mergeTickers = (prev, next) => {
-    const m = new Map(prev.map((t) => [t.symbol, t]));
-    next.forEach((t) => m.set(t.symbol, t));
-    return [...m.values()];
-  };
-  useEffect(() => {
-    const ids = SYMBOLS.filter((s) => s.source !== "TwelveData").map((s) => s.id);
-    let alive = true;
-    const poll = async () => { const t = await fetchTickers(ids); if (alive && t) setTickers((p) => mergeTickers(p, t)); };
-    poll();
-    const id = setInterval(poll, 45000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
-
-  useEffect(() => {
-    const ids = watchlist.filter((wid) => SYMBOLS.find((s) => s.id === wid)?.source === "TwelveData");
-    if (!ids.length) return;
-    let alive = true;
-    const poll = async () => { const t = await fetchTickers(ids); if (alive && t) setTickers((p) => mergeTickers(p, t)); };
-    poll();
-    const id = setInterval(poll, 150000); // 2.5min — see the budget reasoning above
-    return () => { alive = false; clearInterval(id); };
-  }, [watchlist]);
 
   /* extend forwards */
   useEffect(() => {
@@ -339,7 +305,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
       const ok = await data.saveSessionState(meta.id, {
-        id: meta.id, cursor, trades, trade, drawings, notes, indicators, symbol, interval, watchlist,
+        id: meta.id, cursor, trades, trade, drawings, notes, indicators, symbol, interval,
       });
       const st = computeStats(trades);
       const ch = evaluateChallenge(trades, meta.challenge);
@@ -354,7 +320,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       setSaveState(ok ? "saved" : "failed");
     }, 1000);
     return () => clearTimeout(saveT.current);
-  }, [trades, trade, cursor, drawings, notes, indicators, symbol, interval, watchlist, restored]); // eslint-disable-line
+  }, [trades, trade, cursor, drawings, notes, indicators, symbol, interval, restored]); // eslint-disable-line
 
   /* remember where the replay bar was left */
   const barSaveT = useRef(null);
@@ -525,10 +491,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => document.removeEventListener("mousedown", away);
   }, []);
 
-  const allMarkets = tickers.length ? tickers : SYMBOLS.map((s) => ({ symbol: s.id, price: null, chg: 0 }));
-  const marketList = watchlist
-    .map((id) => allMarkets.find((m) => m.symbol === id) || { symbol: id, price: null, chg: 0 })
-    .filter((m) => SYMBOLS.some((s) => s.id === m.symbol));
   const curSource = SYMBOLS.find((s) => s.id === symbol)?.source || "Binance";
   /* Twelve Data has no 1-second candles — hide the option rather than
      let it silently show an empty chart for these symbols */
@@ -684,85 +646,30 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       {/* ================= main ================= */}
       <div className="sim-main" style={{ display: "grid", gridTemplateColumns: "232px minmax(0,1fr) 292px", gap: 0, flex: 1, minHeight: 0 }}>
 
-        {/* ---- left: market watch ---- */}
+        {/* ---- left: ad slot ----
+            Market watch (and its watchlist editor) was retired — no live
+            ticker polling here any more, so it can't compete with actual
+            candle-loading for Twelve Data's shared daily quota, and this
+            rail is now entirely the ad's. Still a fixed 160×600 ("wide
+            skyscraper") rather than stretched to the rail's ~200px usable
+            width: real ad networks serve that exact pixel box, not a
+            responsive one, so sizing it any other way would just need
+            undoing once a real creative lands. Swap the dashed
+            placeholder for the real <img>/<iframe> then; the centering
+            wrapper around it can stay as-is. */}
         <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
-          display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div style={{ padding: "12px 10px 10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div className="cap">Market watch</div>
-            <button className="btn ghost" onClick={() => { setWlQuery(""); setWlOpen(true); }}
-              title="Edit watchlist" aria-label="Edit watchlist" style={{ padding: "3px 6px" }}>
-              <Svg s={14}>{Ic.plus}</Svg>
-            </button>
-          </div>
-          <div className="scroll" style={{ overflowY: "auto", maxHeight: "50%", flexShrink: 0 }}>
-            {!marketList.length && (
-              <div className="sm mut" style={{ padding: "10px 14px", lineHeight: 1.5 }}>
-                Nothing on your watchlist — tap + to add a pair.
-              </div>
-            )}
-            {marketList.map((m) => {
-              const s = SYMBOLS.find((x) => x.id === m.symbol);
-              const on = m.symbol === symbol;
-              return (
-                <button key={m.symbol} disabled={!canControl} onClick={() => switchMarket(m.symbol, null)}
-                  style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
-                    padding: "9px 14px", border: "none", cursor: "pointer", fontFamily: "inherit",
-                    background: on ? "var(--brandSoft)" : "transparent",
-                    borderLeft: "2px solid " + (on ? "var(--brand)" : "transparent") }}>
-                  <span style={{ flex: 1, fontSize: 13, fontWeight: on ? 600 : 500,
-                    color: on ? "var(--brand)" : "var(--ink)" }}>{s?.label || m.symbol}</span>
-                  <span className="num sm mut">{m.price != null ? fmtPrice(m.price) : "—"}</span>
-                  <span className="num sm" style={{ width: 50, textAlign: "right",
-                    color: m.chg >= 0 ? "var(--up)" : "var(--down)" }}>
-                    {m.chg >= 0 ? "+" : ""}{m.chg.toFixed(2)}%
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <div className="sm mut" style={{ padding: "9px 14px", borderTop: "1px solid var(--border)", lineHeight: 1.5 }}>
-            {tickers.length
-              ? `Live prices — your chart is replaying ${cur ? fmtShort(cur.t) : fmtShort(meta.startMs)}`
-              : "Live prices unavailable"}
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          padding: 14, overflowY: "auto", minHeight: 0 }}>
+          <div style={{ width: 160, height: 600, flexShrink: 0, borderRadius: 8,
+            border: "1px dashed var(--border)", background: "var(--surface2)",
+            display: "grid", placeItems: "center", textAlign: "center",
+            color: "var(--dim)", fontSize: 12, lineHeight: 1.6, padding: 10 }}>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Ad space</div>
+              160 × 600
+            </div>
           </div>
         </aside>
-
-        {wlOpen && (() => {
-          const matches = SYMBOLS.filter((s) => s.label.toLowerCase().includes(wlQuery.trim().toLowerCase()));
-          return (
-            <Modal open={wlOpen} onClose={() => setWlOpen(false)} title="Edit watchlist" width={480}>
-              <div style={{ position: "relative", marginBottom: 12 }}>
-                <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--dim)" }}>
-                  <Svg s={14}>{Ic.search}</Svg>
-                </span>
-                <input className="in" autoFocus value={wlQuery} onChange={(e) => setWlQuery(e.target.value)}
-                  placeholder="Search pairs…" style={{ paddingLeft: 30, width: "100%" }} />
-              </div>
-              <div className="scroll" style={{ maxHeight: "50vh", overflowY: "auto", display: "grid", gap: 2 }}>
-                {matches.map((s) => {
-                  const on = watchlist.includes(s.id);
-                  return (
-                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8,
-                      padding: "8px 10px", borderRadius: 8, background: on ? "var(--brandSoft)" : "transparent" }}>
-                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{s.label}</span>
-                      <span className="sm mut" style={{ padding: "2px 8px", borderRadius: 999,
-                        border: "1px solid var(--border)", flexShrink: 0 }}>{s.source || "—"}</span>
-                      <button className={"btn " + (on ? "ghost" : "pri")} style={{ padding: "4px 10px", fontSize: 12 }}
-                        disabled={on && watchlist.length <= 1}
-                        title={on ? (watchlist.length <= 1 ? "At least one pair must stay on the watchlist" : "Remove") : "Add"}
-                        onClick={() => setWatchlist((w) => on ? w.filter((id) => id !== s.id) : [...w, s.id])}>
-                        {on ? <Svg s={13}>{Ic.trash}</Svg> : <Svg s={13}>{Ic.plus}</Svg>}
-                      </button>
-                    </div>
-                  );
-                })}
-                {!matches.length && (
-                  <div className="sm mut" style={{ padding: "10px 4px" }}>No pairs match "{wlQuery}".</div>
-                )}
-              </div>
-            </Modal>
-          );
-        })()}
 
         {/* ---- centre: chart ---- */}
         <section style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>

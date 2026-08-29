@@ -131,7 +131,6 @@ export const api = {
      client-side like the Binance-sourced crypto candles are) */
   twelveDataCandles: (symbol, interval, from, to) =>
     raw(`/api/market/twelvedata/candles?symbol=${symbol}&interval=${interval}&from=${from}&to=${to}`),
-  twelveDataQuotes: (symbols) => raw(`/api/market/twelvedata/quotes?symbols=${symbols}`),
 
   /* rooms */
   kvGet: (k)      => raw(`/api/kv/${encodeURIComponent(k)}`),

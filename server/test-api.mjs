@@ -175,16 +175,6 @@ try {
   const origFetch = global.fetch;
   let twelveDataCalls = 0;
   global.fetch = async (url, opts) => {
-    if (typeof url === "string" && url.includes("api.twelvedata.com/quote")) {
-      twelveDataCalls++;
-      return {
-        ok: true,
-        json: async () => ({
-          "EUR/USD": { symbol: "EUR/USD", close: "1.15828", percent_change: "-0.0025899802" },
-          "GBP/USD": { symbol: "GBP/USD", close: "1.35338", percent_change: "-0.012559566" },
-        }),
-      };
-    }
     if (typeof url === "string" && url.includes("api.twelvedata.com")) {
       twelveDataCalls++;
       return {
@@ -225,23 +215,6 @@ try {
 
   r = await call(`/api/market/twelvedata/candles?symbol=EURUSD&interval=1s&from=${from}&to=${to}`, { token: adminToken });
   ok(r.status === 200 && r.body.candles.length === 0, "an interval Twelve Data doesn't offer (1s) comes back empty, not an error");
-
-  console.log("\n=== market data (quotes) ===");
-  r = await call("/api/market/twelvedata/quotes?symbols=EURUSD,GBPUSD");
-  ok(r.status === 401, "quotes route requires auth");
-
-  r = await call("/api/market/twelvedata/quotes?symbols=", { token: adminToken });
-  ok(r.status === 200 && Object.keys(r.body.quotes).length === 0, "no symbols requested returns an empty object, not an error");
-
-  const quoteCallsBefore = twelveDataCalls;
-  r = await call("/api/market/twelvedata/quotes?symbols=EURUSD,GBPUSD,FAKE", { token: adminToken });
-  ok(r.status === 200, "quotes for a mixed valid/unknown symbol list still succeeds");
-  ok(r.body.quotes.EURUSD?.price === 1.15828 && r.body.quotes.GBPUSD?.price === 1.35338, "quote prices parsed correctly");
-  ok(!("FAKE" in r.body.quotes), "an unrecognised symbol is silently dropped, not erroring the whole batch");
-  ok(twelveDataCalls === quoteCallsBefore + 1, "one batched request covers both symbols, not one each");
-
-  r = await call("/api/market/twelvedata/quotes?symbols=EURUSD,GBPUSD", { token: adminToken });
-  ok(twelveDataCalls === quoteCallsBefore + 1, "a repeat request within the quote TTL is served from cache, not refetched");
 
   global.fetch = origFetch;
 
