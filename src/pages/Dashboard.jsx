@@ -49,6 +49,10 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
   };
 
   const agg = useMemo(() => computeStats(trades), [trades]);
+  /* a joined room's throwaway session (see App.jsx's joinRoomFromDashboard)
+     never gets saved and disappears the moment it's left — it shouldn't
+     ever flash into view here as if it were a real saved session */
+  const savedSessions = useMemo(() => sessions.filter((s) => !s.transient), [sessions]);
 
   const create = () => {
     let startMs;
@@ -108,7 +112,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
       </Card>
 
       <div className="grid-stats" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", marginBottom: 26 }}>
-        <Stat label="Sessions" value={sessions.length} />
+        <Stat label="Sessions" value={savedSessions.length} />
         <Stat label="Trades" value={agg.count} />
         <Stat label="Win rate" value={agg.count ? `${agg.winRate.toFixed(1)}%` : "—"} sub={`${agg.wins}W / ${agg.losses}L${agg.flat ? ` / ${agg.flat} flat` : ""}`} />
         <Stat label="Profit factor" value={agg.profitFactor == null ? "—" : agg.profitFactor.toFixed(2)} />
@@ -119,10 +123,10 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <span className="cap">Saved sessions</span>
-        {sessions.length > 0 && <span className="pill n">{sessions.length}</span>}
+        {savedSessions.length > 0 && <span className="pill n">{savedSessions.length}</span>}
       </div>
 
-      {sessions.length === 0 ? (
+      {savedSessions.length === 0 ? (
         <Card>
           <Empty
             title="No sessions yet"
@@ -132,7 +136,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
         </Card>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
-          {sessions.map((s) => {
+          {savedSessions.map((s) => {
             const st = s.stats || {};
             const sym = SYMBOLS.find((x) => x.id === s.symbol);
             return (

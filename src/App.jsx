@@ -174,19 +174,46 @@ export default function App() {
   /* ---------- join a room straight from the dashboard ----------
      Rooms only ever synced onto whatever session was already open in the
      simulator, so joining meant finding a session of your own first. This
-     spins up a disposable one (its symbol/interval are placeholders —
-     Simulator immediately overwrites them from the room the moment it
-     joins) purely to land somewhere, then tells that fresh Simulator
-     instance which code to auto-join via pendingJoin, keyed to its id so
-     a later, unrelated visit to this same session never re-triggers it. */
-  const joinRoomFromDashboard = async (code) => {
+     needs *some* session object for the router/Simulator to render against
+     (its symbol/interval are placeholders — Simulator overwrites them from
+     the room the moment it joins), but unlike createSession this is never
+     written to the backend and never gets a saved-state row: it's marked
+     `transient` and lives only in this tab's sessions state for as long as
+     the visit lasts, so it can't show up as a fake "session" on the
+     Dashboard or count toward anyone's stats. Simulator skips autosave
+     entirely when meta.transient is set, and the effect below drops it
+     from state again the moment `route` stops pointing at it — covering
+     the Dashboard link, the profile menu, the session switcher and
+     browser back/forward alike, since all of them change `route`. (An
+     earlier version tried dropping it from a Simulator-side effect
+     cleanup instead; that fired during React StrictMode's dev-only
+     double-invoke of effects on first mount, deleting the session before
+     the user had even seen it. Keying off `route` here instead of a
+     mount/unmount lifecycle isn't sensitive to that.) */
+  const joinRoomFromDashboard = (code) => {
     const id = uid();
-    setPendingJoin({ id, code });
-    await createSession({
+    const meta = {
       id, name: `Room ${code}`, symbol: "BTCUSDT", interval: "30m",
       startMs: Date.now() - 30 * 86400000, blind: false, challenge: null, createdAt: Date.now(),
-    });
+      stats: { count: 0, curve: [] }, transient: true,
+    };
+    setSessions((prev) => [meta, ...prev]);
+    setPendingJoin({ id, code });
+    go("sim", id);
   };
+
+  /* belt-and-braces for exits this component doesn't get a chance to
+     intercept (browser back/forward, closing the room panel and just
+     navigating away by hand) — whenever the route stops pointing at a
+     given transient session, drop it. Since it was never persisted,
+     this only ever affects this tab's in-memory list, never the backend. */
+  useEffect(() => {
+    setSessions((prev) => {
+      const isCurrent = (s) => route.page === "sim" && s.id === route.arg;
+      const stale = prev.some((s) => s.transient && !isCurrent(s));
+      return stale ? prev.filter((s) => !s.transient || isCurrent(s)) : prev; // same reference -> no-op re-render
+    });
+  }, [route.page, route.arg]);
 
   const deleteSession = async (id) => {
     const next = sessions.filter((s) => s.id !== id);
@@ -198,7 +225,10 @@ export default function App() {
     setSessions((prev) => {
       const next = prev.map((s) => (s.id === id ? { ...s, ...patch, updatedAt: Date.now() } : s));
       const meta = next.find((s) => s.id === id);
-      if (meta) data.saveSession(meta, next);
+      /* transient (joined-room) sessions never get a backend row — see
+         joinRoomFromDashboard. Simulator's autosave already skips calling
+         this for them, but guard here too rather than rely on that alone. */
+      if (meta && !meta.transient) data.saveSession(meta, next);
       return next;
     });
   }, []);

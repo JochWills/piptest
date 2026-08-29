@@ -302,7 +302,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   /* ================= autosave ================= */
   const saveT = useRef(null);
   useEffect(() => {
-    if (!restored) return;
+    /* a transient (joined-room) session never gets a backend row at all —
+       see joinRoomFromDashboard in App.jsx. Nothing to autosave here: the
+       chart state is the room's, not this throwaway session's own. */
+    if (!restored || meta.transient) return;
     setSaveState("saving");
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
@@ -432,6 +435,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     joinRoom(autoJoinCode);
     onAutoJoinDone?.();
   }, []); // eslint-disable-line
+
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
       const d = await data.roomGet(room.code);
@@ -506,6 +510,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => document.removeEventListener("mousedown", away);
   }, []);
 
+  /* transient (joined-room) sessions never get saved and disappear the
+     moment you leave them, so they don't belong in a "switch to" list */
+  const switchableSessions = sessions.filter((s) => !s.transient);
+
   const curSource = SYMBOLS.find((s) => s.id === symbol)?.source || "Binance";
   /* Twelve Data has no 1-second candles — hide the option rather than
      let it silently show an empty chart for these symbols */
@@ -549,7 +557,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           <span className="sm" style={{ color: saveState === "failed" ? "var(--down)" : "var(--dim)" }}>
-            {saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : "Saved"}
+            {meta.transient ? "Viewing a room — not saved"
+              : saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : "Saved"}
           </span>
           <span data-pop className="hide-sm" style={{ position: "relative" }}>
             <button onClick={() => setSessionsOpen((o) => !o)} title="Switch session" aria-label="Switch session"
@@ -573,9 +582,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                 <div className="cap" style={{ padding: "8px 10px 6px" }}>
                   Sessions — balance shown is this one
                 </div>
-                {sessions.length === 0 ? (
+                {switchableSessions.length === 0 ? (
                   <div className="sm mut" style={{ padding: "6px 10px 10px" }}>No saved sessions yet.</div>
-                ) : sessions.map((s) => {
+                ) : switchableSessions.map((s) => {
                   const isCurrent = s.id === meta.id;
                   const sym = SYMBOLS.find((x) => x.id === s.symbol);
                   const st = s.stats || {};
@@ -1176,7 +1185,7 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
               <input className="in" value={joinCode} maxLength={6} placeholder="ABC123"
                 onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                 onKeyDown={(e) => e.key === "Enter" && joinRoom()} />
-              <button className="btn" onClick={joinRoom}>Join</button>
+              <button className="btn" onClick={() => joinRoom()}>Join</button>
             </div>
           </Field>
         </>
