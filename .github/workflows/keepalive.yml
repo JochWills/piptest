@@ -1,9 +1,19 @@
-# Supabase pauses a free project after 7 days with no database activity,
-# and Render spins a free web service down after 15 minutes idle.
+# Two different sleep problems, two different schedules:
 #
-# This pings /healthz every 3 days. That endpoint runs `SELECT 1`, so a
-# single request wakes the API *and* touches the database — which is
-# exactly what both platforms count as activity.
+# · Render spins a free web service down after 15 minutes idle. The
+#   access token also lives for 15 minutes — so stepping away for a
+#   bit and coming back reliably hit both at once: an expired token
+#   AND a cold server the refresh call lands on, which used to just
+#   log people out outright. The */10 schedule below is a single fast
+#   ping that keeps the API from ever going idle long enough to sleep
+#   during a normal day of use, so that scenario stops coming up.
+#
+# · Supabase pauses a free project after 7 days with NO database
+#   activity — a much slower clock, so it only needs touching every
+#   few days, not every 10 minutes. The 3-day schedule does the
+#   patient, retrying wake-up (a Render cold start from a long pause
+#   can take up to ~60s to boot) since /healthz runs `SELECT 1`,
+#   which is exactly the DB activity Supabase is watching for.
 #
 # Set the API_URL repository variable:
 #   GitHub → Settings → Secrets and variables → Actions → Variables
@@ -13,20 +23,31 @@ name: Keep alive
 
 on:
   schedule:
-    - cron: "17 6 */3 * *"     # every 3 days, 06:17 UTC
+    - cron: "*/10 * * * *"     # every 10 minutes — keeps Render from sleeping mid-session
+    - cron: "17 6 */3 * *"     # every 3 days, 06:17 UTC — also keeps Supabase from pausing
   workflow_dispatch:            # and on demand from the Actions tab
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Wake the API and touch the database
+      - name: Ping the API
         run: |
           URL="${{ vars.API_URL }}"
           if [ -z "$URL" ]; then
             echo "API_URL variable is not set — skipping."
             exit 0
           fi
+
+          if [ "${{ github.event.schedule }}" = "*/10 * * * *" ]; then
+            # frequent keepalive: the API should already be warm, so one
+            # quick request is enough — no need for the patient retry
+            # loop below, which exists for the rare fully-cold-start case
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$URL/healthz" || echo 000)
+            echo "quick ping -> HTTP $code"
+            exit 0
+          fi
+
           echo "Pinging $URL/healthz"
           # a cold Render instance takes ~60s to boot, so allow for it
           for i in 1 2 3 4 5; do

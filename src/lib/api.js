@@ -54,17 +54,49 @@ async function raw(path, { method = "GET", body, auth = true, retry = true } = {
   return data;
 }
 
+/* Render's free tier sleeps the API after 15 minutes idle — the same
+   15 minutes the access token lives for. So the ordinary case of
+   "stepped away for a bit, came back" reliably lands both at once:
+   the token's expired AND the server's cold, needing 30-50s to wake.
+   A network-level failure here (fetch throwing, not the server
+   answering with a real rejection) is that wake-up in progress, not
+   an invalid session — so it's retried with backoff generous enough
+   to ride out a cold start, rather than an instant, wrong logout. */
+const REFRESH_RETRY_DELAYS_MS = [3000, 6000, 12000, 20000];
+
 export async function refresh() {
   if (refreshing) return refreshing;
   refreshing = (async () => {
     try {
-      const r = await fetch(BASE + "/api/auth/refresh", { method: "POST", credentials: "include" });
-      if (!r.ok) { accessToken = null; return false; }
-      const d = await r.json();
-      accessToken = d.accessToken;
-      return d.user || true;
-    } catch (e) { accessToken = null; return false; }
-    finally { refreshing = null; }
+      for (let attempt = 0; ; attempt++) {
+        let res;
+        try {
+          res = await fetch(BASE + "/api/auth/refresh", { method: "POST", credentials: "include" });
+        } catch (e) {
+          /* the request never completed — likely a cold start or a
+             blip, not the server saying no */
+          if (attempt >= REFRESH_RETRY_DELAYS_MS.length) { accessToken = null; return false; }
+          await new Promise((r) => setTimeout(r, REFRESH_RETRY_DELAYS_MS[attempt]));
+          continue;
+        }
+        if (!res.ok) {
+          /* a real answer, just not a good one — try again a couple of
+             times too (a cold start can also surface as a 502/503 from
+             Render's proxy while the app finishes booting), but a
+             genuine 401 (invalid/expired refresh token) won't change
+             on retry, so don't burn the whole backoff budget on it */
+          if (res.status !== 401 && attempt < REFRESH_RETRY_DELAYS_MS.length) {
+            await new Promise((r) => setTimeout(r, REFRESH_RETRY_DELAYS_MS[attempt]));
+            continue;
+          }
+          accessToken = null;
+          return false;
+        }
+        const d = await res.json();
+        accessToken = d.accessToken;
+        return d.user || true;
+      }
+    } finally { refreshing = null; }
   })();
   return refreshing;
 }
