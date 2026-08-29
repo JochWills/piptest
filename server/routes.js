@@ -15,6 +15,7 @@ import {
   revokeRefresh, revokeAllForUser, setRefreshCookie, clearRefreshCookie,
   REFRESH_COOKIE, requireAuth, requireAdmin, reqIp, adminEmails, publicUser,
 } from "./auth.js";
+import { DUKASCOPY_SYMBOLS, loadDukascopyCandles } from "./dukascopy.js";
 
 export const router = express.Router();
 
@@ -390,6 +391,39 @@ router.put("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
 router.delete("/kv/:key", requireAuth, async (req, res) => {
   await q("DELETE FROM kv WHERE key=$1", [req.params.key]);
   res.json({ ok: true });
+});
+
+/* =====================================================
+   MARKET DATA — forex & indices via Dukascopy
+
+   Binance-sourced crypto candles are fetched straight from the
+   browser (see src/lib/market.js) since Binance's public endpoints
+   allow it. Dukascopy's don't (its CORS header only allows requests
+   from Dukascopy's own site — verified directly), and the raw
+   archive is rate-limit-sensitive enough that it needs the queueing
+   in dukascopy.js, not one call per browser tab. So this is the one
+   feed that goes through our own server rather than being fetched
+   client-side.
+   ===================================================== */
+const marketLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+
+router.get("/market/dukascopy/symbols", requireAuth, (_req, res) => {
+  res.json({ symbols: DUKASCOPY_SYMBOLS });
+});
+
+router.get("/market/dukascopy/candles", requireAuth, marketLimiter, async (req, res) => {
+  const { symbol, interval, from, to } = req.query;
+  if (!DUKASCOPY_SYMBOLS[symbol]) return res.status(400).json({ error: "unknown_symbol" });
+  const fromMs = Number(from), toMs = Number(to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+    return res.status(400).json({ error: "bad_range", message: "from/to must be numeric ms timestamps with to > from." });
+  }
+  try {
+    const candles = await loadDukascopyCandles(symbol, interval, fromMs, toMs);
+    res.json({ candles });
+  } catch (e) {
+    res.status(502).json({ error: "upstream_failed", message: "Dukascopy is unreachable right now — try again shortly." });
+  }
 });
 
 /* =====================================================

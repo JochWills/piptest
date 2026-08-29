@@ -94,6 +94,12 @@ export const api = {
   addTrades:   (trades)  => raw("/api/trades", { method: "POST", body: { trades } }),
   patchTrade:  (id, b)   => raw(`/api/trades/${id}`, { method: "PATCH", body: b }),
 
+  /* market data — forex & indices (see server/dukascopy.js for why this
+     one goes through our own API instead of being fetched client-side
+     like the Binance-sourced crypto candles are) */
+  dukascopyCandles: (symbol, interval, from, to) =>
+    raw(`/api/market/dukascopy/candles?symbol=${symbol}&interval=${interval}&from=${from}&to=${to}`),
+
   /* rooms */
   kvGet: (k)      => raw(`/api/kv/${encodeURIComponent(k)}`),
   kvPut: (k, v)   => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "PUT", body: { value: v } }),

@@ -5,7 +5,7 @@ import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import ReplayChart, { TOOLS, INDICATORS } from "../chart/ReplayChart.jsx";
 import { SYMBOLS, INTERVALS, SPEEDS, barMsOf } from "../theme.js";
-import { loadWindow, fetchPaged, fetchTickers, nearestIndex, syntheticKlines } from "../lib/market.js";
+import { loadWindow, fetchPaged, fetchTickers, nearestIndex, syntheticKlines } from "../lib/candles.js";
 import {
   validateSetup, buildSetup, runEngine, bookTrade, openPnl, computeStats, rrOf,
   evaluateChallenge, fmtPrice, fmtMoney, fmtSigned, fmtR, fmtClock, fmtShort, dec,
@@ -39,6 +39,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [shortFrom, setShortFrom] = useState(null);
   const [noOlder, setNoOlder] = useState(false);
   const [tickers, setTickers] = useState([]);
+  const [watchlist, setWatchlist] = useState([meta.symbol]);
+  const [wlOpen, setWlOpen] = useState(false);
+  const [wlQuery, setWlQuery] = useState("");
   const fetchingRef = useRef(false), olderRef = useRef(false), anchorRef = useRef(null);
 
   /* ---------- replay ---------- */
@@ -147,6 +150,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         if (body.indicators) setIndicators(body.indicators);
         if (body.symbol) setSymbol(body.symbol);
         if (body.interval) setIv(body.interval);
+        if (Array.isArray(body.watchlist) && body.watchlist.length) setWatchlist(body.watchlist);
       }
       const prefs = await store.get(K.prefs);
       if (prefs?.replayBar) {
@@ -307,7 +311,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
       const ok = await data.saveSessionState(meta.id, {
-        id: meta.id, cursor, trades, trade, drawings, notes, indicators, symbol, interval,
+        id: meta.id, cursor, trades, trade, drawings, notes, indicators, symbol, interval, watchlist,
       });
       const st = computeStats(trades);
       const ch = evaluateChallenge(trades, meta.challenge);
@@ -322,7 +326,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       setSaveState(ok ? "saved" : "failed");
     }, 1000);
     return () => clearTimeout(saveT.current);
-  }, [trades, trade, cursor, drawings, notes, indicators, symbol, interval, restored]); // eslint-disable-line
+  }, [trades, trade, cursor, drawings, notes, indicators, symbol, interval, watchlist, restored]); // eslint-disable-line
 
   /* remember where the replay bar was left */
   const barSaveT = useRef(null);
@@ -493,7 +497,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => document.removeEventListener("mousedown", away);
   }, []);
 
-  const marketList = tickers.length ? tickers : SYMBOLS.map((s) => ({ symbol: s.id, price: null, chg: 0 }));
+  const allMarkets = tickers.length ? tickers : SYMBOLS.map((s) => ({ symbol: s.id, price: null, chg: 0 }));
+  const marketList = watchlist
+    .map((id) => allMarkets.find((m) => m.symbol === id) || { symbol: id, price: null, chg: 0 })
+    .filter((m) => SYMBOLS.some((s) => s.id === m.symbol));
   const visibleDrawings = drawings.filter((d) => !d.market || d.market === symbol).length;
 
   return (
@@ -648,10 +655,19 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         {/* ---- left: market watch ---- */}
         <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
           display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div style={{ padding: "12px 14px 10px" }}>
+          <div style={{ padding: "12px 10px 10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div className="cap">Market watch</div>
+            <button className="btn ghost" onClick={() => { setWlQuery(""); setWlOpen(true); }}
+              title="Edit watchlist" aria-label="Edit watchlist" style={{ padding: "3px 6px" }}>
+              <Svg s={14}>{Ic.plus}</Svg>
+            </button>
           </div>
-          <div className="scroll" style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+          <div className="scroll" style={{ overflowY: "auto", maxHeight: "50%", flexShrink: 0 }}>
+            {!marketList.length && (
+              <div className="sm mut" style={{ padding: "10px 14px", lineHeight: 1.5 }}>
+                Nothing on your watchlist — tap + to add a pair.
+              </div>
+            )}
             {marketList.map((m) => {
               const s = SYMBOLS.find((x) => x.id === m.symbol);
               const on = m.symbol === symbol;
@@ -678,6 +694,43 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               : "Live prices unavailable"}
           </div>
         </aside>
+
+        {wlOpen && (() => {
+          const matches = SYMBOLS.filter((s) => s.label.toLowerCase().includes(wlQuery.trim().toLowerCase()));
+          return (
+            <Modal open={wlOpen} onClose={() => setWlOpen(false)} title="Edit watchlist" width={480}>
+              <div style={{ position: "relative", marginBottom: 12 }}>
+                <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--dim)" }}>
+                  <Svg s={14}>{Ic.search}</Svg>
+                </span>
+                <input className="in" autoFocus value={wlQuery} onChange={(e) => setWlQuery(e.target.value)}
+                  placeholder="Search pairs…" style={{ paddingLeft: 30, width: "100%" }} />
+              </div>
+              <div className="scroll" style={{ maxHeight: "50vh", overflowY: "auto", display: "grid", gap: 2 }}>
+                {matches.map((s) => {
+                  const on = watchlist.includes(s.id);
+                  return (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8,
+                      padding: "8px 10px", borderRadius: 8, background: on ? "var(--brandSoft)" : "transparent" }}>
+                      <span style={{ flex: 1, fontSize: 13.5, fontWeight: 500 }}>{s.label}</span>
+                      <span className="sm mut" style={{ padding: "2px 8px", borderRadius: 999,
+                        border: "1px solid var(--border)", flexShrink: 0 }}>{s.source || "—"}</span>
+                      <button className={"btn " + (on ? "ghost" : "pri")} style={{ padding: "4px 10px", fontSize: 12 }}
+                        disabled={on && watchlist.length <= 1}
+                        title={on ? (watchlist.length <= 1 ? "At least one pair must stay on the watchlist" : "Remove") : "Add"}
+                        onClick={() => setWatchlist((w) => on ? w.filter((id) => id !== s.id) : [...w, s.id])}>
+                        {on ? <Svg s={13}>{Ic.trash}</Svg> : <Svg s={13}>{Ic.plus}</Svg>}
+                      </button>
+                    </div>
+                  );
+                })}
+                {!matches.length && (
+                  <div className="sm mut" style={{ padding: "10px 4px" }}>No pairs match "{wlQuery}".</div>
+                )}
+              </div>
+            </Modal>
+          );
+        })()}
 
         {/* ---- centre: chart ---- */}
         <section style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
