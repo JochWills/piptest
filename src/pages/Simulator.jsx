@@ -655,7 +655,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             the rail's ~200px usable width, same as any other ad network:
             they serve that exact box, not a responsive one. */}
         <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
           padding: 14, overflowY: "auto", minHeight: 0 }}>
           <a href="https://clicks.pipaffiliates.com/c?m=131252&c=1297452" target="_blank" rel="noopener"
             referrerPolicy="no-referrer-when-downgrade" style={{ flexShrink: 0 }}>
