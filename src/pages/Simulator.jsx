@@ -543,7 +543,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             </div>
           </div>
           <span data-pop style={{ position: "relative" }}>
-            <button className={"btn ghost " + (roomOpen ? "on" : "")} onClick={() => setRoomOpen((o) => !o)}
+            <button className={"btn ghost " + (roomOpen ? "on" : "")}
+              onClick={() => setRoomOpen((o) => { if (!o) setChatOpen(false); return !o; })}
               title="Live room" aria-label="Live room" style={{ padding: "6px 9px" }}>
               <Svg s={15}>{Ic.users}</Svg>
             </button>
@@ -551,7 +552,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           </span>
           {room && (
             <span data-pop style={{ position: "relative" }}>
-              <button className={"btn ghost " + (chatOpen ? "on" : "")} onClick={() => setChatOpen((o) => !o)}
+              <button className={"btn ghost " + (chatOpen ? "on" : "")}
+                onClick={() => setChatOpen((o) => { if (!o) setRoomOpen(false); return !o; })}
                 title="Room chat" aria-label="Room chat" style={{ padding: "6px 9px", position: "relative" }}>
                 <Svg s={15}>{Ic.chat}</Svg>
                 {chatUnread > 0 && !chatOpen && (
