@@ -66,9 +66,18 @@ export async function issueRefresh(userId, req) {
   return { raw, expires };
 }
 
-/* Rotating: the presented token is revoked and a fresh one issued.
-   Re-use of an already-revoked token means it leaked, so every
-   session for that user is killed. */
+/* Re-use of an already-revoked token normally means it leaked — but a
+   browser with two tabs open produces the exact same signal by accident:
+   both tabs' access tokens expire around the same moment, both fire a
+   request, both get a 401, both hit /api/auth/refresh with the cookie
+   value that was current when they were sent. The server processes them
+   one after another; the second one presents a token this first one just
+   rotated away. That's not theft, it's a race — so a token reused within
+   this window is treated as benign and quietly re-rotated instead of
+   nuking every session. Reuse *outside* the window still triggers a full
+   revoke: a stolen token being replayed minutes or days later is theft. */
+const REUSE_GRACE_MS = 15_000;
+
 export async function rotateRefresh(raw, req) {
   const { rows } = await q(
     `SELECT rt.*, u.id AS uid, u.role, u.handle, u.status
@@ -77,7 +86,7 @@ export async function rotateRefresh(raw, req) {
   const row = rows[0];
   if (!row) return null;
 
-  if (row.revoked_at) {
+  if (row.revoked_at && Date.now() - new Date(row.revoked_at).getTime() > REUSE_GRACE_MS) {
     await q("UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL", [row.uid]);
     await logEvent(row.uid, "refresh_reuse_detected", {}, reqIp(req));
     return null;
