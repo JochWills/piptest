@@ -295,6 +295,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     anchorRef.current = cur?.t ?? null;
     if (cs) setSymbol(nextSym);
     if (ci) setIv(nextIv);
+    /* Twelve Data has no 1-second candles — landing on one of its
+       symbols while 1s is selected would just show an empty chart */
+    const nextSource = cs ? SYMBOLS.find((s) => s.id === nextSym)?.source : curSource;
+    const nextInterval = ci ? nextIv : interval;
+    if (nextSource === "TwelveData" && nextInterval === "1s") setIv("1m");
   };
 
   /* drawings */
@@ -501,6 +506,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const marketList = watchlist
     .map((id) => allMarkets.find((m) => m.symbol === id) || { symbol: id, price: null, chg: 0 })
     .filter((m) => SYMBOLS.some((s) => s.id === m.symbol));
+  const curSource = SYMBOLS.find((s) => s.id === symbol)?.source || "Binance";
+  /* Twelve Data has no 1-second candles — hide the option rather than
+     let it silently show an empty chart for these symbols */
+  const availIntervals = curSource === "TwelveData" ? INTERVALS.filter((i) => i.id !== "1s") : INTERVALS;
   const visibleDrawings = drawings.filter((d) => !d.market || d.market === symbol).length;
 
   return (
@@ -588,7 +597,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       {/* ================= timeframe strip ================= */}
       <div style={{ display: "flex", alignItems: "center", gap: 3, padding: "6px 14px",
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexWrap: "wrap", flexShrink: 0 }}>
-        {INTERVALS.map((i) => (
+        {availIntervals.map((i) => (
           <button key={i.id} className={"btn ghost " + (interval === i.id ? "on" : "")}
             style={{ padding: "5px 11px", fontSize: 12.5 }} disabled={!canControl}
             onClick={() => switchMarket(null, i.id)}>{i.label}</button>

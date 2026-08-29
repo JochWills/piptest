@@ -170,6 +170,54 @@ try {
   r = await call("/api/auth/login", { method: "POST", body: { email: "josh@piptest.com", password: "brand-new-pass-9" } });
   ok(r.status === 200, "the new password works");
 
+  console.log("\n=== market data (Twelve Data) ===");
+  process.env.TWELVE_DATA_API_KEY = "test-key";
+  const origFetch = global.fetch;
+  let twelveDataCalls = 0;
+  global.fetch = async (url, opts) => {
+    if (typeof url === "string" && url.includes("api.twelvedata.com")) {
+      twelveDataCalls++;
+      return {
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          values: [
+            { datetime: "2024-01-02 00:00:00", open: "1.1037", high: "1.1038", low: "1.1036", close: "1.10365" },
+            { datetime: "2024-01-02 01:00:00", open: "1.10365", high: "1.1040", low: "1.1035", close: "1.1039" },
+          ],
+        }),
+      };
+    }
+    return origFetch(url, opts);
+  };
+
+  r = await call("/api/market/twelvedata/symbols", { token: adminToken });
+  ok(r.status === 200 && r.body.symbols.EURUSD?.apiSymbol === "EUR/USD", "symbol table lists EUR/USD correctly");
+
+  r = await call("/api/market/twelvedata/candles?symbol=EURUSD&interval=1h&from=1&to=2");
+  ok(r.status === 401, "candles route requires auth");
+
+  r = await call("/api/market/twelvedata/candles?symbol=FAKE&interval=1h&from=1&to=2", { token: adminToken });
+  ok(r.status === 400 && r.body.error === "unknown_symbol", "unknown symbol rejected");
+
+  r = await call("/api/market/twelvedata/candles?symbol=EURUSD&interval=1h&from=100&to=50", { token: adminToken });
+  ok(r.status === 400 && r.body.error === "bad_range", "to <= from is rejected");
+
+  const from = Date.UTC(2024, 0, 2, 0), to = Date.UTC(2024, 0, 2, 2);
+  r = await call(`/api/market/twelvedata/candles?symbol=EURUSD&interval=1h&from=${from}&to=${to}`, { token: adminToken });
+  ok(r.status === 200 && r.body.candles.length === 2, "returns the mocked candles");
+  ok(r.body.candles[0].o === 1.1037 && r.body.candles[0].c === 1.10365, "candle values parsed correctly");
+  ok(r.body.candles[0].t < r.body.candles[1].t, "candles come back sorted ascending by time");
+
+  const callsAfterFirst = twelveDataCalls;
+  r = await call(`/api/market/twelvedata/candles?symbol=EURUSD&interval=1h&from=${from}&to=${to}`, { token: adminToken });
+  ok(twelveDataCalls === callsAfterFirst, "an identical request is served from cache, not fetched again");
+
+  r = await call(`/api/market/twelvedata/candles?symbol=EURUSD&interval=1s&from=${from}&to=${to}`, { token: adminToken });
+  ok(r.status === 200 && r.body.candles.length === 0, "an interval Twelve Data doesn't offer (1s) comes back empty, not an error");
+
+  global.fetch = origFetch;
+
   console.log("\n=== disabling a user ===");
   r = await call("/api/admin/users/" + userId, { method: "PATCH", token: adminToken, body: { status: "disabled" } });
   ok(r.status === 200 && r.body.user.status === "disabled", "admin can disable an account");

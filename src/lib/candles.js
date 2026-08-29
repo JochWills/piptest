@@ -1,29 +1,30 @@
 /* ============================================================
    candles.js — picks a feed by symbol, same shape either way
 
-   Simulator.jsx used to import loadWindow/fetchPaged/fetchTickers
-   straight from market.js (Binance only). Now that a second source
-   exists, it imports them from here instead: same function names and
-   return shapes, routed to Binance (browser-side, market.js) or
-   Dukascopy (through our own API, since Dukascopy can't be called
-   from the browser — see server/dukascopy.js) based on each symbol's
-   `source` in theme.js.
+   Simulator.jsx imports loadWindow/fetchPaged/fetchTickers from here
+   rather than straight from market.js (Binance only) now that a
+   second source exists: same function names and return shapes,
+   routed to Binance (browser-side, market.js) or Twelve Data
+   (through our own API — see server/twelvedata.js for why) based on
+   each symbol's `source` in theme.js.
 
-   Dukascopy's numbers are different in a way worth knowing before
-   touching this file:
-   · no live ticker — it's a historical archive, not a quote stream,
-     so fetchTickers simply never returns a Dukascopy row. Market
-     Watch already renders that as "—", the same as when Binance
-     itself is unreachable — nothing extra needed for that.
-   · a "page" of history costs real, rate-limited server time (each
-     hour of ticks is its own throttled fetch — see dukascopy.js), so
-     initial loads stay deliberately small and pages stay modest;
-     Simulator's existing loadOlder/forward-extend calls just take
-     longer to fill in on a cold range, not on a cached one.
-   · a weekend or holiday is a real gap, not a failure — fetchPaged
-     below widens its own search window a couple of times before
-     giving up, so scrolling back into Friday's close doesn't look
-     like "no more history" one gap short of Thursday's candles.
+   Twelve Data's free tier is generous enough per call (up to 5,000
+   candles) that this doesn't need the elaborate small-window/widen-
+   on-scroll dance the earlier Dukascopy attempt did — a normal
+   lookback fits in one request. The one thing that does need
+   handling here: these markets close. Forex is closed weekends;
+   the index ETFs (SPY/DIA/QQQ) are open barely six and a half hours
+   a day, US market hours only. So fetchPaged asks for a generously
+   wide calendar window relative to how many bars it actually wants,
+   widening further if the first attempt comes back empty — otherwise
+   landing a scroll-back request right on a Friday close could look
+   like "no more history" when Thursday's candles are right there.
+
+   No live ticker for Twelve Data symbols (Market Watch shows "—",
+   same fallback as when Binance itself is unreachable) — polling a
+   quote every 45s across a shared 8-requests/minute budget would
+   compete with the actual backtesting candle requests for a feature
+   that's a nice-to-have here, not the point.
    ============================================================ */
 
 import { SYMBOLS, barMsOf } from "../theme.js";
@@ -32,52 +33,51 @@ import * as binance from "./market.js";
 
 const sourceOf = (symbol) => SYMBOLS.find((s) => s.id === symbol)?.source || "Binance";
 
-const HOUR = 3600000;
-const INITIAL_HOURS = 12;   // first paint: fast, not "45 days of comparable history"
-const MIN_PAGE_HOURS = 24;  // floor for any one fetchPaged call
-const WIDEN_HOURS = [0, 72, 240]; // retry budget so a weekend gap isn't mistaken for "no more data"
+const FORWARD = 1000; // matches market.js's own forward buffer
+const WIDEN_MULT = [3, 10, 30]; // multiples of the naive span — cheap, each attempt is one call
 
-async function dukascopyRange(symbol, interval, fromMs, toMs) {
+async function twelveDataRange(symbol, interval, fromMs, toMs) {
   if (!API_ENABLED) return null;
   try {
-    const { candles } = await api.dukascopyCandles(symbol, interval, Math.floor(fromMs), Math.floor(toMs));
+    const { candles } = await api.twelveDataCandles(symbol, interval, Math.floor(fromMs), Math.floor(toMs));
     return candles && candles.length ? candles : null;
   } catch (e) { return null; }
 }
 
-async function dukascopyLoadWindow(symbol, interval, targetMs) {
-  const from = targetMs - INITIAL_HOURS * HOUR;
-  const to = targetMs + 2 * HOUR;
-  const bars = (await dukascopyRange(symbol, interval, from, to)) || [];
+async function twelveDataLoadWindow(symbol, interval, targetMs) {
+  const iv = barMsOf(interval);
+  const lb = binance.lookbackBars(interval);
+  const from = targetMs - lb * iv;
+  const to = targetMs + FORWARD * iv;
+  const bars = (await twelveDataRange(symbol, interval, from, to)) || [];
   return { bars, synthetic: !bars.length, shortFrom: null };
 }
 
-async function dukascopyFetchPaged(symbol, interval, startTime, wanted) {
+async function twelveDataFetchPaged(symbol, interval, startTime, wanted) {
   const iv = barMsOf(interval);
-  const baseHours = Math.max(MIN_PAGE_HOURS, Math.ceil((wanted * iv) / HOUR));
-  for (const extra of WIDEN_HOURS) {
-    const bars = await dukascopyRange(symbol, interval, startTime, startTime + (baseHours + extra) * HOUR);
+  for (const mult of WIDEN_MULT) {
+    const bars = await twelveDataRange(symbol, interval, startTime, startTime + wanted * iv * mult);
     if (bars) return bars;
   }
   return null;
 }
 
 export async function loadWindow(symbol, interval, targetMs) {
-  return sourceOf(symbol) === "Dukascopy"
-    ? dukascopyLoadWindow(symbol, interval, targetMs)
+  return sourceOf(symbol) === "TwelveData"
+    ? twelveDataLoadWindow(symbol, interval, targetMs)
     : binance.loadWindow(symbol, interval, targetMs);
 }
 
 export async function fetchPaged(symbol, interval, startTime, wanted, maxPages) {
-  return sourceOf(symbol) === "Dukascopy"
-    ? dukascopyFetchPaged(symbol, interval, startTime, wanted)
+  return sourceOf(symbol) === "TwelveData"
+    ? twelveDataFetchPaged(symbol, interval, startTime, wanted)
     : binance.fetchPaged(symbol, interval, startTime, wanted, maxPages);
 }
 
-/* Binance-only for now — Dukascopy rows just come back missing,
+/* Binance-only for now — a TwelveData row just comes back missing,
    which the caller already renders as "—". */
 export function fetchTickers(symbolIds) {
-  const binanceIds = symbolIds.filter((id) => sourceOf(id) !== "Dukascopy");
+  const binanceIds = symbolIds.filter((id) => sourceOf(id) !== "TwelveData");
   return binanceIds.length ? binance.fetchTickers(binanceIds) : Promise.resolve([]);
 }
 
