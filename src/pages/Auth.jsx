@@ -101,7 +101,7 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
           <div style={{ display: "grid", gap: 14 }}>
             {isSignup && (
               <Field label="Display name">
-                <input className="in" value={name} placeholder="Josh Williams" autoComplete="name"
+                <input className="in" value={name} placeholder="John Doe" autoComplete="name"
                   onChange={(e) => onName(e.target.value)} />
               </Field>
             )}
@@ -114,7 +114,7 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
 
             {isSignup && (
               <Field label="Handle" hint="How you appear to others in shared rooms.">
-                <input className="in" value={handle} placeholder="josh_pe" maxLength={18}
+                <input className="in" value={handle} placeholder="john_doe" maxLength={18}
                   autoComplete="username" onChange={(e) => setHandle(e.target.value)} />
               </Field>
             )}

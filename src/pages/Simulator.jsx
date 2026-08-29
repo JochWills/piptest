@@ -29,7 +29,7 @@ const TOOL_ICONS = {
 const PALETTE = ["brand", "up", "down", "muted"];
 const ZOOMS = [{ n: 60, l: "60" }, { n: 120, l: "120" }, { n: 250, l: "250" }, { n: 500, l: "500" }, { n: 0, l: "All" }];
 
-export default function Simulator({ meta, account, theme, T, tags, onExit, onSaveSession, onTradesClosed, onToggleTheme }) {
+export default function Simulator({ meta, account, theme, T, tags, onExit, onSaveSession, onTradesClosed, onToggleTheme, onNav, onSignOut, sessions = [], autoJoinCode, onAutoJoinDone }) {
   /* ---------- market ---------- */
   const [symbol, setSymbol] = useState(meta.symbol);
   const [interval, setIv] = useState(meta.interval);
@@ -80,6 +80,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [drawings, setDrawings] = useState([]);
   const [indicators, setIndicators] = useState({ volume: true, ema20: false, ema50: false, sma200: false });
   const [indOpen, setIndOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [logScale, setLog] = useState(false);
   const [zoom, setZoom] = useState(120);
   const undoRef = useRef([]), redoRef = useRef([]);
@@ -401,10 +403,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     chatSeenRef.current = 0; setChatUnread(0);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
   };
-  const joinRoom = async () => {
+  const joinRoom = async (codeArg) => {
     setRoomMsg("");
     if (!API_ENABLED) { setRoomMsg("Live rooms need the API."); return; }
-    const code = joinCode.trim().toUpperCase();
+    const code = (codeArg ?? joinCode).trim().toUpperCase();
     if (!code) { setRoomMsg("Enter a room code first."); return; }
     if (code.length !== 6) { setRoomMsg(`"${code}" is ${code.length} characters — codes are 6.`); return; }
     setRoomMsg("Looking for that room…");
@@ -417,6 +419,19 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     appliedRef.current = 0; chatSeenRef.current = doc.messages?.length || 0; setChatUnread(0);
     setRoom(doc); setRoomMsg(`Joined ${code} as viewer.`);
   };
+
+  /* the Dashboard's "Join room" button creates a throwaway session just to
+     land here in, then hands us the code it was for via this prop — this
+     runs that same join once on mount instead of making someone type the
+     code again right after they just typed it. onAutoJoinDone clears it on
+     the parent's end, so revisiting this session later never auto-rejoins. */
+  useEffect(() => {
+    if (!autoJoinCode) return;
+    setJoinCode(autoJoinCode);
+    setRoomOpen(true);
+    joinRoom(autoJoinCode);
+    onAutoJoinDone?.();
+  }, []); // eslint-disable-line
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
       const d = await data.roomGet(room.code);
@@ -486,7 +501,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   }, [canControl, bars.length, selected, drawings]); // eslint-disable-line
 
   useEffect(() => {
-    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setIndOpen(false); setRoomOpen(false); setChatOpen(false); } };
+    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setIndOpen(false); setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
   }, []);
@@ -536,12 +551,57 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           <span className="sm" style={{ color: saveState === "failed" ? "var(--down)" : "var(--dim)" }}>
             {saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : "Saved"}
           </span>
-          <div className="hide-sm" style={{ textAlign: "right" }}>
-            <div className="num" style={{ fontSize: 14, fontWeight: 600 }}>{fmtMoney(equity + unreal)}</div>
-            <div className="sm mut" style={{ fontSize: 11 }}>
-              {stats.count ? fmtR(stats.totalR) : "no trades"}
-            </div>
-          </div>
+          <span data-pop className="hide-sm" style={{ position: "relative" }}>
+            <button onClick={() => setSessionsOpen((o) => !o)} title="Switch session" aria-label="Switch session"
+              style={{ textAlign: "right", display: "flex", alignItems: "center", gap: 6,
+                background: "transparent", border: "1px solid transparent", borderRadius: 9,
+                padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface3)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}>
+              <span>
+                <div className="num" style={{ fontSize: 14, fontWeight: 600 }}>{fmtMoney(equity + unreal)}</div>
+                <div className="sm mut" style={{ fontSize: 11 }}>
+                  {stats.count ? fmtR(stats.totalR) : "no trades"}
+                </div>
+              </span>
+              <Svg s={13} style={{ color: "var(--muted)" }}>{Ic.chev}</Svg>
+            </button>
+
+            {sessionsOpen && (
+              <div className="card" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60,
+                width: 268, padding: 6, maxHeight: 380, overflowY: "auto" }}>
+                <div className="cap" style={{ padding: "8px 10px 6px" }}>
+                  Sessions — balance shown is this one
+                </div>
+                {sessions.length === 0 ? (
+                  <div className="sm mut" style={{ padding: "6px 10px 10px" }}>No saved sessions yet.</div>
+                ) : sessions.map((s) => {
+                  const isCurrent = s.id === meta.id;
+                  const sym = SYMBOLS.find((x) => x.id === s.symbol);
+                  const st = s.stats || {};
+                  return (
+                    <button key={s.id} className={"btn ghost " + (isCurrent ? "on" : "")}
+                      style={{ width: "100%", justifyContent: "space-between", padding: "8px 10px", textAlign: "left", gap: 8 }}
+                      onClick={() => { setSessionsOpen(false); if (!isCurrent) onNav?.("sim", s.id); }}>
+                      <span style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {s.name}
+                        </div>
+                        <div className="sm" style={{ fontSize: 11, opacity: isCurrent ? 0.85 : undefined,
+                          color: isCurrent ? "inherit" : "var(--muted)" }}>
+                          {sym?.label || s.symbol} · {INTERVALS.find((i) => i.id === s.interval)?.label}
+                        </div>
+                      </span>
+                      <span className="num sm" style={{ flexShrink: 0, fontWeight: 600,
+                        color: isCurrent ? "inherit" : !st.count ? "var(--dim)" : st.net > 0 ? "var(--up)" : st.net < 0 ? "var(--down)" : "var(--muted)" }}>
+                        {st.count ? fmtSigned(st.net) : "—"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </span>
           <span data-pop style={{ position: "relative" }}>
             <button className={"btn ghost " + (roomOpen ? "on" : "")}
               onClick={() => setRoomOpen((o) => { if (!o) setChatOpen(false); return !o; })}
@@ -575,9 +635,40 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           <button className="btn ghost" onClick={onToggleTheme} style={{ padding: "6px 9px" }} aria-label="Toggle theme">
             <Svg s={15}>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
           </button>
-          <button className={"btn " + (playing ? "" : "pri")} disabled={!canControl} onClick={() => setPlaying((p) => !p)}>
-            <Svg s={14}>{playing ? Ic.pause : Ic.play}</Svg>{playing ? "Pause" : "Replay"}
-          </button>
+          {/* the floating replay bar (bottom of the chart) already carries
+              its own play/pause, so this slot is free for the same account
+              menu the landing page header uses, rather than a redundant
+              second play/pause control */}
+          <span data-pop style={{ position: "relative" }}>
+            <button onClick={() => setProfileOpen((o) => !o)} aria-label="Account menu"
+              style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                background: "transparent", border: "1px solid var(--border)", borderRadius: 999,
+                padding: "4px 10px 4px 4px", fontFamily: "inherit", color: "var(--ink)" }}>
+              <Avatar value={account?.avatar} handle={account?.handle} size={26} />
+              <span className="sm hide-sm" style={{ fontWeight: 600, maxWidth: 110, overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account?.name || account?.handle}</span>
+              <Svg s={13} style={{ color: "var(--muted)" }}>{Ic.chev}</Svg>
+            </button>
+
+            {profileOpen && (
+              <div className="card" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60, width: 232, padding: 6 }}>
+                <div style={{ padding: "8px 10px 10px", borderBottom: "1px solid var(--border)", marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5 }}>{account?.name || account?.handle}</div>
+                  <div className="sm mut" style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {account?.email || "@" + account?.handle}
+                  </div>
+                </div>
+                {[["dashboard", "Dashboard"], ["journal", "Journal"],
+                  ["analytics", "Analytics"], ["settings", "Settings"]].map(([id, label]) => (
+                  <button key={id} className="btn ghost" style={{ width: "100%", justifyContent: "flex-start", padding: "8px 10px" }}
+                    onClick={() => { setProfileOpen(false); onNav?.(id); }}>{label}</button>
+                ))}
+                <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+                <button className="btn ghost" style={{ width: "100%", justifyContent: "flex-start", padding: "8px 10px", color: "var(--down)" }}
+                  onClick={() => { setProfileOpen(false); onSignOut?.(); }}>Sign out</button>
+              </div>
+            )}
+          </span>
         </div>
       </header>
 
@@ -667,7 +758,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         </aside>
 
         {/* ---- centre: chart ---- */}
-        <section style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+        <section style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
           <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
             {/* tool rail */}
             <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 5px",
@@ -739,12 +830,17 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               component so it can sit anywhere over the workspace */}
 
           {/* ---- blotter resize handle ----
-              zIndex above the floating replay bar (80) — that bar's position is
-              user-draggable and independent of this layout, so it can end up
-              sitting right on top of this strip; without this it silently eats
-              the drag (its <select> etc. intercept the mousedown instead). */}
+              zIndex below the floating replay bar (80) — the bar is
+              user-draggable and can end up sitting right over this strip,
+              and the bar must always be the one on top when that happens
+              (it's the thing being actively interacted with; this strip
+              is just part of the static layout underneath). That means
+              this strip's own mousedown gets silently blocked in whatever
+              small area the bar currently covers — move the bar first to
+              resize through that spot — which is the right tradeoff over
+              having this thin strip paint over the bar. */}
           <div onMouseDown={onBlotterResizeStart} title="Drag to resize"
-            style={{ height: 7, flexShrink: 0, cursor: "row-resize", position: "relative", zIndex: 90,
+            style={{ height: 7, flexShrink: 0, cursor: "row-resize", position: "relative", zIndex: 5,
               background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
             <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)",
               width: 36, height: 3, borderRadius: 2, background: "var(--border)" }} />
@@ -795,6 +891,62 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               )}
             </div>
           </div>
+
+          {/* ================= floating replay bar =================
+              Positioned (and clamped) relative to this section, not the
+              viewport — it's meant to float "over the chart", and a
+              viewport-relative position drifted onto the blotter/right
+              panel/resize handle depending on window size and whatever
+              spot was last saved. Confining it to this section's own box
+              means it can only ever end up over the chart/blotter, never
+              outside the workspace it's meant to sit in. */}
+          <FloatingBar
+            pos={barPos}
+            onPos={setBarPos}
+            collapsed={barCollapsed}
+            onToggleCollapse={() => setBarCollapsed((c) => !c)}
+            minWidth={560}
+            label="Replay"
+          >
+            <div style={{ padding: "6px 10px" }}>
+              {/* one row: transport, speed, scrubber, clock — keeps the bar shallow
+                  so it covers as little of the chart as possible */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
+                  style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
+                    background: playing ? "var(--up)" : "var(--dim)" }} />
+
+                <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+                  <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
+                    onClick={() => setCursor(0)} title="Back to the start"><Svg s={13}>{Ic.start}</Svg></button>
+                  <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
+                    onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (←)"><Svg s={13}>{Ic.back}</Svg></button>
+                  <button className="btn pri" style={{ padding: "4px 11px" }} disabled={!canControl}
+                    onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
+                    <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
+                  </button>
+                  <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
+                    onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
+                </div>
+
+                <select className="in" value={speed} disabled={!canControl}
+                  onChange={(e) => setSpeed(+e.target.value)}
+                  title="Replay speed"
+                  style={{ width: 66, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
+                  {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}&times;</option>)}
+                </select>
+
+                <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
+                  onChange={(e) => setCursor(+e.target.value)}
+                  title={`Bar ${cursor + 1} of ${bars.length}`}
+                  style={{ flex: 1, minWidth: 90, accentColor: T.brand, margin: 0 }} />
+
+                <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {cur ? fmtClock(cur.t, interval) : ""}
+                </span>
+              </div>
+            </div>
+          </FloatingBar>
         </section>
 
         {/* ---- right: order ticket ---- */}
@@ -906,55 +1058,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           </div>
         </aside>
       </div>
-
-      {/* ================= floating replay bar ================= */}
-      <FloatingBar
-        pos={barPos}
-        onPos={setBarPos}
-        collapsed={barCollapsed}
-        onToggleCollapse={() => setBarCollapsed((c) => !c)}
-        minWidth={560}
-        label="Replay"
-      >
-        <div style={{ padding: "6px 10px" }}>
-          {/* one row: transport, speed, scrubber, clock — keeps the bar shallow
-              so it covers as little of the chart as possible */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
-              style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
-                background: playing ? "var(--up)" : "var(--dim)" }} />
-
-            <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
-              <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                onClick={() => setCursor(0)} title="Back to the start"><Svg s={13}>{Ic.start}</Svg></button>
-              <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (←)"><Svg s={13}>{Ic.back}</Svg></button>
-              <button className="btn pri" style={{ padding: "4px 11px" }} disabled={!canControl}
-                onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
-                <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
-              </button>
-              <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
-            </div>
-
-            <select className="in" value={speed} disabled={!canControl}
-              onChange={(e) => setSpeed(+e.target.value)}
-              title="Replay speed"
-              style={{ width: 66, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
-              {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}&times;</option>)}
-            </select>
-
-            <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
-              onChange={(e) => setCursor(+e.target.value)}
-              title={`Bar ${cursor + 1} of ${bars.length}`}
-              style={{ flex: 1, minWidth: 90, accentColor: T.brand, margin: 0 }} />
-
-            <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
-              {cur ? fmtClock(cur.t, interval) : ""}
-            </span>
-          </div>
-        </div>
-      </FloatingBar>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
 

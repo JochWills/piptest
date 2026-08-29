@@ -27,12 +27,26 @@ export function Spark({ curve, h = 40, w = 240 }) {
   );
 }
 
-export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete, onNav }) {
+export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete, onNav, onJoinRoom }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     name: "", symbol: "BTCUSDT", interval: "30m",
     date: "2025-03-13", time: "10:00", challenge: "none", random: false,
   });
+
+  /* ---------- join room ----------
+     A "join a room" entry point that doesn't require already being inside
+     a simulator session first — previously the only way in was to open
+     (or create) a session of your own, then find the room panel there. */
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [joinErr, setJoinErr] = useState("");
+  const submitJoin = () => {
+    const code = joinCodeInput.trim().toUpperCase();
+    if (code.length !== 6) { setJoinErr(`Codes are 6 characters — "${code}" is ${code.length}.`); return; }
+    setJoinOpen(false); setJoinCodeInput(""); setJoinErr("");
+    onJoinRoom(code);
+  };
 
   const agg = useMemo(() => computeStats(trades), [trades]);
 
@@ -67,7 +81,10 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
         eyebrow="Overview"
         title="Dashboard"
         sub="Your saved replay sessions and how they add up."
-        actions={<button className="btn pri" onClick={() => setOpen(true)}><Svg s={14}>{Ic.plus}</Svg>New session</button>}
+        actions={<>
+          <button className="btn" onClick={() => setJoinOpen(true)}><Svg s={14}>{Ic.users}</Svg>Join room</button>
+          <button className="btn pri" onClick={() => setOpen(true)}><Svg s={14}>{Ic.plus}</Svg>New session</button>
+        </>}
       />
 
       {/* headline */}
@@ -222,6 +239,22 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
           <div style={{ display: "flex", gap: 9, marginTop: 4 }}>
             <button className="btn pri" onClick={create}>Create and open</button>
             <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={joinOpen} onClose={() => { setJoinOpen(false); setJoinErr(""); }} title="Join a room" width={380}>
+        <div style={{ display: "grid", gap: 14 }}>
+          <Field label="Room code" hint="Ask whoever's hosting for their 6-character code.">
+            <input className="in" value={joinCodeInput} maxLength={6} placeholder="ABC123"
+              style={{ textTransform: "uppercase", letterSpacing: 1 }} autoFocus
+              onChange={(e) => { setJoinCodeInput(e.target.value); setJoinErr(""); }}
+              onKeyDown={(e) => e.key === "Enter" && submitJoin()} />
+          </Field>
+          {joinErr && <p className="sm" style={{ color: "var(--down)" }}>{joinErr}</p>}
+          <div style={{ display: "flex", gap: 9 }}>
+            <button className="btn pri" onClick={submitJoin} disabled={!joinCodeInput.trim()}>Join</button>
+            <button className="btn" onClick={() => { setJoinOpen(false); setJoinErr(""); }}>Cancel</button>
           </div>
         </div>
       </Modal>

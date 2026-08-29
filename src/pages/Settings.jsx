@@ -280,12 +280,6 @@ function AvatarPicker({ open, account, onClose, onSave }) {
         </button>
         <button className="btn" onClick={onClose}>Cancel</button>
       </div>
-
-      <p className="sm mut" style={{ marginTop: 16, lineHeight: 1.6 }}>
-        Avatars are stored as a short code rather than an image, so they cost
-        almost nothing and load instantly. Emoji are drawn by your device, so
-        yours may look slightly different on someone else's screen.
-      </p>
     </Modal>
   );
 }

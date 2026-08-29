@@ -13,7 +13,7 @@ import Settings from "./pages/Settings.jsx";
 import { store, K } from "./lib/store.js";
 import { api, API_ENABLED, setToken, refresh, onAuthLost } from "./lib/api.js";
 import * as data from "./lib/data.js";
-import { fmtShort } from "./lib/trading.js";
+import { fmtShort, uid } from "./lib/trading.js";
 
 /* ============================================================
    App — routing, session and the state that spans pages
@@ -42,6 +42,7 @@ export default function App() {
   const [trades, setTrades] = useState([]);
   const [tags, setTags] = useState(DEFAULT_TAGS);
   const [importOffer, setImportOffer] = useState(null);
+  const [pendingJoin, setPendingJoin] = useState(null); // { id, code } — see joinRoomFromDashboard
 
   const T = THEMES[theme];
   const vars = useMemo(() => cssVars(T), [T]);
@@ -170,6 +171,23 @@ export default function App() {
     go("sim", s.id);
   };
 
+  /* ---------- join a room straight from the dashboard ----------
+     Rooms only ever synced onto whatever session was already open in the
+     simulator, so joining meant finding a session of your own first. This
+     spins up a disposable one (its symbol/interval are placeholders —
+     Simulator immediately overwrites them from the room the moment it
+     joins) purely to land somewhere, then tells that fresh Simulator
+     instance which code to auto-join via pendingJoin, keyed to its id so
+     a later, unrelated visit to this same session never re-triggers it. */
+  const joinRoomFromDashboard = async (code) => {
+    const id = uid();
+    setPendingJoin({ id, code });
+    await createSession({
+      id, name: `Room ${code}`, symbol: "BTCUSDT", interval: "30m",
+      startMs: Date.now() - 30 * 86400000, blind: false, challenge: null, createdAt: Date.now(),
+    });
+  };
+
   const deleteSession = async (id) => {
     const next = sessions.filter((s) => s.id !== id);
     setSessions(next);
@@ -295,6 +313,9 @@ export default function App() {
         key={meta.id} meta={meta} account={account} theme={theme} T={T} tags={tags}
         onExit={() => go("dashboard")} onSaveSession={patchSession}
         onTradesClosed={onTradesClosed} onToggleTheme={toggleTheme}
+        onNav={go} onSignOut={signOut} sessions={sessions}
+        autoJoinCode={pendingJoin?.id === meta.id ? pendingJoin.code : null}
+        onAutoJoinDone={() => setPendingJoin(null)}
       />
     );
   }
@@ -310,7 +331,8 @@ export default function App() {
     >
       {page === "dashboard" && (
         <Dashboard sessions={sessions} trades={trades} onNav={go}
-          onOpen={(id) => go("sim", id)} onCreate={createSession} onDelete={deleteSession} />
+          onOpen={(id) => go("sim", id)} onCreate={createSession} onDelete={deleteSession}
+          onJoinRoom={joinRoomFromDashboard} />
       )}
       {page === "journal" && (
         <Journal trades={trades} tags={tags} onUpdateTrade={updateTrade} onExport={exportCsv} />
