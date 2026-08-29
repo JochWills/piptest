@@ -54,6 +54,24 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [formErr, setFormErr] = useState("");
   const [notes, setNotes] = useState("");
   const [tab, setTab] = useState("trades");
+  const [blotterH, setBlotterH] = useState(216);
+  const blotterDrag = useRef(null);
+  const onBlotterResizeStart = useCallback((e) => {
+    blotterDrag.current = { startY: e.clientY, startH: blotterH };
+    const move = (ev) => {
+      const d = blotterDrag.current;
+      if (!d) return;
+      setBlotterH(Math.min(560, Math.max(80, d.startH - (ev.clientY - d.startY))));
+    };
+    const up = () => {
+      blotterDrag.current = null;
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+    e.preventDefault();
+  }, [blotterH]);
 
   /* ---------- chart tools ---------- */
   const [tool, setTool] = useState("cursor");
@@ -478,7 +496,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const visibleDrawings = drawings.filter((d) => !d.market || d.market === symbol).length;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* ================= top bar ================= */}
       <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", height: 56,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, flexWrap: "wrap" }}>
@@ -696,7 +714,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             </div>
 
             {/* chart */}
-            <div style={{ flex: 1, minWidth: 0, position: "relative", display: "flex", flexDirection: "column" }}>
+            <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
               <div className="num" style={{ position: "absolute", top: 8, left: 12, zIndex: 5,
                 pointerEvents: "none", fontSize: 12 }}>
                 <span style={{ fontWeight: 600 }}>
@@ -726,35 +744,32 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                   logScale={logScale} zoom={zoom} onNeedOlder={loadOlder}
                 />
               )}
-
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "6px 12px",
-                borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--dim)", flexWrap: "wrap" }}>
-                <span>
-                  {tool === "cursor"
-                    ? selected ? "Drag to move · handles to reshape · Delete to remove"
-                      : `${visibleDrawings} drawing${visibleDrawings === 1 ? "" : "s"} · press ? for shortcuts`
-                    : `${TOOLS.find((t) => t.id === tool)?.title} · drag on the chart · Esc to cancel`}
-                </span>
-                <span className="num">
-                  bar {cursor + 1} / {bars.length}
-                  {shortFrom && ` · no ${interval} data before ${fmtShort(shortFrom)}`}
-                  {!canControl && ` · view only, following ${room?.host}`}
-                </span>
-              </div>
             </div>
           </div>
 
           {/* the replay transport now floats — rendered near the end of this
               component so it can sit anywhere over the workspace */}
 
+          {/* ---- blotter resize handle ----
+              zIndex above the floating replay bar (80) — that bar's position is
+              user-draggable and independent of this layout, so it can end up
+              sitting right on top of this strip; without this it silently eats
+              the drag (its <select> etc. intercept the mousedown instead). */}
+          <div onMouseDown={onBlotterResizeStart} title="Drag to resize"
+            style={{ height: 7, flexShrink: 0, cursor: "row-resize", position: "relative", zIndex: 90,
+              background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
+            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)",
+              width: 36, height: 3, borderRadius: 2, background: "var(--border)" }} />
+          </div>
+
           {/* ---- blotter ---- */}
-          <div style={{ borderTop: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0 }}>
+          <div style={{ background: "var(--surface)", flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 2, padding: "0 14px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
               {[["trades", `Trades (${trades.length})`], ["orders", "Orders"], ["positions", "Positions"], ["notes", "Notes"]].map(([id, l]) => (
                 <button key={id} className={"tab " + (tab === id ? "on" : "")} onClick={() => setTab(id)}>{l}</button>
               ))}
             </div>
-            <div className="scroll" style={{ maxHeight: 216, overflowY: "auto" }}>
+            <div className="scroll" style={{ height: blotterH, overflowY: "auto" }}>
               {tab === "trades" && (trades.length === 0
                 ? <Empty title="No closed trades yet" body="Arm a setup on the right, then advance the replay." />
                 : (

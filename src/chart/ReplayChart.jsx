@@ -150,7 +150,7 @@ export default function ReplayChart({
     const ser = chart.addCandlestickSeries ? chart.addCandlestickSeries(o) : chart.addSeries(LC.CandlestickSeries, o);
     chartRef.current = chart; serRef.current = ser; lastRef.current = { key: "", cursor: -1 };
 
-    const ro = new ResizeObserver(() => { if (boxRef.current) { chart.applyOptions({ width: boxRef.current.clientWidth }); sizeOv(); } });
+    const ro = new ResizeObserver(() => { if (boxRef.current) { chart.applyOptions({ width: boxRef.current.clientWidth, height: boxRef.current.clientHeight }); sizeOv(); } });
     ro.observe(boxRef.current); sizeOv();
 
     let raf = 0;
@@ -479,9 +479,9 @@ export default function ReplayChart({
       window.removeEventListener("mouseup", up, true); box.removeEventListener("mouseleave", leave); };
   }, [lwc, paint]);
 
-  if (lwc === "loading") return <div style={{ height, display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 13 }}>Loading chart engine…</div>;
+  if (lwc === "loading") return <div style={{ flex: 1, minHeight: height, display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 13 }}>Loading chart engine…</div>;
   if (lwc === "failed") return (
-    <div style={{ height, display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
+    <div style={{ flex: 1, minHeight: height, display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
       <div>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Chart engine didn't load</div>
         <div className="sm mut" style={{ maxWidth: 360, lineHeight: 1.6 }}>
@@ -492,7 +492,7 @@ export default function ReplayChart({
   );
 
   return (
-    <div style={{ position: "relative", height, width: "100%" }}>
+    <div style={{ position: "relative", flex: 1, minHeight: 0, width: "100%" }}>
       <div ref={boxRef} style={{ width: "100%", height: "100%" }} />
       <canvas ref={ovRef} style={{ position: "absolute", inset: 0, pointerEvents: "none" }} />
     </div>
