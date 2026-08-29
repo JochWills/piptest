@@ -68,28 +68,34 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         backdropFilter: "blur(10px)", borderBottom: "1px solid var(--border)",
       }}>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 20px", height: 64,
-          display: "flex", alignItems: "center", gap: 22 }}>
-          <Logo size={30} />
-          <nav style={{ display: "flex", gap: 20, marginLeft: 16 }} className="hide-sm">
-            <NavLink to="features">Features</NavLink>
-            <NavLink to="how">How it works</NavLink>
-            <NavLink to="faq">FAQ</NavLink>
-          </nav>
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 22, minWidth: 0 }}>
+            <Logo size={30} />
+            <nav style={{ display: "flex", gap: 20 }} className="hide-sm">
+              <NavLink to="features">Features</NavLink>
+              <NavLink to="how">How it works</NavLink>
+              <NavLink to="faq">FAQ</NavLink>
+            </nav>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button className="btn ghost" onClick={onToggleTheme} aria-label="Toggle theme" style={{ padding: "6px 9px" }}>
               <Svg>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
             </button>
 
             {account ? (
               <>
-                <button className="btn pri" onClick={() => onNav("dashboard")}>Open PipTest</button>
+                {/* redundant with "Dashboard" at the top of the account
+                    menu right next to it, so it's the one to drop for
+                    space on mobile rather than shrinking the wordmark or
+                    wrapping the row */}
+                <button className="btn pri hide-sm" onClick={() => onNav("dashboard")}>Open PipTest</button>
                 <span data-menu style={{ position: "relative" }}>
                   <button onClick={() => setMenu((m) => !m)} aria-label="Account menu"
                     style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                       background: "transparent", border: "1px solid var(--border)", borderRadius: 999,
                       padding: "4px 10px 4px 4px", fontFamily: "inherit", color: "var(--ink)" }}>
                     <Avatar value={account.avatar} handle={account.handle} size={26} />
-                    <span className="sm" style={{ fontWeight: 600, maxWidth: 110, overflow: "hidden",
+                    <span className="sm hide-sm" style={{ fontWeight: 600, maxWidth: 110, overflow: "hidden",
                       textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{account.name || account.handle}</span>
                     <Svg s={13} style={{ color: "var(--muted)" }}>{Ic.chev}</Svg>
                   </button>

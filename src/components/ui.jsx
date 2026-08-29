@@ -138,6 +138,17 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
   gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .pagehead-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* shared utility — hide something below the mobile breakpoint. Defined
+   here (global CSS, injected on every page) rather than inside whichever
+   page happens to declare it locally: a page-local <style> tag is still
+   a real, global <style> element once mounted (React doesn't scope it),
+   so a rule defined only inside Simulator.jsx's own <style> block did
+   nothing at all on any other page — it simply wasn't in the document
+   while that page was showing. */
+@media (max-width: 900px) {
+  .hide-sm { display: none !important; }
+}
+
 @media (max-width: 860px) {
   .shell { flex-direction: column; }
 

@@ -521,9 +521,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const visibleDrawings = drawings.filter((d) => !d.market || d.market === symbol).length;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div className="sim-page" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* ================= top bar ================= */}
-      <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", height: 56,
+      <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", minHeight: 56,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, flexWrap: "wrap" }}>
         {/* the logo doubles as the way out — labelled, because an icon
             alone left people with no obvious route back */}
@@ -538,7 +538,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
               <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Dashboard
+            <span className="hide-sm">Dashboard</span>
           </span>
         </button>
         <div className="vsep" style={{ height: 24 }} />
@@ -710,9 +710,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             </div>
           )}
         </span>
-        <button className="btn ghost" style={{ padding: "6px 8px" }} onClick={undo} disabled={!canControl} aria-label="Undo"><Svg s={15}>{Ic.undo}</Svg></button>
-        <button className="btn ghost" style={{ padding: "6px 8px" }} onClick={redo} disabled={!canControl} aria-label="Redo"><Svg s={15}>{Ic.redo}</Svg></button>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 3, alignItems: "center" }}>
+        <button className="btn ghost hide-sm" style={{ padding: "6px 8px" }} onClick={undo} disabled={!canControl} aria-label="Undo"><Svg s={15}>{Ic.undo}</Svg></button>
+        <button className="btn ghost hide-sm" style={{ padding: "6px 8px" }} onClick={redo} disabled={!canControl} aria-label="Redo"><Svg s={15}>{Ic.redo}</Svg></button>
+        <div className="hide-sm" style={{ marginLeft: "auto", display: "flex", gap: 3, alignItems: "center" }}>
           {ZOOMS.map((z) => (
             <button key={z.l} className={"btn ghost " + (zoom === z.n ? "on" : "")} style={{ padding: "5px 10px", fontSize: 12.5 }}
               onClick={() => setZoom(z.n)}>{z.l}</button>
@@ -767,10 +767,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         </aside>
 
         {/* ---- centre: chart ---- */}
-        <section style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
-          <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-            {/* tool rail */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 5px",
+        <section className="sim-chart-section" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
+          <div className="sim-chartrow" style={{ display: "flex", flex: 1, minHeight: 0 }}>
+            {/* tool rail — mouse-only (no touch handling on the chart's
+                drawing tools), so it's hidden on mobile rather than shown
+                for a feature that doesn't actually work there */}
+            <div className="hide-sm" style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 5px",
               borderRight: "1px solid var(--border)", background: "var(--surface)" }}>
               {TOOLS.map((t) => (
                 <button key={t.id} title={`${t.title}  (${t.key})`} aria-label={t.title}
@@ -848,7 +850,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               small area the bar currently covers — move the bar first to
               resize through that spot — which is the right tradeoff over
               having this thin strip paint over the bar. */}
-          <div onMouseDown={onBlotterResizeStart} title="Drag to resize"
+          <div className="hide-sm" onMouseDown={onBlotterResizeStart} title="Drag to resize"
             style={{ height: 7, flexShrink: 0, cursor: "row-resize", position: "relative", zIndex: 5,
               background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
             <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)",
@@ -1077,9 +1079,25 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           .sim-left { display: none !important; }
         }
         @media (max-width: 900px) {
-          .sim-main { grid-template-columns: 1fr !important; }
+          /* The desktop layout is a fixed 100vh window where the chart and
+             order-ticket sit side by side, each scrolling internally —
+             that's the right model with room to spare, but collapsing it
+             to one column via grid-template-columns alone (the old rule
+             here) doesn't turn it into a stack: .sim-main and the chart
+             section still tried to *fill* that same fixed height, so a
+             phone-width chart, blotter and order ticket all got crushed
+             into one short box and drawn on top of each other instead of
+             stacking. Mobile gets a genuinely different model instead: the
+             whole page scrolls normally, the chart gets one deliberate
+             viewport-relative height, and the blotter/order-ticket flow
+             below it at their natural height like any other web page. */
+          .sim-page { height: auto !important; min-height: 100vh; overflow: visible !important; }
+          .sim-main { grid-template-columns: 1fr !important; flex: none !important; min-height: 0 !important; }
           .sim-right { border-left: none !important; border-top: 1px solid var(--border); }
-          .hide-sm { display: none !important; }
+          .sim-chart-section { display: block !important; }
+          .sim-chartrow { height: 50vh !important; flex: none !important; }
+          /* .hide-sm itself is defined globally in ui.jsx now — every
+             page's markup can rely on it, not just this one */
         }
       `}</style>
     </div>
