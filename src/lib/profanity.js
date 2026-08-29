@@ -13,14 +13,27 @@
    at a word boundary, so "classic", "scunthorpe" and "assassin"
    are untouched.
 
-   Common inflections (fucking, shitty, retarded, …) are listed out
-   explicitly rather than bolted on with a generic suffix, because a
-   generic "+er/+ing" rule turns short nouns into real words —
-   "dick" + er = "dicker", "cock" + er = "cocker" (spaniel).
+   Common inflections and misspellings (fucking, fucken, fuk, shitty,
+   retarded, …) are listed out explicitly rather than bolted on with
+   a generic suffix or fuzzy match, because a generic "+er/+ing" rule
+   turns short nouns into real words — "dick" + er = "dicker", "cock"
+   + er = "cocker" (spaniel) — and a generic edit-distance match does
+   the same to short common words at a distance of one typo.
+
+   The slur section blocks actual slur *terms*, not the neutral
+   demographic words (a religion, ethnicity, orientation) they get
+   aimed at — "jew", "black", "gay" etc. are never on this list, on
+   purpose: those are how people identify themselves, and blocking
+   the word itself censors legitimate use far more often than it
+   catches an insult built from it, without even reliably catching
+   the insult (it's the surrounding language that's hateful, not the
+   demographic word). A word that has no other use but the slur is
+   fair game; a word that doubles as someone's own name for
+   themselves is not.
    ============================================================ */
 
 const WORDS = [
-  "fuck", "fucking", "fucked", "fucker", "fuckers", "motherfucker",
+  "fuck", "fucking", "fucked", "fucker", "fuckers", "fucken", "fuckin", "fuk", "motherfucker",
   "shit", "shitty", "shitting", "bullshit",
   "bitch", "bitchy", "bitches",
   "asshole", "assholes",
@@ -32,10 +45,12 @@ const WORDS = [
   "pussy", "pussies",
   "slut", "sluts",
   "whore", "whores",
-  "faggot", "faggots",
-  "retard", "retarded",
-  "nigger", "niggers",
-  "nigga", "niggas",
+  "poes",
+  /* slurs — ethnic/racial/religious/orientation/disability */
+  "nigger", "niggers", "nigga", "niggas", "negro", "negroes", "coon", "coons",
+  "chink", "gook", "spic", "spick", "wetback", "beaner", "kike", "raghead", "towelhead", "paki",
+  "faggot", "faggots", "fag", "fags", "dyke", "dykes", "tranny", "trannies",
+  "retard", "retarded", "spastic", "mongoloid",
 ];
 
 /* letter -> the characters people swap in for it, so "f4ck" and
