@@ -181,11 +181,34 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => { alive = false; };
   }, [symbol, interval, meta.startMs]);
 
+  /* two separate polls, not one: Binance is fast and free, so crypto
+     stays snappy at 45s. Twelve Data quotes share a tight, disclosed
+     daily budget with actual candle-loading, so those poll far less
+     often and only for symbols actually on this watchlist — not the
+     full catalog — see lib/candles.js and server/twelvedata.js. */
+  const mergeTickers = (prev, next) => {
+    const m = new Map(prev.map((t) => [t.symbol, t]));
+    next.forEach((t) => m.set(t.symbol, t));
+    return [...m.values()];
+  };
   useEffect(() => {
-    (async () => { const t = await fetchTickers(SYMBOLS.map((s) => s.id)); if (t) setTickers(t); })();
-    const id = setInterval(async () => { const t = await fetchTickers(SYMBOLS.map((s) => s.id)); if (t) setTickers(t); }, 45000);
-    return () => clearInterval(id);
+    const ids = SYMBOLS.filter((s) => s.source !== "TwelveData").map((s) => s.id);
+    let alive = true;
+    const poll = async () => { const t = await fetchTickers(ids); if (alive && t) setTickers((p) => mergeTickers(p, t)); };
+    poll();
+    const id = setInterval(poll, 45000);
+    return () => { alive = false; clearInterval(id); };
   }, []);
+
+  useEffect(() => {
+    const ids = watchlist.filter((wid) => SYMBOLS.find((s) => s.id === wid)?.source === "TwelveData");
+    if (!ids.length) return;
+    let alive = true;
+    const poll = async () => { const t = await fetchTickers(ids); if (alive && t) setTickers((p) => mergeTickers(p, t)); };
+    poll();
+    const id = setInterval(poll, 150000); // 2.5min — see the budget reasoning above
+    return () => { alive = false; clearInterval(id); };
+  }, [watchlist]);
 
   /* extend forwards */
   useEffect(() => {

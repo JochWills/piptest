@@ -20,11 +20,14 @@
    landing a scroll-back request right on a Friday close could look
    like "no more history" when Thursday's candles are right there.
 
-   No live ticker for Twelve Data symbols (Market Watch shows "—",
-   same fallback as when Binance itself is unreachable) — polling a
-   quote every 45s across a shared 8-requests/minute budget would
-   compete with the actual backtesting candle requests for a feature
-   that's a nice-to-have here, not the point.
+   Live quotes for Twelve Data symbols exist, but deliberately don't
+   piggyback on Binance's 45s ticker poll — confirmed a quote batch
+   costs one credit PER SYMBOL requested, so polling all of them that
+   often would burn most of the shared daily budget on a nice-to-have,
+   competing with the actual backtesting candle requests. Simulator.jsx
+   polls these on their own, longer cadence, and only for symbols on
+   the current watchlist — see server/twelvedata.js's quote cache for
+   the rest of the reasoning.
    ============================================================ */
 
 import { SYMBOLS, barMsOf } from "../theme.js";
@@ -74,11 +77,22 @@ export async function fetchPaged(symbol, interval, startTime, wanted, maxPages) 
     : binance.fetchPaged(symbol, interval, startTime, wanted, maxPages);
 }
 
-/* Binance-only for now — a TwelveData row just comes back missing,
-   which the caller already renders as "—". */
-export function fetchTickers(symbolIds) {
+async function twelveDataQuotes(symbolIds) {
+  if (!API_ENABLED || !symbolIds.length) return [];
+  try {
+    const { quotes } = await api.twelveDataQuotes(symbolIds.join(","));
+    return Object.entries(quotes || {}).map(([symbol, q]) => ({ symbol, price: q.price, chg: q.chg }));
+  } catch (e) { return []; }
+}
+
+export async function fetchTickers(symbolIds) {
   const binanceIds = symbolIds.filter((id) => sourceOf(id) !== "TwelveData");
-  return binanceIds.length ? binance.fetchTickers(binanceIds) : Promise.resolve([]);
+  const tdIds = symbolIds.filter((id) => sourceOf(id) === "TwelveData");
+  const [b, t] = await Promise.all([
+    binanceIds.length ? binance.fetchTickers(binanceIds) : Promise.resolve([]),
+    twelveDataQuotes(tdIds),
+  ]);
+  return [...(b || []), ...(t || [])];
 }
 
 export const syntheticKlines = binance.syntheticKlines;

@@ -119,3 +119,54 @@ export async function loadTwelveDataCandles(symbol, interval, fromMs, toMs) {
   cache.set(key, candles);
   return candles;
 }
+
+/* ---------- live quotes ----------
+   Unlike candles, a quote goes stale immediately — so this is a
+   short-TTL cache instead of a permanent one, and deliberately
+   conservative: confirmed directly that /quote costs one credit
+   PER SYMBOL requested, not one per call (a batch of 10 costs 10).
+   Refreshing all 10 symbols continuously even every few minutes
+   would eat most of the 800/day budget on its own, competing with
+   the actual backtesting candle requests that are the point of this
+   app — so this only ever fetches symbols something actually asked
+   for (a user's watchlist, not the full catalog), and caches each
+   one for several minutes so concurrent users asking for the same
+   symbol share one fetch rather than multiplying the cost. */
+const QUOTE_TTL_MS = 5 * 60 * 1000;
+const quoteCache = new Map(); // symbol -> { price, chg, fetchedAt }
+
+export async function loadTwelveDataQuotes(symbols) {
+  const now = Date.now();
+  const known = symbols.filter((s) => TWELVE_DATA_SYMBOLS[s]);
+  const stale = known.filter((s) => !quoteCache.has(s) || now - quoteCache.get(s).fetchedAt > QUOTE_TTL_MS);
+
+  if (stale.length) {
+    const apiKey = process.env.TWELVE_DATA_API_KEY;
+    if (apiKey) {
+      try {
+        const apiSymbols = stale.map((s) => TWELVE_DATA_SYMBOLS[s].apiSymbol);
+        const result = await enqueue(async () => {
+          const url = `${BASE}/quote?symbol=${encodeURIComponent(apiSymbols.join(","))}&apikey=${apiKey}`;
+          const r = await fetch(url);
+          return r.json();
+        });
+        /* Twelve Data returns the quote object directly for one symbol,
+           but keyed-by-symbol for a batch — normalise to the latter */
+        const bySymbol = result && result.symbol ? { [result.symbol]: result } : result;
+        for (const s of stale) {
+          const q = bySymbol?.[TWELVE_DATA_SYMBOLS[s].apiSymbol];
+          if (q && q.close != null) {
+            quoteCache.set(s, { price: +q.close, chg: +(q.percent_change || 0), fetchedAt: now });
+          }
+        }
+      } catch (e) { /* leave these symbols out of the response below */ }
+    }
+  }
+
+  const out = {};
+  for (const s of known) {
+    const c = quoteCache.get(s);
+    if (c) out[s] = { price: c.price, chg: c.chg };
+  }
+  return out;
+}
