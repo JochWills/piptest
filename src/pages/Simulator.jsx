@@ -13,6 +13,7 @@ import {
 } from "../lib/trading.js";
 import { store, K } from "../lib/store.js";
 import * as data from "../lib/data.js";
+import { censor } from "../lib/profanity.js";
 import { API_ENABLED } from "../lib/api.js";
 
 const TOOL_ICONS = {
@@ -449,7 +450,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     try {
       const d = (await data.roomGet(room.code)) || room;
       const msg = { id: uid(), from: account.handle, avatar: account.avatar || null,
-        text: text.slice(0, 500), ts: Date.now() };
+        text: censor(text.slice(0, 500)), ts: Date.now() };
       d.messages = [...(d.messages || []), msg].slice(-200);
       d.updatedBy = account.handle; d.updatedAt = Date.now();
       await data.roomPut(room.code, d);
@@ -1163,7 +1164,7 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
                 <span style={{ padding: "7px 10px", borderRadius: 12, fontSize: 13, lineHeight: 1.4,
                   wordBreak: "break-word", background: mine ? "var(--brand)" : "var(--surface3)",
                   color: mine ? "var(--brandInk)" : "var(--ink)" }}>
-                  {m.text}
+                  {censor(m.text)}
                 </span>
               </div>
             </div>
