@@ -103,7 +103,14 @@ export default function FloatingBar({
       onMouseDown={(e) => e.stopPropagation()}
       style={{
         position: "absolute", left: pos.x, top: pos.y, zIndex: 80,
-        minWidth: collapsed ? 0 : minWidth,
+        /* width, not just minWidth: on a phone-width container this is
+           the difference between the bar shrinking to fit and it just
+           rendering at its full desktop width regardless, hanging off
+           the right edge of the screen. maxWidth caps it to whatever the
+           container actually has room for; the transport row's own
+           flex-shrink (the scrubber especially) absorbs the squeeze. */
+        width: collapsed ? "auto" : minWidth,
+        maxWidth: "calc(100% - 16px)",
         background: "var(--surface)",
         border: "1px solid var(--borderStrong)",
         borderRadius: 12,

@@ -920,9 +920,15 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             label="Replay"
           >
             <div style={{ padding: "6px 10px" }}>
-              {/* one row: transport, speed, scrubber, clock — keeps the bar shallow
-                  so it covers as little of the chart as possible */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* one row on desktop — transport, speed, scrubber, clock —
+                  keeps the bar shallow so it covers as little of the chart
+                  as possible. The bar itself is now capped to its
+                  container's width (see FloatingBar), which on a phone is
+                  narrower than this content's natural width; flex-wrap
+                  here means that spills onto a second line inside the
+                  bar's own rounded card instead of past its edge and off
+                  the side of the screen. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 4 }}>
                 <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
                   style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
                     background: playing ? "var(--up)" : "var(--dim)" }} />
