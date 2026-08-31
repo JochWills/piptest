@@ -120,7 +120,7 @@ export default function Settings({ account, onSaveAccount, onChangePassword, tag
         <Card style={{ padding: 20 }}>
           <h3 style={{ fontSize: 16, marginBottom: 4 }}>Usage</h3>
           <p className="sm mut" style={{ marginBottom: 16, lineHeight: 1.6 }}>
-            PipTest is free while it's in early access — everything is unlocked.
+            PipTest is completely free — everything is unlocked.
           </p>
           <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
             {[["Sessions", sessions.length], ["Trades logged", trades.length], ["Setup tags", tags.length]].map(([l, v]) => (

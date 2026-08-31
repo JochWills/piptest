@@ -86,7 +86,7 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
           <h2 style={{ fontSize: 22, marginBottom: 6 }}>{isSignup ? "Create your account" : "Welcome back"}</h2>
           <p className="sm mut" style={{ marginBottom: 22, lineHeight: 1.6 }}>
             {isSignup
-              ? "Free while PipTest is in early access. Your sessions follow you to any device."
+              ? "Completely free, always. Your sessions follow you to any device."
               : "Sign in to pick up where you left off."}
           </p>
 

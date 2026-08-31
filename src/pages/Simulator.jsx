@@ -613,7 +613,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           </span>
           <span data-pop style={{ position: "relative" }}>
             <button className={"btn ghost " + (roomOpen ? "on" : "")}
-              onClick={() => setRoomOpen((o) => { if (!o) setChatOpen(false); return !o; })}
+              onClick={() => setRoomOpen((o) => { if (!o) { setChatOpen(false); setProfileOpen(false); } return !o; })}
               title="Live room" aria-label="Live room" style={{ padding: "6px 9px" }}>
               <Svg s={15}>{Ic.users}</Svg>
             </button>
@@ -622,7 +622,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           {room && (
             <span data-pop style={{ position: "relative" }}>
               <button className={"btn ghost " + (chatOpen ? "on" : "")}
-                onClick={() => setChatOpen((o) => { if (!o) setRoomOpen(false); return !o; })}
+                onClick={() => setChatOpen((o) => { if (!o) { setRoomOpen(false); setProfileOpen(false); } return !o; })}
                 title="Room chat" aria-label="Room chat" style={{ padding: "6px 9px", position: "relative" }}>
                 <Svg s={15}>{Ic.chat}</Svg>
                 {chatUnread > 0 && !chatOpen && (
@@ -649,7 +649,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               menu the landing page header uses, rather than a redundant
               second play/pause control */}
           <span data-pop style={{ position: "relative" }}>
-            <button onClick={() => setProfileOpen((o) => !o)} aria-label="Account menu"
+            <button onClick={() => setProfileOpen((o) => { if (!o) { setRoomOpen(false); setChatOpen(false); } return !o; })} aria-label="Account menu"
               style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
                 background: "transparent", border: "1px solid var(--border)", borderRadius: 999,
                 padding: "4px 10px 4px 4px", fontFamily: "inherit", color: "var(--ink)" }}>

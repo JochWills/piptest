@@ -25,7 +25,7 @@ DOWN    = (239, 68, 68)
 BORDER  = (35, 41, 53)
 LOGO_BLUE = (19, 112, 253)
 
-FONT_DIR = "/usr/share/fonts/truetype/google-fonts"
+FONT_DIR = os.environ.get("OG_FONT_DIR", "/usr/share/fonts/truetype/google-fonts")
 def font(name, size):
     return ImageFont.truetype(f"{FONT_DIR}/Poppins-{name}.ttf", size * S)
 
@@ -139,7 +139,7 @@ def build(width, height, square=False):
     hsize = 58 if not square else 50
     head = font("Bold", hsize)
     y = pad + int(118 * S)
-    for line in ["Get a year of screen time", "into a weekend."]:
+    for line in ["Replay the markets.", "Together. Completely Free."]:
         d.text((pad, y), line, font=head, fill=INK)
         y += int(hsize * 1.24 * S)
 
