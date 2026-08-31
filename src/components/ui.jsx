@@ -198,7 +198,27 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
 .live { animation: pulse 1.8s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .fade-in, .live { animation: none; } }
+
+/* spinner — a small inline "this bit is still loading" mark, not a
+   page-covering overlay. Use inside whatever element is waiting on data. */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--border); border-top-color: var(--brand);
+  animation: spin .7s linear infinite;
+}
+
+/* skeleton — a shimmering placeholder standing in for a value/row that
+   hasn't arrived yet, so the layout it belongs to renders immediately
+   instead of waiting on data before showing anything at all. */
+@keyframes shine { 0% { background-position: 160% 0; } 100% { background-position: -60% 0; } }
+.skel {
+  display: inline-block; border-radius: 6px; color: transparent !important;
+  background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+  background-size: 250% 100%; animation: shine 1.3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) { .fade-in, .live, .spinner, .skel { animation: none; } }
 
 @media (max-width: 720px) { h1 { font-size: 32px; } h2 { font-size: 24px; } }
 `;
@@ -215,14 +235,18 @@ export const Field = ({ label, hint, children }) => (
   </label>
 );
 
-export const Stat = ({ label, value, sub, tone }) => (
+export const Stat = ({ label, value, sub, tone, loading }) => (
   <div className="stat">
     <div className="cap" style={{ marginBottom: 5 }}>{label}</div>
-    <div className="num" style={{
-      fontSize: 19, fontWeight: 600,
-      color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)",
-    }}>{value}</div>
-    {sub && <div className="sm mut" style={{ marginTop: 3 }}>{sub}</div>}
+    {loading ? (
+      <span className="skel" style={{ width: 46, height: 19 }} />
+    ) : (
+      <div className="num" style={{
+        fontSize: 19, fontWeight: 600,
+        color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)",
+      }}>{value}</div>
+    )}
+    {sub && !loading && <div className="sm mut" style={{ marginTop: 3 }}>{sub}</div>}
   </div>
 );
 
@@ -233,6 +257,27 @@ export const Empty = ({ title, body, action }) => (
     {action}
   </div>
 );
+
+/* Small "still loading" pill in the corner of the screen — not a
+   page-covering overlay. The app underneath renders straight away (each
+   page shows its own per-section loading state), and this just tells you
+   there's still an account/session fetch in flight. Disappears the moment
+   it resolves. */
+export function CornerLoader({ show, label = "Loading" }) {
+  if (!show) return null;
+  return (
+    <div className="fade-in" style={{
+      position: "fixed", right: 16, bottom: 16, zIndex: 300,
+      display: "flex", alignItems: "center", gap: 8,
+      background: "var(--surface)", border: "1px solid var(--border)",
+      borderRadius: 999, padding: "8px 14px", boxShadow: "0 8px 26px rgba(0,0,0,.28)",
+      fontSize: 12.5, color: "var(--muted)", fontWeight: 500, pointerEvents: "none",
+    }}>
+      <span className="spinner" />
+      {label}…
+    </div>
+  );
+}
 
 export function Modal({ open, onClose, title, children, width = 520 }) {
   if (!open) return null;

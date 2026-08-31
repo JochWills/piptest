@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { THEMES, cssVars, DEFAULT_TAGS } from "./theme.js";
-import { GLOBAL_CSS, Modal } from "./components/ui.jsx";
+import { GLOBAL_CSS, Modal, CornerLoader } from "./components/ui.jsx";
 import Shell from "./components/Shell.jsx";
 import Landing from "./pages/Landing.jsx";
 import Auth from "./pages/Auth.jsx";
@@ -279,15 +279,15 @@ export default function App() {
     go("");
   };
 
-  /* ---------- render ---------- */
-  if (!booted) {
-    return (
-      <div className="pt" data-theme={theme} style={vars}><style>{GLOBAL_CSS}</style>
-        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--dim)" }}>Loading…</div>
-      </div>
-    );
-  }
-
+  /* ---------- render ----------
+     No full-screen "Loading…" gate: the very first render already has
+     real (empty) state — theme defaults, account null, sessions/trades
+     [] — so the actual page renders immediately and each data-dependent
+     bit of it shows its own loading state (see Dashboard's `loading`
+     prop, Landing's `booting` prop) rather than the whole app waiting
+     behind a blank screen. The only thing marking that boot (the
+     silent-refresh + initial fetch) is still in flight is the small
+     corner pill below, which just disappears once it resolves. */
   const wrap = (children) => (
     <div className="pt" data-theme={theme} style={vars}>
       <style>{GLOBAL_CSS}</style>
@@ -299,6 +299,7 @@ export default function App() {
         setImportOffer(null);
         alert(`Brought across ${r.sessions} session${r.sessions === 1 ? "" : "s"} and ${r.trades} trade${r.trades === 1 ? "" : "s"}.`);
       }} />
+      <CornerLoader show={!booted} />
     </div>
   );
 
@@ -306,7 +307,7 @@ export default function App() {
     return wrap(
       <Landing
         theme={theme} T={T} onToggleTheme={toggleTheme}
-        account={account} onSignOut={signOut} onNav={go}
+        account={account} onSignOut={signOut} onNav={go} booting={!booted}
         onGetStarted={() => { if (account) go("dashboard"); else { setAuthMode("signup"); go("auth"); } }}
         onSignIn={() => { if (account) go("dashboard"); else { setAuthMode("signin"); go("auth"); } }}
       />
@@ -323,7 +324,11 @@ export default function App() {
     );
   }
 
-  if (route.page === "auth" || !account) {
+  /* `!account` alone would also mean "still finding out" during the
+     silent-refresh boot — only treat it as "genuinely signed out" once
+     that's actually resolved, otherwise a signed-in user opening a
+     deep link flashes the auth screen before bouncing back. */
+  if (route.page === "auth" || (!account && booted)) {
     return wrap(
       <Auth
         mode={authMode}
@@ -337,7 +342,17 @@ export default function App() {
 
   if (route.page === "sim") {
     const meta = sessions.find((s) => s.id === route.arg);
-    if (!meta) { go("dashboard"); return null; }
+    if (!meta) {
+      /* sessions haven't come back from boot yet — this session may well
+         exist once they do, so don't bounce to the dashboard on a false
+         negative. Once booted, if it's still missing it really is gone. */
+      if (!booted) return wrap(
+        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--dim)" }}>
+          <span className="spinner" />
+        </div>
+      );
+      go("dashboard"); return null;
+    }
     return wrap(
       <Simulator
         key={meta.id} meta={meta} account={account} theme={theme} T={T} tags={tags}
@@ -360,7 +375,7 @@ export default function App() {
       account={account} theme={theme} onToggleTheme={toggleTheme} onSignOut={signOut}
     >
       {page === "dashboard" && (
-        <Dashboard sessions={sessions} trades={trades} onNav={go}
+        <Dashboard sessions={sessions} trades={trades} onNav={go} loading={!booted}
           onOpen={(id) => go("sim", id)} onCreate={createSession} onDelete={deleteSession}
           onJoinRoom={joinRoomFromDashboard} />
       )}
@@ -368,7 +383,17 @@ export default function App() {
         <Journal trades={trades} tags={tags} onUpdateTrade={updateTrade} onExport={exportCsv} />
       )}
       {page === "analytics" && <Analytics trades={trades} />}
-      {page === "settings" && (
+      {/* Settings reads straight off `account` from its very first render
+          (no optional chaining — it's always been guaranteed non-null by
+          the auth gate above), so unlike the other pages it can't just be
+          handed a null account and left to show its own loading state;
+          hold it back until account actually exists. */}
+      {page === "settings" && !account && (
+        <div style={{ padding: "60px 0", display: "grid", placeItems: "center" }}>
+          <span className="spinner" />
+        </div>
+      )}
+      {page === "settings" && account && (
         <Settings account={account} sessions={sessions} trades={trades} tags={tags}
           onSaveAccount={async (patch) => {
             if (API_ENABLED) {

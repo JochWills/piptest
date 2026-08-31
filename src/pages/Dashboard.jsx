@@ -27,7 +27,7 @@ export function Spark({ curve, h = 40, w = 240 }) {
   );
 }
 
-export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete, onNav, onJoinRoom }) {
+export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete, onNav, onJoinRoom, loading }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     name: "", symbol: "BTCUSDT", interval: "30m",
@@ -96,29 +96,37 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
         <div style={{ display: "flex", gap: 30, alignItems: "center", flexWrap: "wrap" }}>
           <div>
             <div className="cap" style={{ marginBottom: 6 }}>Net across all sessions</div>
-            <div className="num" style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em",
-              color: agg.count ? (agg.net > 0 ? "var(--up)" : agg.net < 0 ? "var(--down)" : "var(--ink)") : "var(--dim)" }}>
-              {agg.count ? fmtSigned(agg.net) : "$0.00"}
-            </div>
+            {loading ? (
+              <span className="skel" style={{ width: 130, height: 32 }} />
+            ) : (
+              <div className="num" style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em",
+                color: agg.count ? (agg.net > 0 ? "var(--up)" : agg.net < 0 ? "var(--down)" : "var(--ink)") : "var(--dim)" }}>
+                {agg.count ? fmtSigned(agg.net) : "$0.00"}
+              </div>
+            )}
             <div className="sm mut" style={{ marginTop: 4 }}>
-              {agg.count ? `${fmtR(agg.totalR)} over ${agg.count} trades` : "No trades recorded yet"}
+              {loading
+                ? <span className="skel" style={{ width: 140, height: 12 }} />
+                : (agg.count ? `${fmtR(agg.totalR)} over ${agg.count} trades` : "No trades recorded yet")}
             </div>
           </div>
           <div style={{ flex: 1, minWidth: 200, maxWidth: 460 }}>
             <div className="cap" style={{ marginBottom: 6 }}>Equity curve</div>
-            <Spark curve={agg.curve} h={54} />
+            {loading
+              ? <span className="skel" style={{ display: "block", width: "100%", height: 54 }} />
+              : <Spark curve={agg.curve} h={54} />}
           </div>
         </div>
       </Card>
 
       <div className="grid-stats" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", marginBottom: 26 }}>
-        <Stat label="Sessions" value={savedSessions.length} />
-        <Stat label="Trades" value={agg.count} />
-        <Stat label="Win rate" value={agg.count ? `${agg.winRate.toFixed(1)}%` : "—"} sub={`${agg.wins}W / ${agg.losses}L${agg.flat ? ` / ${agg.flat} flat` : ""}`} />
-        <Stat label="Profit factor" value={agg.profitFactor == null ? "—" : agg.profitFactor.toFixed(2)} />
-        <Stat label="Avg R" value={agg.count ? fmtR(agg.avgR) : "—"} sub="per trade" />
+        <Stat label="Sessions" value={savedSessions.length} loading={loading} />
+        <Stat label="Trades" value={agg.count} loading={loading} />
+        <Stat label="Win rate" value={agg.count ? `${agg.winRate.toFixed(1)}%` : "—"} sub={`${agg.wins}W / ${agg.losses}L${agg.flat ? ` / ${agg.flat} flat` : ""}`} loading={loading} />
+        <Stat label="Profit factor" value={agg.profitFactor == null ? "—" : agg.profitFactor.toFixed(2)} loading={loading} />
+        <Stat label="Avg R" value={agg.count ? fmtR(agg.avgR) : "—"} sub="per trade" loading={loading} />
         <Stat label="Max drawdown" value={agg.count ? fmtMoney(agg.maxDD) : "—"}
-          sub={agg.count ? `${agg.maxDDPct.toFixed(1)}%` : ""} tone={agg.maxDD > 0 ? "down" : undefined} />
+          sub={agg.count ? `${agg.maxDDPct.toFixed(1)}%` : ""} tone={agg.maxDD > 0 ? "down" : undefined} loading={loading} />
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
@@ -126,7 +134,19 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
         {savedSessions.length > 0 && <span className="pill n">{savedSessions.length}</span>}
       </div>
 
-      {savedSessions.length === 0 ? (
+      {loading ? (
+        /* sessions haven't come back yet — this is not the same thing as
+           "you have none", so don't show the empty state (it would read
+           as a real, if very sad, answer) while it's still unknown. */
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
+          {[0, 1, 2].map((i) => (
+            <Card key={i} style={{ padding: 16 }}>
+              <span className="skel" style={{ display: "block", width: "55%", height: 14.5, marginBottom: 8 }} />
+              <span className="skel" style={{ display: "block", width: "75%", height: 12 }} />
+            </Card>
+          ))}
+        </div>
+      ) : savedSessions.length === 0 ? (
         <Card>
           <Empty
             title="No sessions yet"

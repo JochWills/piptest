@@ -38,7 +38,7 @@ const FAQ = [
   { q: "Does it cost anything?", a: "PipTest is free while it’s in early access. If paid plans arrive later you’ll hear well before anything changes, and everything you’ve built stays yours." },
 ];
 
-export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T, account, onSignOut, onNav }) {
+export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T, account, onSignOut, onNav, booting }) {
   const [openFaq, setOpenFaq] = useState(0);
   const [menu, setMenu] = useState(false);
 
@@ -82,7 +82,13 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
               <Svg>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
             </button>
 
-            {account ? (
+            {booting ? (
+              /* still resolving the silent-refresh — we don't yet know if
+                 there's an account, so don't commit to either the signed-in
+                 or signed-out header (a wrong guess flashes and flips a
+                 moment later). A neutral placeholder instead. */
+              <span className="skel" style={{ width: 86, height: 32, borderRadius: 999 }} />
+            ) : account ? (
               <>
                 {/* redundant with "Dashboard" at the top of the account
                     menu right next to it, so it's the one to drop for
