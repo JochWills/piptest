@@ -118,7 +118,7 @@ export function createReplayController({ control, onBar, onState }) {
       emitState();
       return state.covered !== false;
     },
-    jumpTo(ms, widget) { stop(); state.atEnd = false; control.jumpTo(ms, widget); emitState(); },
+    jumpTo(ms, widget) { stop(); state.atEnd = false; control.jumpTo(ms, widget, state.symbol, state.resolution); emitState(); },
     get state() { return { ...state }; },
   };
 }

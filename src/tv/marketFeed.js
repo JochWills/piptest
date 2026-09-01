@@ -56,9 +56,20 @@ class MarketFeed {
   }
 
   /* Load a window centred on `aroundMs` — coalesced so panning fast
-     doesn't fire a request per frame for the same stretch of history. */
+     doesn't fire a request per frame for the same stretch of history.
+     The dedup key includes a coarse (6h) bucket of `aroundMs`, not just
+     symbol/resolution: two requests a few frames apart while panning
+     land in the same bucket and correctly share one fetch, but two
+     requests for genuinely distant moments (e.g. a multiplayer guest's
+     chart racing to mount at its own placeholder date, briefly, before
+     jumping to the room's real one — both for the same symbol/resolution)
+     used to collapse into a single fetch keyed on whichever one happened
+     to start first, silently starving the other of the data it actually
+     needed and leaving its cursor/price/OHLC stuck on the wrong moment
+     forever (nothing ever retried it). */
   async _ensureWindow(symbol, ivId, aroundMs) {
-    const k = key(symbol, ivId);
+    const bucket = Math.floor(aroundMs / (6 * 3600 * 1000));
+    const k = `${key(symbol, ivId)}|${bucket}`;
     if (this.inflight.has(k)) return this.inflight.get(k);
     const p = loadWindow(symbol, ivId, aroundMs)
       .then((r) => {

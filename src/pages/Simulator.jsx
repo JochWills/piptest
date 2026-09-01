@@ -121,6 +121,24 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [joinCode, setJoinCode] = useState("");
   const [roomMsg, setRoomMsg] = useState("");
   const pushRef = useRef(0), appliedRef = useRef(0), missRef = useRef(0);
+  /* Only host/editor could ever push chart state before multiplayer —
+     now any participant can, and a freshly-JOINED guest's own local
+     symbol/interval/cursor/stepId/playing is still whatever placeholder
+     joinRoomFromDashboard made up, not the room's real state, until the
+     first poll below actually syncs it. Without this guard, pushRoom
+     could fire on that very first render and clobber the host's real
+     cursor with the guest's placeholder garbage. True for the host right
+     away (their own local state IS the room's state, by construction).
+     For a guest this can't just be set the moment the poll *attempts* a
+     correction (chartStartRef reassignment or jumpTo) — both are
+     asynchronous (a remount's onReady, a jumpTo's bar lookup), and the
+     widget can independently deliver its OWN still-uncorrected cursor
+     in the meantime, which used to get waved through as "synced" and
+     pushed straight back out, corrupting the room for everyone. It's
+     only set once handleCursor actually observes a cursor landing near
+     where lastKnownDocCursorRef says the room really is. */
+  const roomSyncedRef = useRef(false);
+  const lastKnownDocCursorRef = useRef(null);
 
   /* ---------- room chat ----------
      Lives inside the room doc itself (kv row), so it's gone the
@@ -291,6 +309,17 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const handleCursor = useCallback((ms, rawBar) => {
     setCursor(ms);
     if (rawBar) setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return toNative(rawBar); });
+    /* confirm room-sync only once a cursor actually lands near where the
+       room doc says it should be — see roomSyncedRef's own comment for
+       why "we attempted a correction" isn't good enough on its own. A
+       day's tolerance is generous on purpose: this is only distinguishing
+       "landed in the right neighbourhood" from "still showing a stale
+       placeholder that can be months/years off", not checking bar-level
+       precision (jumpTo/the drift-check elsewhere already handle that). */
+    if (!roomSyncedRef.current && lastKnownDocCursorRef.current != null
+        && Math.abs(ms - lastKnownDocCursorRef.current) < 86400000) {
+      roomSyncedRef.current = true;
+    }
   }, []);
 
   /* ================= actions ================= */
@@ -540,7 +569,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      whatever layout is already sitting in `room` forward via the spread. */
   const lastAppliedLayoutRef = useRef(null);
   const pushRoom = useCallback(async (extra = {}) => {
-    if (!room || !canControl || !API_ENABLED) return;
+    if (!room || !canControl || !API_ENABLED || !roomSyncedRef.current) return;
     const now = Date.now();
     if (!extra.force && now - pushRef.current < 700) return;
     pushRef.current = now;
@@ -588,28 +617,60 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       } else {
         appliedRef.current = doc.updatedAt || 0;
         setRoom(doc);
-        /* Synced unconditionally, not just when the symbol/interval also
-           happen to differ — a fresh join's placeholder session defaults to
-           today's date on whatever symbol "New session" defaults to, which
-           can coincidentally already match the host's, and the widget can
-           race to mount before this poll ever runs. Either way, this needs
-           to be right by the time the widget (re)mounts, which is the only
-           moment it's actually read. */
-        chartStartRef.current = doc.cursor;
-        seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
         const marketChanged = doc.symbol !== symbol || doc.interval !== interval;
         if (doc.symbol !== symbol) setSymbol(doc.symbol);
         if (doc.interval !== interval) setIv(doc.interval);
         setStepId(doc.stepId || "1m"); setPlaying(doc.playing);
-        /* a couple of bars' worth of drift is normal jitter, not a desync —
-           cursor is milliseconds now, not a bar index, so the old ">3" bar
-           tolerance would resync on every poll */
-        if (!marketChanged && Math.abs(cursor - doc.cursor) > barMsOf(interval) * 2) {
-          chartCtlRef.current?.control.jumpTo(doc.cursor, chartCtlRef.current.widget);
+        /* the room's authoritative position, for handleCursor to confirm
+           against once a correction (remount or jumpTo, both async)
+           actually lands — see roomSyncedRef's own comment. Tracked on
+           every full-apply regardless of branch, not just when a
+           correction is attempted, since it's also what "already in
+           sync, nothing to do" below confirms against immediately. */
+        lastKnownDocCursorRef.current = doc.cursor;
+
+        if (marketChanged || !chartCtlRef.current) {
+          /* Either a real remount is about to happen anyway (symbol/
+             interval just changed — TVAdvancedChart remounts on those
+             props regardless of anything here), or the widget isn't up
+             yet (first join, or the widget can simply race to mount
+             before this poll ever runs). Either way this is the one
+             moment startMs is actually read, so it needs to be right.
+             A routine cursor sync while the SAME widget stays mounted
+             must go through jumpTo below instead, never this ref —
+             touching it on every poll used to force a remount every
+             ~1.5s the moment more than one participant could push chart
+             state (multiplayer), wiping drawings and jolting the view
+             on every single tick. */
+          chartStartRef.current = doc.cursor;
+          seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
+        } else if (Math.abs(cursor - doc.cursor) > barMsOf(interval) * 2) {
+          /* a couple of bars' worth of drift is normal jitter, not a
+             desync — cursor is milliseconds now, not a bar index, so the
+             old ">3" bar tolerance would resync on every poll */
+          seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
+          /* replay.jumpTo, not control.jumpTo directly — the wrapper is
+             what threads symbol/resolution through so a real bar comes
+             back and price/clock/OHLC don't sit stale (see datafeed.js's
+             jumpTo); it also stops local playback, which is right here
+             since playing already gets re-synced from doc.playing above. */
+          chartCtlRef.current.replay.jumpTo(doc.cursor, chartCtlRef.current.widget);
+        } else {
+          // already within a couple of bars of the room — nothing to
+          // correct, so there's nothing async to wait on either.
+          roomSyncedRef.current = true;
         }
+
         if (doc.layout && doc.layout !== lastAppliedLayoutRef.current) {
-          chartCtlRef.current?.load(doc.layout);
           lastAppliedLayoutRef.current = doc.layout;
+          /* if a remount is imminent (marketChanged) or the widget isn't
+             up, load() on whatever chartCtlRef currently holds would
+             either hit a stale/about-to-be-torn-down instance or no-op —
+             queue it the same way the host's own saved layout is queued
+             on initial restore, so the NEXT mount's onReady picks it up
+             instead of silently losing it. */
+          if (marketChanged || !chartCtlRef.current) pendingLayoutRef.current = doc.layout;
+          else chartCtlRef.current.load(doc.layout);
         }
       }
 
@@ -672,6 +733,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       ...(mode === "multiplayer" ? { trading: {}, roomLog: [] } : {}) };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
+    roomSyncedRef.current = true; // the doc IS the host's own already-correct local state
+    lastKnownDocCursorRef.current = cursor;
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
   };
   const joinRoom = async (codeArg) => {
@@ -688,6 +751,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                           ts: Date.now(), avatar: account.avatar || null } };
     await data.roomPut(code, doc);
     appliedRef.current = 0; chatSeenRef.current = doc.messages?.length || 0; setChatUnread(0);
+    /* not yet — Simulator's own symbol/interval/cursor/stepId/playing are
+       still joinRoomFromDashboard's throwaway placeholder until the poll
+       effect's first full-apply actually overwrites them with the room's
+       real state (see roomSyncedRef's own comment). */
+    roomSyncedRef.current = false;
     setRoom(doc);
     setRoomMsg(doc.mode === "multiplayer" ? `Joined ${code} — trade away.`
       : doc.mode === "streamer" ? `Joined ${code} — watching the host.`
@@ -1430,8 +1498,14 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
       </div>
       {!room ? (
         <>
+          {/* .btn is inline-flex + white-space:nowrap (fine for an
+              icon+label button, wrong here) — override both, or a two-line
+              card lays its title/description out side by side on one row
+              and runs straight off the edge of the panel instead of
+              wrapping/stacking. */}
           <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
-            <button className="btn pri" style={{ width: "100%", textAlign: "left", padding: "10px 12px" }}
+            <button className="btn pri" style={{ width: "100%", display: "flex", flexDirection: "column",
+              alignItems: "flex-start", textAlign: "left", whiteSpace: "normal", padding: "10px 12px" }}
               onClick={() => hostRoom("multiplayer")}>
               <div style={{ fontWeight: 700 }}>Multiplayer</div>
               <div style={{ fontSize: 11.5, opacity: 0.9, lineHeight: 1.4, marginTop: 2 }}>
@@ -1439,7 +1513,8 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
                 colour on the chart, a live leaderboard.
               </div>
             </button>
-            <button className="btn" style={{ width: "100%", textAlign: "left", padding: "10px 12px" }}
+            <button className="btn" style={{ width: "100%", display: "flex", flexDirection: "column",
+              alignItems: "flex-start", textAlign: "left", whiteSpace: "normal", padding: "10px 12px" }}
               onClick={() => hostRoom("streamer")}>
               <div style={{ fontWeight: 700 }}>Streamer</div>
               <div className="mut" style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 2 }}>

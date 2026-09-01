@@ -248,12 +248,32 @@ export function createDatafeed(opts = {}) {
        still-forming candle being built up by step() above is gone; the
        chart will show the last *complete* bar at or before the target
        instead until stepping forward rebuilds one from there again. */
-    jumpTo(ms, widget) {
+    jumpTo(ms, widget, symbol, resolution) {
       state.cursorMs = ms;
       state.agg = null;
       state.onCursor(ms, null);
       for (const s of state.subs.values()) s.reset && s.reset();
       try { widget && widget.activeChart().resetData(); } catch (e) {}
+      /* best-effort: once the feed actually has data at this position,
+         hand Simulator a real bar so its own price/clock/OHLC display
+         doesn't sit stale until the next explicit step reveals one —
+         realign() (below, resolution switches) already does exactly
+         this; a plain jump never did. That gap used to go unnoticed
+         because Simulator's room-sync jump was always followed by a
+         full widget remount anyway (which gets a real bar for free on
+         mount), but a remount on every poll tick is its own, much worse
+         bug (constant reloading, drawings wiped) — see the room poll
+         effect in Simulator.jsx. Guarded on cursorMs still matching:
+         a newer jump/step landing before this resolves should win, not
+         get clobbered by a stale lookup. */
+      if (symbol && resolution) {
+        (async () => {
+          const covered = await feed.ensureAround(symbol, resolution, ms);
+          if (!covered || state.cursorMs !== ms) return;
+          const bar = feed.barAt(symbol, resolution, ms);
+          if (bar) state.onCursor(ms, bar);
+        })();
+      }
     },
 
     /* Resolution changed: keep the same moment and snap to the open of the

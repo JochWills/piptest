@@ -58,15 +58,24 @@ export default function TVAdvancedChart({
     if (status !== "ready" || !boxRef.current) return;
     let dead = false;
 
+    /* `dead` already guards onChartReady below against a stale widget's
+       late callback — it needs to guard these three too. datafeed/replay
+       run their own async work (realign's data fetch, a jumpTo's bar
+       lookup) that nothing cancels just because this effect's cleanup
+       tore the widget down; a torn-down instance's callback can still
+       land after a newer mount has taken over (e.g. the room-sync fixup
+       remount right after a fresh join — see the room poll effect in
+       Simulator.jsx) and silently overwrite the new one's correct state
+       with its own stale result if allowed through. */
     const { datafeed, control } = createDatafeed({
       cursorMs: startMs ?? Date.now(),
-      onCursor: (ms, bar) => cbs.current.onCursor && cbs.current.onCursor(ms, bar),
+      onCursor: (ms, bar) => !dead && cbs.current.onCursor && cbs.current.onCursor(ms, bar),
     });
 
     const replay = createReplayController({
       control,
-      onBar: (bar) => cbs.current.onBar && cbs.current.onBar(bar),
-      onState: (s) => cbs.current.onState && cbs.current.onState(s),
+      onBar: (bar) => !dead && cbs.current.onBar && cbs.current.onBar(bar),
+      onState: (s) => !dead && cbs.current.onState && cbs.current.onState(s),
     });
     replay.setMarket(symbol, interval);
 
