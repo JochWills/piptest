@@ -71,23 +71,30 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [notes, setNotes] = useState("");
   const [tab, setTab] = useState("trades");
   const [blotterH, setBlotterH] = useState(216);
+  /* Pointer capture, not window mousemove/mouseup — the chart above this
+     handle is a TradingView iframe, a separate document. A plain window
+     listener stops receiving events the instant the cursor crosses into
+     it, which is exactly what a quick upward drag does (the handle sits
+     right at the chart's bottom edge), making the drag feel like it
+     "sticks" or stops responding. Pointer capture keeps delivering events
+     to this element regardless of what's under the cursor — same fix
+     FloatingBar already uses for its own drag. */
   const blotterDrag = useRef(null);
   const onBlotterResizeStart = useCallback((e) => {
     blotterDrag.current = { startY: e.clientY, startH: blotterH };
-    const move = (ev) => {
-      const d = blotterDrag.current;
-      if (!d) return;
-      setBlotterH(Math.min(560, Math.max(80, d.startH - (ev.clientY - d.startY))));
-    };
-    const up = () => {
-      blotterDrag.current = null;
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
     e.preventDefault();
   }, [blotterH]);
+  const onBlotterResizeMove = useCallback((e) => {
+    const d = blotterDrag.current;
+    if (!d) return;
+    setBlotterH(Math.min(560, Math.max(80, d.startH - (e.clientY - d.startY))));
+  }, []);
+  const onBlotterResizeEnd = useCallback((e) => {
+    if (!blotterDrag.current) return;
+    blotterDrag.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) {}
+  }, []);
 
   /* ---------- chart chrome ----------
      Drawing tools, indicators, log/linear, zoom presets are all the
@@ -845,9 +852,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               small area the bar currently covers — move the bar first to
               resize through that spot — which is the right tradeoff over
               having this thin strip paint over the bar. */}
-          <div className="hide-sm" onMouseDown={onBlotterResizeStart} title="Drag to resize"
+          <div className="hide-sm" onPointerDown={onBlotterResizeStart} onPointerMove={onBlotterResizeMove}
+            onPointerUp={onBlotterResizeEnd} onPointerCancel={onBlotterResizeEnd} title="Drag to resize"
             style={{ height: 7, flexShrink: 0, cursor: "row-resize", position: "relative", zIndex: 5,
-              background: "var(--surface)", borderTop: "1px solid var(--border)" }}>
+              background: "var(--surface)", borderTop: "1px solid var(--border)", touchAction: "none" }}>
             <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)",
               width: 36, height: 3, borderRadius: 2, background: "var(--border)" }} />
           </div>
@@ -911,7 +919,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             onPos={setBarPos}
             collapsed={barCollapsed}
             onToggleCollapse={() => setBarCollapsed((c) => !c)}
-            minWidth={560}
+            minWidth={430}
             label="Replay"
           >
             <div style={{ padding: "6px 10px" }}>
