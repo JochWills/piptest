@@ -12,6 +12,7 @@ import {
   START_BALANCE, uid, makeCode,
 } from "../lib/trading.js";
 import { store, K } from "../lib/store.js";
+import { decodeAvatar } from "../lib/avatars.js";
 import * as data from "../lib/data.js";
 import { censor } from "../lib/profanity.js";
 import { API_ENABLED } from "../lib/api.js";
@@ -137,8 +138,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [helpOpen, setHelpOpen] = useState(false);
 
   const role = room ? room.participants?.[account.handle]?.role || "viewer" : "host";
-  const canControl = !room || role === "host" || role === "editor";
+  /* Multiplayer grants everyone full rights automatically — drawing is
+     meant to be collaborative and, per how PipTest's owner wants this to
+     work, so is driving the replay clock. Streamer rooms keep the
+     original viewer/editor split (host-promoted editors only). */
+  const canControl = !room || room.mode === "multiplayer" || role === "host" || role === "editor";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
+  /* Streamer guests are pure spectators — no order ticket, no trade
+     actions. Multiplayer guests always trade (that's the whole point);
+     solo (no room) always trades. */
+  const canTrade = !room || room.mode !== "streamer" || isHost;
 
   /* the widget only reads canDraw at mount, so a role change (promoted
      or demoted mid-session) has to remount it — same tradeoff as an
@@ -162,12 +171,33 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const stepMs = useMemo(() => barMsOf(stepId), [stepId]);
 
   const price = cur?.c ?? null;
-  const stats = useMemo(() => computeStats(trades), [trades]);
+  /* a multiplayer guest spawns with the room's own starting balance
+     (see hostRoom) rather than an assumption baked in here — outside a
+     room, or in a streamer room, this is just the global default. */
+  const startBalance = room?.startBalance || START_BALANCE;
+  const stats = useMemo(() => computeStats(trades, startBalance), [trades, startBalance]);
   const equity = stats.equity;
   const unreal = openPnl(trade, price);
   const chg = cur && prevCloseRef.current != null ? cur.c - prevCloseRef.current : 0;
   const chgPct = cur && prevCloseRef.current ? (chg / prevCloseRef.current) * 100 : 0;
   const challenge = useMemo(() => evaluateChallenge(trades, meta.challenge), [trades, meta.challenge]);
+
+  /* multiplayer leaderboard rows — includes the local participant's own
+     live balance too (room.trading only has the *last broadcast* value
+     for "me", which lags a tick behind this render's own equity/unreal). */
+  const leaderboardRows = useMemo(() => {
+    if (room?.mode !== "multiplayer") return [];
+    const rows = Object.entries(room.trading || {}).map(([who, t]) => ({
+      handle: who, avatar: t.avatar, total: (t.balance ?? startBalance) + (t.unrealPnl || 0),
+    }));
+    if (!rows.some((r) => r.handle === account.handle)) {
+      rows.push({ handle: account.handle, avatar: account.avatar, total: equity + unreal });
+    } else {
+      const mine = rows.find((r) => r.handle === account.handle);
+      mine.total = equity + unreal;
+    }
+    return rows.sort((a, b) => b.total - a.total);
+  }, [room?.trading, room?.mode, account.handle, account.avatar, equity, unreal, startBalance]);
 
   const entryVal = parseFloat(form.entry) || price || 0;
   const rr = useMemo(() => rrOf(entryVal, parseFloat(form.stop), parseFloat(form.target)), [entryVal, form.stop, form.target]);
@@ -220,6 +250,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      bars to the {t,o,h,l,c} shape the rest of this file already uses. */
   const tradeRef = useRef(null);
   useEffect(() => { tradeRef.current = trade; }, [trade]);
+  /* the room poll effect (below) is only recreated when room.code/account
+     .handle change, so it can't close over trade/price/equity directly
+     without going stale the moment either updates — refs instead, same
+     reasoning as tradeRef above. */
+  const priceRef = useRef(null);
+  useEffect(() => { priceRef.current = price; }, [price]);
+  const equityRef = useRef(startBalance);
+  useEffect(() => { equityRef.current = equity; }, [equity]);
 
   const toNative = (b) => ({ t: b.time, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume });
 
@@ -267,6 +305,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   };
 
   const arm = (atMarket) => {
+    if (!canTrade) return;
     const e = atMarket ? price : entryVal;
     const errs = validateSetup({ dir: form.dir, entry: e, stop: form.stop, target: form.target, riskPct: form.riskPct, equity, price });
     if (errs.length) { setFormErr(errs[0]); return; }
@@ -411,6 +450,37 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (trade.target != null) zoneShapesRef.current.push(ctl.drawZone({ price: trade.target, color: T.up, text: `Target ${fmtPrice(trade.target)}` }));
   }, [trade, chartReady]); // eslint-disable-line
 
+  /* everyone else's open trades, in multiplayer — same shape API, just
+     colored/labelled per participant (their own avatar colour, see
+     Avatar.jsx) so it's obvious at a glance whose is whose. A stable
+     stringified summary as the dependency, not `room` itself, since
+     `room` is a fresh object every ~1.5s poll tick regardless of whether
+     any open trade actually changed. */
+  const remoteZoneShapesRef = useRef([]);
+  const remoteOpenKey = useMemo(() => {
+    if (room?.mode !== "multiplayer") return "";
+    return JSON.stringify(Object.entries(room.trading || {})
+      .filter(([who]) => who !== account.handle)
+      .map(([who, t]) => [who, t.avatar, t.openTrade && [t.openTrade.status, t.openTrade.dir,
+        t.openTrade.entry, t.openTrade.stop, t.openTrade.target]]));
+  }, [room?.trading, room?.mode, account.handle]);
+  useEffect(() => {
+    const ctl = chartCtlRef.current;
+    if (!ctl) return;
+    for (const id of remoteZoneShapesRef.current) ctl.removeShape(id);
+    remoteZoneShapesRef.current = [];
+    if (room?.mode !== "multiplayer") return;
+    for (const [who, t] of Object.entries(room.trading || {})) {
+      if (who === account.handle || !t.openTrade) continue;
+      const ot = t.openTrade;
+      const color = decodeAvatar(t.avatar, who).color.fg;
+      remoteZoneShapesRef.current.push(ctl.drawZone({ price: ot.entry, color,
+        text: `${who} · ${ot.status === "open" ? "Entry" : "Limit"} ${fmtPrice(ot.entry)}` }));
+      if (ot.stop != null) remoteZoneShapesRef.current.push(ctl.drawZone({ price: ot.stop, color, text: `${who} · Stop ${fmtPrice(ot.stop)}` }));
+      if (ot.target != null) remoteZoneShapesRef.current.push(ctl.drawZone({ price: ot.target, color, text: `${who} · Target ${fmtPrice(ot.target)}` }));
+    }
+  }, [remoteOpenKey, chartReady]); // eslint-disable-line
+
   /* ================= autosave =================
      `layout` is the widget's own save() snapshot — drawings, indicators
      and chart settings together, replacing what used to be two separate
@@ -425,10 +495,17 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
       const layout = chartReady && chartCtlRef.current ? await chartCtlRef.current.save() : pendingLayoutRef.current;
+      /* multiplayerLog is the durable "trade data from guests is saved in
+         the host's session" record — a guest's own closed trade also goes
+         into their own personal Journal separately (onTradesClosed,
+         unconditional, room or not), but only the host has a real backend
+         session row for the room's activity to live alongside. See the
+         room doc's own roomLog, kept live by the poll effect above. */
       const ok = await data.saveSessionState(meta.id, {
         id: meta.id, cursor, trades, trade, layout, notes, symbol, interval,
+        ...(room?.mode === "multiplayer" ? { multiplayerLog: room.roomLog || [] } : {}),
       });
-      const st = computeStats(trades);
+      const st = computeStats(trades, startBalance);
       const ch = evaluateChallenge(trades, meta.challenge);
       onSaveSession(meta.id, {
         symbol, interval,
@@ -504,33 +581,69 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         return;
       }
       missRef.current = 0;
-      if (doc.updatedBy === account.handle || (doc.updatedAt || 0) <= appliedRef.current) {
-        setRoom((r) => ({ ...r, participants: doc.participants, messages: doc.messages })); return;
+      const isMyOwnEcho = doc.updatedBy === account.handle || (doc.updatedAt || 0) <= appliedRef.current;
+      if (isMyOwnEcho) {
+        setRoom((r) => ({ ...r, participants: doc.participants, messages: doc.messages,
+          trading: doc.trading, roomLog: doc.roomLog }));
+      } else {
+        appliedRef.current = doc.updatedAt || 0;
+        setRoom(doc);
+        /* Synced unconditionally, not just when the symbol/interval also
+           happen to differ — a fresh join's placeholder session defaults to
+           today's date on whatever symbol "New session" defaults to, which
+           can coincidentally already match the host's, and the widget can
+           race to mount before this poll ever runs. Either way, this needs
+           to be right by the time the widget (re)mounts, which is the only
+           moment it's actually read. */
+        chartStartRef.current = doc.cursor;
+        seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
+        const marketChanged = doc.symbol !== symbol || doc.interval !== interval;
+        if (doc.symbol !== symbol) setSymbol(doc.symbol);
+        if (doc.interval !== interval) setIv(doc.interval);
+        setStepId(doc.stepId || "1m"); setPlaying(doc.playing);
+        /* a couple of bars' worth of drift is normal jitter, not a desync —
+           cursor is milliseconds now, not a bar index, so the old ">3" bar
+           tolerance would resync on every poll */
+        if (!marketChanged && Math.abs(cursor - doc.cursor) > barMsOf(interval) * 2) {
+          chartCtlRef.current?.control.jumpTo(doc.cursor, chartCtlRef.current.widget);
+        }
+        if (doc.layout && doc.layout !== lastAppliedLayoutRef.current) {
+          chartCtlRef.current?.load(doc.layout);
+          lastAppliedLayoutRef.current = doc.layout;
+        }
       }
-      appliedRef.current = doc.updatedAt || 0;
-      setRoom(doc);
-      /* Synced unconditionally, not just when the symbol/interval also
-         happen to differ — a fresh join's placeholder session defaults to
-         today's date on whatever symbol "New session" defaults to, which
-         can coincidentally already match the host's, and the widget can
-         race to mount before this poll ever runs. Either way, this needs
-         to be right by the time the widget (re)mounts, which is the only
-         moment it's actually read. */
-      chartStartRef.current = doc.cursor;
-      seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
-      const marketChanged = doc.symbol !== symbol || doc.interval !== interval;
-      if (doc.symbol !== symbol) setSymbol(doc.symbol);
-      if (doc.interval !== interval) setIv(doc.interval);
-      setStepId(doc.stepId || "1m"); setPlaying(doc.playing);
-      /* a couple of bars' worth of drift is normal jitter, not a desync —
-         cursor is milliseconds now, not a bar index, so the old ">3" bar
-         tolerance would resync on every poll */
-      if (!marketChanged && Math.abs(cursor - doc.cursor) > barMsOf(interval) * 2) {
-        chartCtlRef.current?.control.jumpTo(doc.cursor, chartCtlRef.current.widget);
-      }
-      if (doc.layout && doc.layout !== lastAppliedLayoutRef.current) {
-        chartCtlRef.current?.load(doc.layout);
-        lastAppliedLayoutRef.current = doc.layout;
+
+      /* ---- multiplayer: heartbeat + live trade/balance broadcast, plus
+         (host only, per how this was decided) a stale-participant sweep.
+         Deliberately never touches updatedBy/updatedAt — this is a
+         low-priority side channel onto the same doc, not a chart-state
+         change, so it can't be mistaken for one and never fights
+         pushRoom/setRole/sendChat over "who wrote last". Reads trade/
+         price/equity off refs, not the closed-over state values, since
+         this effect (and this poll fn) is only rebuilt when room.code or
+         account.handle change — see the refs' own comments. */
+      if (doc.mode === "multiplayer") {
+        const t = tradeRef.current;
+        doc.trading = { ...doc.trading,
+          [account.handle]: {
+            avatar: account.avatar || null, lastSeen: Date.now(),
+            balance: equityRef.current, unrealPnl: openPnl(t, priceRef.current),
+            openTrade: t ? { ...t, markPrice: priceRef.current } : null,
+          } };
+        if (isHost) {
+          const staleBefore = Date.now() - 60000;
+          for (const [who, info] of Object.entries(doc.trading)) {
+            if (who === account.handle || !info.openTrade || info.lastSeen > staleBefore) continue;
+            const ot = info.openTrade;
+            if (ot.status === "open") {
+              const rec = bookTrade(ot, ot.markPrice ?? ot.entry, "left room", Date.now());
+              doc.roomLog = [...(doc.roomLog || []),
+                { ...rec, handle: who, avatar: info.avatar, forcedClose: true }].slice(-500);
+            }
+            doc.trading[who] = { ...info, openTrade: null };
+          }
+        }
+        await data.roomPut(room.code, doc);
       }
     };
     poll();
@@ -549,12 +662,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     }
   }, [room?.messages, chatOpen]); // eslint-disable-line
 
-  const hostRoom = async () => {
+  const hostRoom = async (mode) => {
     if (!API_ENABLED) { setRoomMsg("Live rooms need the API. Set VITE_API_URL and redeploy."); return; }
     const code = makeCode();
-    const doc = { code, host: account.handle, symbol, interval, startMs: meta.startMs,
+    const doc = { code, host: account.handle, mode, sessionId: meta.id, startBalance,
+      symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      layout: null, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
+      layout: null, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now(),
+      ...(mode === "multiplayer" ? { trading: {}, roomLog: [] } : {}) };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
@@ -573,7 +688,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                           ts: Date.now(), avatar: account.avatar || null } };
     await data.roomPut(code, doc);
     appliedRef.current = 0; chatSeenRef.current = doc.messages?.length || 0; setChatUnread(0);
-    setRoom(doc); setRoomMsg(`Joined ${code} as viewer.`);
+    setRoom(doc);
+    setRoomMsg(doc.mode === "multiplayer" ? `Joined ${code} — trade away.`
+      : doc.mode === "streamer" ? `Joined ${code} — watching the host.`
+      : `Joined ${code} as viewer.`);
   };
 
   /* the Dashboard's "Join room" button creates a throwaway session just to
@@ -592,7 +710,20 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
       const d = await data.roomGet(room.code);
-      if (d?.participants) { delete d.participants[account.handle]; await data.roomPut(room.code, d); }
+      if (d) {
+        /* fast path: close an open multiplayer position right now, rather
+           than leave it to the host's up-to-60s stale sweep (poll effect
+           below) — that sweep is the safety net for a crash/closed tab,
+           a deliberate Leave click can just do it immediately. */
+        const t = tradeRef.current;
+        if (d.mode === "multiplayer" && t?.status === "open" && priceRef.current) {
+          const rec = bookTrade(t, priceRef.current, "left room", Date.now());
+          d.roomLog = [...(d.roomLog || []), { ...rec, handle: account.handle, avatar: account.avatar || null }].slice(-500);
+        }
+        if (d.participants) delete d.participants[account.handle];
+        if (d.trading) delete d.trading[account.handle];
+        await data.roomPut(room.code, d);
+      }
     }
     setRoom(null); setRoomMsg(""); setChatOpen(false);
   };
@@ -932,7 +1063,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           {/* ---- blotter ---- */}
           <div style={{ background: "var(--surface)", flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 2, padding: "0 14px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-              {[["trades", `Trades (${trades.length})`], ["orders", "Orders"], ["positions", "Positions"], ["notes", "Notes"]].map(([id, l]) => (
+              {[["trades", `Trades (${trades.length})`], ["orders", "Orders"], ["positions", "Positions"],
+                ...(room?.mode === "multiplayer" ? [["leaderboard", "Leaderboard"]] : []), ["notes", "Notes"]].map(([id, l]) => (
                 <button key={id} className={"tab " + (tab === id ? "on" : "")} onClick={() => setTab(id)}>{l}</button>
               ))}
             </div>
@@ -965,6 +1097,30 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               {tab === "positions" && (trade?.status === "open"
                 ? <SingleRow trade={trade} symbol={symbol} kind="position" unreal={unreal} onClose={closeNow} onBE={moveStopToBE} />
                 : <Empty title="No open position" />)}
+
+              {tab === "leaderboard" && (
+                leaderboardRows.length === 0
+                  ? <Empty title="No one's trading yet" />
+                  : (
+                    <div style={{ display: "grid", gap: 2, padding: 8 }}>
+                      {leaderboardRows.map((r, i) => (
+                        <div key={r.handle} style={{ display: "flex", alignItems: "center", gap: 10,
+                          padding: "8px 10px", borderRadius: 8,
+                          background: r.handle === account.handle ? "var(--surface2)" : "transparent" }}>
+                          <span className="num mut" style={{ width: 18, fontSize: 12.5, textAlign: "right" }}>{i + 1}</span>
+                          <Avatar value={r.avatar} handle={r.handle} size={24} />
+                          <span className="sm" style={{ flex: 1, fontWeight: r.handle === account.handle ? 600 : 500 }}>
+                            {r.handle}{r.handle === account.handle ? " (you)" : ""}
+                          </span>
+                          <span className="num" style={{ fontWeight: 700,
+                            color: r.total > startBalance ? "var(--up)" : r.total < startBalance ? "var(--down)" : "var(--muted)" }}>
+                            {fmtMoney(r.total)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+              )}
 
               {tab === "notes" && (
                 <div style={{ padding: 14 }}>
@@ -1038,7 +1194,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           <div style={{ padding: 14 }}>
             <div className="cap" style={{ marginBottom: 12 }}>Setup</div>
 
-            {trade ? (
+            {!canTrade ? (
+              <div className="sm mut" style={{ lineHeight: 1.6, padding: "6px 2px" }}>
+                You're viewing this session — trading is off in Streamer mode.
+              </div>
+            ) : trade ? (
               <OpenTicket trade={trade} price={price} unreal={unreal} onClose={closeNow} onBE={moveStopToBE}
                 onCancel={() => setTrade(null)} />
             ) : (
@@ -1263,14 +1423,30 @@ function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel }) {
 
 function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose }) {
   return (
-    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 15, width: 272 }}>
+    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 15, width: 300 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <span className="cap">Live room</span>
         <button className="btn ghost" style={{ padding: "2px 7px" }} onClick={onClose} aria-label="Close">✕</button>
       </div>
       {!room ? (
         <>
-          <button className="btn pri" style={{ width: "100%", marginBottom: 12 }} onClick={hostRoom}>Share this chart</button>
+          <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+            <button className="btn pri" style={{ width: "100%", textAlign: "left", padding: "10px 12px" }}
+              onClick={() => hostRoom("multiplayer")}>
+              <div style={{ fontWeight: 700 }}>Multiplayer</div>
+              <div style={{ fontSize: 11.5, opacity: 0.9, lineHeight: 1.4, marginTop: 2 }}>
+                Guests spawn in with a fresh balance and trade alongside you — own P&L, own
+                colour on the chart, a live leaderboard.
+              </div>
+            </button>
+            <button className="btn" style={{ width: "100%", textAlign: "left", padding: "10px 12px" }}
+              onClick={() => hostRoom("streamer")}>
+              <div style={{ fontWeight: 700 }}>Streamer</div>
+              <div className="mut" style={{ fontSize: 11.5, lineHeight: 1.4, marginTop: 2 }}>
+                Guests just watch — exactly what you see, no trading.
+              </div>
+            </button>
+          </div>
           <Field label="Join with a code">
             <div style={{ display: "flex", gap: 6 }}>
               <input className="in" value={joinCode} maxLength={6} placeholder="ABC123"
@@ -1285,7 +1461,9 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div>
               <div className="num" style={{ fontSize: 21, fontWeight: 700, letterSpacing: ".08em" }}>{room.code}</div>
-              <div className="sm mut">host {room.host}</div>
+              <div className="sm mut">
+                host {room.host} · {room.mode === "multiplayer" ? "Multiplayer" : "Streamer"}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               {isHost && <button className="btn" onClick={closeRoom}>Close</button>}
@@ -1299,18 +1477,26 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
                 <span className="sm" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {who}{who === account.handle ? " (you)" : ""}
                 </span>
-                <span className={"pill " + (info.role === "viewer" ? "n" : "b")}>{info.role}</span>
-                {isHost && info.role !== "host" && (
-                  <button className="btn ghost" style={{ padding: "2px 7px", fontSize: 11 }}
-                    onClick={() => setRole(who, info.role === "editor" ? "viewer" : "editor")}>
-                    {info.role === "editor" ? "Revoke" : "Edit"}
-                  </button>
+                {room.mode === "multiplayer" ? (
+                  <span className="pill n">{info.role === "host" ? "host" : "trader"}</span>
+                ) : (
+                  <>
+                    <span className={"pill " + (info.role === "viewer" ? "n" : "b")}>{info.role}</span>
+                    {isHost && info.role !== "host" && (
+                      <button className="btn ghost" style={{ padding: "2px 7px", fontSize: 11 }}
+                        onClick={() => setRole(who, info.role === "editor" ? "viewer" : "editor")}>
+                        {info.role === "editor" ? "Revoke" : "Edit"}
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             ))}
           </div>
           <div className="sm mut" style={{ marginTop: 10, lineHeight: 1.55 }}>
-            Playback and drawings sync to everyone. Trades stay individual.
+            {room.mode === "multiplayer"
+              ? "Playback and drawings sync to everyone. Trades stay individual — check the Leaderboard tab."
+              : "You're driving — guests watch exactly what you see."}
             {isHost ? " Closing the room ends it for everyone and clears the chat." : ""}
           </div>
         </>
