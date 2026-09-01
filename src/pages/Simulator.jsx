@@ -47,6 +47,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [speed, setSpeed] = useState(1);
   const chartCtlRef = useRef(null);
   const [chartReady, setChartReady] = useState(false);
+  /* bumped on every drawing/study edit (see handleDrawingsChanged) purely
+     so the autosave effect below has something to react to — drawing a
+     trendline while paused doesn't touch trades/cursor/notes/symbol/interval
+     on its own, so without this the layout only got persisted incidentally
+     whenever one of those *also* happened to change. */
+  const [layoutTick, setLayoutTick] = useState(0);
   /* a short ring buffer of recently-seen bar timestamps, oldest first —
      the library can append forward cheaply but resists rewriting history
      (see TRADINGVIEW.md), so "step back" walks this instead of asking the
@@ -359,7 +365,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       setSaveState(ok ? "saved" : "failed");
     }, 1000);
     return () => clearTimeout(saveT.current);
-  }, [trades, trade, cursor, notes, symbol, interval, restored, chartReady]); // eslint-disable-line
+  }, [trades, trade, cursor, notes, symbol, interval, restored, chartReady, layoutTick]); // eslint-disable-line
 
   /* remember where the replay bar was left */
   const barSaveT = useRef(null);
@@ -391,11 +397,17 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     await data.roomPut(room.code, doc);
   }, [room, canControl, symbol, interval, cursor, playing, speed, account.handle]);
 
-  const handleDrawingsChanged = useCallback(async () => {
+  const handleDrawingsChanged = useCallback(() => {
+    /* always bump this, room or not — it's what makes the autosave effect
+       below (which otherwise only reacts to trades/cursor/notes/symbol/
+       interval) also pick up a layout-only edit and persist it. */
+    setLayoutTick((n) => n + 1);
     if (!room || !canControl || !chartCtlRef.current) return;
-    const layout = await chartCtlRef.current.save();
-    lastAppliedLayoutRef.current = layout;
-    pushRoom({ layout, force: true });
+    (async () => {
+      const layout = await chartCtlRef.current.save();
+      lastAppliedLayoutRef.current = layout;
+      pushRoom({ layout, force: true });
+    })();
   }, [room, canControl, pushRoom]);
 
   useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, speed, symbol, interval]); // eslint-disable-line
