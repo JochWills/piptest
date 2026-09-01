@@ -1,7 +1,9 @@
 import React from "react";
 
 export const GLOBAL_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* font stylesheet moved to a real <link> in index.html's <head> — see the
+   comment there. A CSS @import here only starts once this whole string
+   has been injected into the DOM by React, which is much later. */
 
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -321,7 +323,20 @@ export const Ic = {
   grid: <><rect x="2.4" y="2.4" width="4.7" height="4.7" rx="1.1" stroke="currentColor" strokeWidth="1.4" fill="none" /><rect x="8.9" y="2.4" width="4.7" height="4.7" rx="1.1" stroke="currentColor" strokeWidth="1.4" fill="none" /><rect x="2.4" y="8.9" width="4.7" height="4.7" rx="1.1" stroke="currentColor" strokeWidth="1.4" fill="none" /><rect x="8.9" y="8.9" width="4.7" height="4.7" rx="1.1" stroke="currentColor" strokeWidth="1.4" fill="none" /></>,
   book: <path d="M3 3.2h4.2c1 0 1.8.8 1.8 1.8v8c0-.8-.7-1.4-1.5-1.4H3zM13 3.2H8.8c-1 0-1.8.8-1.8 1.8v8c0-.8.7-1.4 1.5-1.4H13z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />,
   chart: <path d="M2.5 13.5V9M6.2 13.5V4M9.8 13.5V7M13.5 13.5V2.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />,
-  gear: <><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /><path d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8 3.5 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></>,
+  /* an actual gear — solid teeth, not the sun icon's thin radiating
+     lines, so the two don't read as the same glyph at a glance */
+  gear: <>
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(45 8 8)" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(90 8 8)" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(135 8 8)" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(180 8 8)" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(225 8 8)" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(270 8 8)" />
+    <rect x="7.15" y="2.1" width="1.7" height="2.2" rx=".4" fill="currentColor" transform="rotate(315 8 8)" />
+    <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.4" fill="none" />
+    <circle cx="8" cy="8" r="1.1" fill="currentColor" />
+  </>,
   target: <><circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /></>,
   logout: <path d="M6 3.2H3.4v9.6H6M9.3 5.4 11.9 8l-2.6 2.6M11.9 8H6" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
   chat: <path d="M2.5 3.6h11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.4l-3.1 2.8V11H2.5a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.35" fill="none" strokeLinejoin="round" strokeLinecap="round" />,

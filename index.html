@@ -25,6 +25,13 @@
     <meta name="twitter:image" content="https://www.piptest.com/og.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- was a CSS @import inside a JS-injected <style> tag (GLOBAL_CSS in
+         ui.jsx) — that can't even start fetching until the JS bundle has
+         downloaded, parsed and run, and @import is render-blocking on top
+         of that. A real <link> here lets the browser's preload scanner
+         kick this off immediately, in parallel with everything else,
+         which is the whole point of the preconnect hints above. -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" />
   </head>
   <body style="margin:0">
     <div id="root"></div>

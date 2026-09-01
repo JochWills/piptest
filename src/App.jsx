@@ -1,15 +1,22 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, Suspense, lazy } from "react";
 import { THEMES, cssVars, DEFAULT_TAGS } from "./theme.js";
 import { GLOBAL_CSS, Modal, CornerLoader } from "./components/ui.jsx";
 import Shell from "./components/Shell.jsx";
 import Landing from "./pages/Landing.jsx";
 import Auth from "./pages/Auth.jsx";
 import Reset from "./pages/Reset.jsx";
-import Dashboard from "./pages/Dashboard.jsx";
-import Simulator from "./pages/Simulator.jsx";
-import Journal from "./pages/Journal.jsx";
-import Analytics from "./pages/Analytics.jsx";
-import Settings from "./pages/Settings.jsx";
+/* Lazy: everything behind the auth gate, so a first-time visitor on
+   Landing (the default route, and the one conversion actually depends
+   on) never downloads the trading engine, room sync, journal/analytics
+   or the TradingView wrapper before they've even signed up. Landing,
+   Auth and Reset stay eager — they're small, and they're on the very
+   first paint, so lazy-loading them would just delay the thing this is
+   trying to speed up. */
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const Simulator = lazy(() => import("./pages/Simulator.jsx"));
+const Journal = lazy(() => import("./pages/Journal.jsx"));
+const Analytics = lazy(() => import("./pages/Analytics.jsx"));
+const Settings = lazy(() => import("./pages/Settings.jsx"));
 import { store, K } from "./lib/store.js";
 import { api, API_ENABLED, setToken, refresh, onAuthLost } from "./lib/api.js";
 import * as data from "./lib/data.js";
@@ -31,6 +38,19 @@ const parseHash = () => {
   if (!ROUTES.includes(page)) return { page: "", arg: null };
   return { page, arg: arg || null };
 };
+
+/* Suspense fallback for the lazy-loaded pages above — same spinner the
+   settings-without-account and sim-not-found-yet states already used, so
+   a lazy chunk fetch doesn't look any different from the loading states
+   that were already here. `full` for a standalone route (sim), the
+   shorter version for anything rendering inside Shell's own layout. */
+const PageLoading = ({ full }) => (
+  <div style={full
+    ? { minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--dim)" }
+    : { padding: "60px 0", display: "grid", placeItems: "center" }}>
+    <span className="spinner" />
+  </div>
+);
 
 export default function App() {
   const [route, setRoute] = useState(parseHash);
@@ -354,14 +374,16 @@ export default function App() {
       go("dashboard"); return null;
     }
     return wrap(
-      <Simulator
-        key={meta.id} meta={meta} account={account} theme={theme} T={T} tags={tags}
-        onExit={() => go("dashboard")} onSaveSession={patchSession}
-        onTradesClosed={onTradesClosed} onToggleTheme={toggleTheme}
-        onNav={go} onSignOut={signOut} sessions={sessions}
-        autoJoinCode={pendingJoin?.id === meta.id ? pendingJoin.code : null}
-        onAutoJoinDone={() => setPendingJoin(null)}
-      />
+      <Suspense fallback={<PageLoading full />}>
+        <Simulator
+          key={meta.id} meta={meta} account={account} theme={theme} T={T} tags={tags}
+          onExit={() => go("dashboard")} onSaveSession={patchSession}
+          onTradesClosed={onTradesClosed} onToggleTheme={toggleTheme}
+          onNav={go} onSignOut={signOut} sessions={sessions}
+          autoJoinCode={pendingJoin?.id === meta.id ? pendingJoin.code : null}
+          onAutoJoinDone={() => setPendingJoin(null)}
+        />
+      </Suspense>
     );
   }
 
@@ -374,40 +396,38 @@ export default function App() {
       onHome={() => go("")}
       account={account} theme={theme} onToggleTheme={toggleTheme} onSignOut={signOut}
     >
-      {page === "dashboard" && (
-        <Dashboard sessions={sessions} trades={trades} onNav={go} loading={!booted}
-          onOpen={(id) => go("sim", id)} onCreate={createSession} onDelete={deleteSession}
-          onJoinRoom={joinRoomFromDashboard} />
-      )}
-      {page === "journal" && (
-        <Journal trades={trades} tags={tags} onUpdateTrade={updateTrade} onExport={exportCsv} />
-      )}
-      {page === "analytics" && <Analytics trades={trades} />}
-      {/* Settings reads straight off `account` from its very first render
-          (no optional chaining — it's always been guaranteed non-null by
-          the auth gate above), so unlike the other pages it can't just be
-          handed a null account and left to show its own loading state;
-          hold it back until account actually exists. */}
-      {page === "settings" && !account && (
-        <div style={{ padding: "60px 0", display: "grid", placeItems: "center" }}>
-          <span className="spinner" />
-        </div>
-      )}
-      {page === "settings" && account && (
-        <Settings account={account} sessions={sessions} trades={trades} tags={tags}
-          onSaveAccount={async (patch) => {
-            if (API_ENABLED) {
-              const { user } = await api.updateMe(patch);
-              setAccount(user);
-            } else {
-              const next = { ...account, ...patch };
-              setAccount(next); await store.set(K.account, next);
-            }
-          }}
-          onChangePassword={(b) => api.changePassword(b)}
-          onSaveTags={(t) => { setTags(t); savePrefs({ tags: t }); }}
-          onWipe={wipe} onSignOut={signOut} />
-      )}
+      <Suspense fallback={<PageLoading />}>
+        {page === "dashboard" && (
+          <Dashboard sessions={sessions} trades={trades} onNav={go} loading={!booted}
+            onOpen={(id) => go("sim", id)} onCreate={createSession} onDelete={deleteSession}
+            onJoinRoom={joinRoomFromDashboard} />
+        )}
+        {page === "journal" && (
+          <Journal trades={trades} tags={tags} onUpdateTrade={updateTrade} onExport={exportCsv} />
+        )}
+        {page === "analytics" && <Analytics trades={trades} />}
+        {/* Settings reads straight off `account` from its very first render
+            (no optional chaining — it's always been guaranteed non-null by
+            the auth gate above), so unlike the other pages it can't just be
+            handed a null account and left to show its own loading state;
+            hold it back until account actually exists. */}
+        {page === "settings" && !account && <PageLoading />}
+        {page === "settings" && account && (
+          <Settings account={account} sessions={sessions} trades={trades} tags={tags}
+            onSaveAccount={async (patch) => {
+              if (API_ENABLED) {
+                const { user } = await api.updateMe(patch);
+                setAccount(user);
+              } else {
+                const next = { ...account, ...patch };
+                setAccount(next); await store.set(K.account, next);
+              }
+            }}
+            onChangePassword={(b) => api.changePassword(b)}
+            onSaveTags={(t) => { setTags(t); savePrefs({ tags: t }); }}
+            onWipe={wipe} onSignOut={signOut} />
+        )}
+      </Suspense>
     </Shell>
   );
 }
