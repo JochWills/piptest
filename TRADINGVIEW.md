@@ -23,7 +23,13 @@ get it from TradingView directly before building a business model on it.
 
 ## 2. Install the library
 
-It is not on npm and not on any CDN. Once you have repo access:
+It is not on npm and not on any CDN.
+
+**Locally**: clone it once by hand and copy the `charting_library` folder's
+contents into `public/charting_library/` — Vite serves `public/` at the web
+root, so the files land at `/charting_library/…`, which is what
+`TVAdvancedChart.jsx` expects. Not committed — it's licensed, not ours to
+redistribute; already excluded via `.gitignore`.
 
 ```bash
 git clone --depth 1 git@github.com:tradingview/charting_library.git tv-tmp
@@ -32,24 +38,20 @@ cp -R tv-tmp/charting_library/* public/charting_library/
 rm -rf tv-tmp
 ```
 
-Vite serves `public/` at the web root, so the files land at
-`/charting_library/…`, which is what `TVAdvancedChart.jsx` expects.
+**On Render** (the live site is a static build — there's no persistent disk
+to have installed it onto by hand, so it has to be fetched on every deploy):
+`render.yaml`'s `piptest` service build command runs `npm run tv:install`
+before `npm run build`, which runs `scripts/tv-install.sh`. That script
+needs a `TV_GH_TOKEN` env var — a GitHub personal access token belonging to
+whichever account TradingView granted `charting_library` access to — set as
+a secret on the `piptest` web service in Render's dashboard. If it's unset
+or the clone fails, the build still succeeds and the chart just shows its
+"not installed" placeholder rather than the whole site failing to deploy.
 
-**Do not commit the library.** It's licensed, not yours to redistribute. Add to
-`.gitignore`:
-
-```
-public/charting_library/
-```
-
-Then add the clone step to Render's build command:
-
-```
-npm ci && npm run tv:install && npm run build
-```
-
-with a `tv:install` script that clones using a deploy key. Until that's set up,
-the chart renders a clear "not installed" panel rather than a blank frame.
+To set it up: on GitHub, generate a personal access token for the account
+with access (classic token, `repo` scope is enough), then in Render open the
+`piptest` service → **Environment** → add `TV_GH_TOKEN` with that value →
+save, which triggers a redeploy that actually installs the library this time.
 
 ## 3. What's in `src/tv/`
 

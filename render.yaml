@@ -6,11 +6,19 @@ services:
   - type: web
     name: piptest
     runtime: static
-    buildCommand: npm ci && npm run build
+    # tv:install pulls TradingView's licensed Advanced Charts library in
+    # before the build — it's gitignored on purpose (licensed, not ours to
+    # commit; see TRADINGVIEW.md), so it has to be fetched fresh on every
+    # deploy. Missing/bad TV_GH_TOKEN degrades to the chart's own "not
+    # installed" placeholder rather than failing the whole build.
+    buildCommand: npm ci && npm run tv:install && npm run build
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_URL
         sync: false        # https://api.piptest.com
+      - key: TV_GH_TOKEN
+        sync: false        # GitHub PAT for the account TradingView granted
+                            # charting_library access to — see TRADINGVIEW.md §1
     routes:
       - type: rewrite
         source: /*

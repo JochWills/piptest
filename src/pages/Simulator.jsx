@@ -116,6 +116,20 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const canControl = !room || role === "host" || role === "editor";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
 
+  /* the widget only reads canDraw at mount, so a role change (promoted
+     or demoted mid-session) has to remount it — same tradeoff as an
+     actual symbol/interval switch. Freeze the position first, exactly
+     like switchMarket does, so the remount lands back where the replay
+     actually is rather than snapping to wherever the widget last mounted. */
+  const canControlRef = useRef(canControl);
+  useEffect(() => {
+    if (canControlRef.current === canControl) return;
+    canControlRef.current = canControl;
+    const at = cur?.t ?? cursor;
+    chartStartRef.current = at;
+    seenRef.current = [at]; seenIdxRef.current = 0;
+  }, [canControl]); // eslint-disable-line
+
   const price = cur?.c ?? null;
   const stats = useMemo(() => computeStats(trades), [trades]);
   const equity = stats.equity;
@@ -797,7 +811,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               ) : (
                 <TVAdvancedChart
                   symbol={symbol} interval={IV_TO_TV_RES[interval] || "30"} theme={theme}
-                  startMs={chartStartRef.current}
+                  startMs={chartStartRef.current} canDraw={canControl}
                   onReady={handleReady} onBar={handleBar} onCursor={handleCursor}
                   onState={handleReplayState} onDrawingsChanged={handleDrawingsChanged}
                   height="100%"

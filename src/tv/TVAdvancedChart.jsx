@@ -41,6 +41,8 @@ export default function TVAdvancedChart({
   onDrawingsChanged,// () => void     — for room sync
   onState,          // (state) => void — { playing, atEnd, speed, covered, earliest }; fires when the
                      // replay controller's own state changes, including reaching the end of data on its own
+  canDraw = true,   // false for a room viewer — hides the drawing toolbar entirely rather than
+                     // just disabling PipTest's own UI around it, since drawing is now the library's
   height = 520,
 }) {
   const boxRef = useRef(null);
@@ -79,16 +81,18 @@ export default function TVAdvancedChart({
       autosize: true,
       theme: theme === "dark" ? "dark" : "light",
       /* Replay is ours, so hide the library's own timeframe-jumping UI that
-         would let a user step past the cursor and see the future. */
+         would let a user step past the cursor and see the future. A room
+         viewer (canDraw false) also loses the left toolbar entirely — it's
+         the library's own drawing tools now (§5, TRADINGVIEW.md), so
+         hiding it is the only way to actually stop a viewer drawing,
+         same as PipTest disabling its own tool rail used to. */
       disabled_features: [
         "header_symbol_search",
         "header_compare",
         "go_to_date",
         "timeframes_toolbar",
+        ...(canDraw ? [] : ["left_toolbar"]),
       ],
-      /* left toolbar shown by default — PipTest no longer has its own
-         drawing-tool rail (§5, TRADINGVIEW.md), so this is now the only
-         way to draw at all. */
       enabled_features: [
         "seconds_resolution",
         "use_localstorage_for_settings",
@@ -156,7 +160,7 @@ export default function TVAdvancedChart({
       try { widget.remove(); } catch (e) {}
       widgetRef.current = null; apiRef.current = null;
     };
-  }, [status, symbol, interval, startMs]); // eslint-disable-line
+  }, [status, symbol, interval, startMs, canDraw]); // eslint-disable-line
 
   useEffect(() => { apiRef.current && apiRef.current.setTheme(theme); }, [theme]);
 
