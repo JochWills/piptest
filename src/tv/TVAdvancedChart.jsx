@@ -39,7 +39,7 @@ export default function TVAdvancedChart({
   onBar,            // (bar) => void  — every bar the replay reveals
   onCursor,         // (ms, bar) => void
   onDrawingsChanged,// () => void     — for room sync
-  onState,          // (state) => void — { playing, atEnd, speed, covered, earliest }; fires when the
+  onState,          // (state) => void — { playing, atEnd, stepBars, covered, earliest }; fires when the
                      // replay controller's own state changes, including reaching the end of data on its own
   canDraw = true,   // false for a room viewer — hides the drawing toolbar entirely rather than
                      // just disabling PipTest's own UI around it, since drawing is now the library's

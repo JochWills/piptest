@@ -93,8 +93,20 @@ export const INTERVALS = [
   { id: "1d", ms: 86400000, label: "1D" },
 ];
 
-export const SPEEDS = [1, 2, 3, 5, 10, 25, 50];
 export const barMsOf = (id) => INTERVALS.find((i) => i.id === id)?.ms || 60000;
+
+/* The replay bar's "speed" control used to be an abstract ×N multiplier —
+   unclear what it was N times of, and inconsistent across chart intervals
+   (4× felt completely different on a 1s chart than on a 1D one). It's a
+   step-size picker instead now: literally one of the same INTERVALS values,
+   so "30m" means the same thing here as it does in the timeframe tabs. Next
+   / play then advance the replay by that much calendar time, expressed as
+   however many bars of the *currently displayed* interval that covers. */
+export const MAX_STEP_BARS = 500; // batch cap — see stepBarsFor
+export const stepBarsFor = (stepId, chartIntervalId) => {
+  const stepMs = barMsOf(stepId), chartMs = barMsOf(chartIntervalId);
+  return Math.max(1, Math.min(MAX_STEP_BARS, Math.round(stepMs / chartMs)));
+};
 
 /* setup tags for journalling — user-extendable in Settings */
 export const DEFAULT_TAGS = [

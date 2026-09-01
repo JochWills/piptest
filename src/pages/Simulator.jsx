@@ -5,7 +5,7 @@ import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
 import { IV_TO_TV_RES } from "../tv/marketFeed.js";
-import { SYMBOLS, INTERVALS, SPEEDS, barMsOf } from "../theme.js";
+import { SYMBOLS, INTERVALS, barMsOf, stepBarsFor } from "../theme.js";
 import {
   validateSetup, buildSetup, runEngine, bookTrade, openPnl, computeStats, rrOf,
   evaluateChallenge, fmtPrice, fmtMoney, fmtSigned, fmtR, fmtClock, fmtShort, dec,
@@ -44,7 +44,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [cur, setCur] = useState(null);
   const prevCloseRef = useRef(null);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
+  /* how much calendar time one "next" click or one play-tick advances,
+     as an INTERVALS id (e.g. "30m") — independent of the chart's own
+     displayed interval. barsPerStep below converts that into an actual
+     bar count for whatever timeframe is currently on screen. */
+  const [stepId, setStepId] = useState("1m");
   const chartCtlRef = useRef(null);
   const [chartReady, setChartReady] = useState(false);
   /* bumped on every drawing/study edit (see handleDrawingsChanged) purely
@@ -61,6 +65,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      whole thing to a saved position before the widget ever mounts. */
   const seenRef = useRef([meta.startMs]);
   const seenIdxRef = useRef(0);
+  /* index-aligned with seenRef — the full {t,o,h,l,c,v} bar for every
+     entry that's actually been revealed (handleBar), or null for the
+     one bare anchor timestamp seenRef starts life with (mount/restore/
+     switchMarket — nothing's been revealed at that position yet, so
+     there's no bar to show). Lets stepBack/stepForward update the
+     displayed clock/price/OHLC immediately when they jump within
+     already-seen history, instead of only on a freshly revealed bar. */
+  const seenBarsRef = useRef([null]);
 
   /* ---------- trading ---------- */
   const [trade, setTrade] = useState(null);
@@ -140,8 +152,15 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     canControlRef.current = canControl;
     const at = cur?.t ?? cursor;
     chartStartRef.current = at;
-    seenRef.current = [at]; seenIdxRef.current = 0;
+    seenRef.current = [at]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
   }, [canControl]); // eslint-disable-line
+
+  /* how many bars of the *currently displayed* interval the chosen step
+     size covers — e.g. stepId="4h" on a 30m chart is 8 bars, on a 1m
+     chart is 240. Recomputed whenever either changes; capped (see
+     stepBarsFor) so an extreme combination like "4h" steps on a 1s
+     chart can't try to reveal tens of thousands of bars in one go. */
+  const barsPerStep = useMemo(() => stepBarsFor(stepId, interval), [stepId, interval]);
 
   const price = cur?.c ?? null;
   const stats = useMemo(() => computeStats(trades), [trades]);
@@ -175,7 +194,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         const savedCursor = typeof body.cursor === "number" && body.cursor >= LEGACY_CURSOR_CUTOFF ? body.cursor : meta.startMs;
         setCursor(savedCursor);
         chartStartRef.current = savedCursor;
-        seenRef.current = [savedCursor]; seenIdxRef.current = 0;
+        seenRef.current = [savedCursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
         setTrades(body.trades || []);
         setTrade(body.trade || null);
         pendingLayoutRef.current = body.layout || null;
@@ -215,7 +234,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const b = toNative(rawBar);
     setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
     const last = seenRef.current[seenRef.current.length - 1];
-    if (last !== b.t) { seenRef.current.push(b.t); if (seenRef.current.length > 500) seenRef.current.shift(); }
+    if (last !== b.t) {
+      seenRef.current.push(b.t); seenBarsRef.current.push(b);
+      if (seenRef.current.length > 500) { seenRef.current.shift(); seenBarsRef.current.shift(); }
+    }
     seenIdxRef.current = seenRef.current.length - 1;
 
     const t0 = tradeRef.current;
@@ -273,7 +295,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
        prop changes (see the note by chartStartRef's declaration). */
     const at = cur?.t ?? cursor;
     chartStartRef.current = at;
-    seenRef.current = [at]; seenIdxRef.current = 0;
+    seenRef.current = [at]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
     if (cs) setSymbol(nextSym);
     if (ci) setIv(nextIv);
     /* Twelve Data has no 1-second candles — landing on one of its
@@ -287,31 +309,54 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      Forward is the library's own cheap incremental step. Backward is not
      (see TRADINGVIEW.md) — it resists rewriting history — so "back" and
      re-stepping "forward" within what's already been seen walk the small
-     ring buffer of recently-seen bar timestamps instead, via jumpTo. */
+     ring buffer of recently-seen bars instead, via jumpTo.
+
+     Both now move by `barsPerStep` bars, not always 1 — the chosen step
+     size (the dropdown next to Play) can span several already-seen bars,
+     several fresh ones, or a mix: whatever's still in the ring buffer is
+     an instant jumpTo, and whatever isn't gets freshly revealed (and run
+     through the trade engine, bar by bar) via replay.stepBars.
+
+     jumpTo repositions the chart but — pre-existing, not new here —
+     never told Simulator's own OHLC/clock state what it jumped to (only
+     a freshly *revealed* bar does, via handleBar), so stepping back used
+     to visibly leave the clock/price stuck at wherever the last reveal
+     left them. applySeenBar fixes that using the bar this ring buffer
+     already has on hand for anything actually re-visited. */
+  const applySeenBar = (idx) => {
+    const b = seenBarsRef.current[idx];
+    if (!b) return; // the one bare anchor entry — nothing revealed there yet
+    setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
+  };
   const stepForward = useCallback(() => {
     const ctl = chartCtlRef.current;
     if (!ctl) return;
-    if (seenIdxRef.current < seenRef.current.length - 1) {
-      seenIdxRef.current++;
+    const remaining = seenRef.current.length - 1 - seenIdxRef.current;
+    if (remaining > 0) {
+      const jump = Math.min(barsPerStep, remaining);
+      seenIdxRef.current += jump;
       ctl.replay.jumpTo(seenRef.current[seenIdxRef.current], ctl.widget);
+      applySeenBar(seenIdxRef.current);
+      if (jump < barsPerStep) ctl.replay.stepBars(barsPerStep - jump);
     } else {
-      ctl.replay.step();
+      ctl.replay.stepBars(barsPerStep);
     }
-  }, []);
+  }, [barsPerStep]);
   const stepBack = useCallback(() => {
     const ctl = chartCtlRef.current;
     if (!ctl || seenIdxRef.current <= 0) return;
-    seenIdxRef.current--;
+    seenIdxRef.current = Math.max(0, seenIdxRef.current - barsPerStep);
     ctl.replay.jumpTo(seenRef.current[seenIdxRef.current], ctl.widget);
-  }, []);
+    applySeenBar(seenIdxRef.current);
+  }, [barsPerStep]);
   const backToStart = useCallback(() => {
     const ctl = chartCtlRef.current;
     if (!ctl) return;
-    seenRef.current = [meta.startMs]; seenIdxRef.current = 0;
+    seenRef.current = [meta.startMs]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
     ctl.replay.jumpTo(meta.startMs, ctl.widget);
   }, [meta.startMs]);
 
-  /* drives the widget's own replay clock off Simulator's playing/speed
+  /* drives the widget's own replay clock off Simulator's playing/step
      state, rather than the other way round — room sync and the transport
      buttons both just flip this state, same as before. */
   useEffect(() => {
@@ -320,8 +365,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   }, [playing, chartReady]);
   useEffect(() => {
     if (!chartReady || !chartCtlRef.current) return;
-    chartCtlRef.current.replay.setSpeed(speed);
-  }, [speed, chartReady]);
+    chartCtlRef.current.replay.setStep(barsPerStep);
+  }, [barsPerStep, chartReady]);
   /* the replay controller can also stop itself (end of available data) —
      without this, the Play button could keep showing "playing" forever */
   const handleReplayState = useCallback((s) => { if (!s.playing) setPlaying(false); }, []);
@@ -398,11 +443,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const now = Date.now();
     if (!extra.force && now - pushRef.current < 700) return;
     pushRef.current = now;
-    const doc = { ...room, symbol, interval, cursor, playing, speed, updatedBy: account.handle, updatedAt: now, ...extra };
+    const doc = { ...room, symbol, interval, cursor, playing, stepId, updatedBy: account.handle, updatedAt: now, ...extra };
     delete doc.force;
     setRoom(doc);
     await data.roomPut(room.code, doc);
-  }, [room, canControl, symbol, interval, cursor, playing, speed, account.handle]);
+  }, [room, canControl, symbol, interval, cursor, playing, stepId, account.handle]);
 
   const handleDrawingsChanged = useCallback(() => {
     /* always bump this, room or not — it's what makes the autosave effect
@@ -417,7 +462,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     })();
   }, [room, canControl, pushRoom]);
 
-  useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, speed, symbol, interval]); // eslint-disable-line
+  useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, stepId, symbol, interval]); // eslint-disable-line
 
   useEffect(() => {
     if (!room?.code || !API_ENABLED) return;
@@ -448,11 +493,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
          to be right by the time the widget (re)mounts, which is the only
          moment it's actually read. */
       chartStartRef.current = doc.cursor;
-      seenRef.current = [doc.cursor]; seenIdxRef.current = 0;
+      seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
       const marketChanged = doc.symbol !== symbol || doc.interval !== interval;
       if (doc.symbol !== symbol) setSymbol(doc.symbol);
       if (doc.interval !== interval) setIv(doc.interval);
-      setSpeed(doc.speed); setPlaying(doc.playing);
+      setStepId(doc.stepId || "1m"); setPlaying(doc.playing);
       /* a couple of bars' worth of drift is normal jitter, not a desync —
          cursor is milliseconds now, not a bar index, so the old ">3" bar
          tolerance would resync on every poll */
@@ -485,7 +530,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const code = makeCode();
     const doc = { code, host: account.handle, symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      layout: null, cursor, playing: false, speed, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
+      layout: null, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
@@ -949,11 +994,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                     onClick={stepForward} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
                 </div>
 
-                <select className="in" value={speed} disabled={!canControl}
-                  onChange={(e) => setSpeed(+e.target.value)}
-                  title="Replay speed"
+                <select className="in" value={stepId} disabled={!canControl}
+                  onChange={(e) => setStepId(e.target.value)}
+                  title="Time per step — how far Next/Play move the replay"
                   style={{ width: 66, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
-                  {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}&times;</option>)}
+                  {INTERVALS.map((iv) => <option key={iv.id} value={iv.id}>{iv.label}</option>)}
                 </select>
 
                 <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0, marginLeft: "auto" }}>

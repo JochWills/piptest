@@ -3,7 +3,7 @@ import Logo, { LogoMark } from "../components/Logo.jsx";
 import { Card, Svg, Ic } from "../components/ui.jsx";
 import Avatar from "../components/Avatar.jsx";
 import FloatingBar from "../components/FloatingBar.jsx";
-import { SYMBOLS, INTERVALS, SPEEDS } from "../theme.js";
+import { SYMBOLS, INTERVALS } from "../theme.js";
 
 /* ============================================================
    Landing — the page that has to earn the signup
@@ -178,13 +178,13 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
       <section style={{ borderBottom: "1px solid var(--border)" }}>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "26px 20px",
           display: "flex", gap: 40, justifyContent: "center", flexWrap: "wrap" }}>
-          {/* pulled straight from the actual symbol/interval/speed lists
-              rather than hand-typed, so this can't quietly drift out of
-              date again as markets get added (it already had — this used
-              to say "10 · Crypto markets" from before forex/index ETFs
-              were added, undercounting the real total by half). */}
+          {/* pulled straight from the actual symbol/interval lists rather
+              than hand-typed, so this can't quietly drift out of date again
+              as markets get added (it already had — this used to say
+              "10 · Crypto markets" from before forex/index ETFs were added,
+              undercounting the real total by half). */}
           {[[INTERVALS[0].label, "Smallest candle"], [String(SYMBOLS.length), "Markets"],
-            [`${Math.max(...SPEEDS)}×`, "Replay speed"], ["∞", "Repeat attempts"]].map(([v, l]) => (
+            [INTERVALS[INTERVALS.length - 1].label, "Biggest replay jump"], ["∞", "Repeat attempts"]].map(([v, l]) => (
             <div key={l} style={{ textAlign: "center" }}>
               <div className="num" style={{ fontSize: 22, fontWeight: 700 }}>{v}</div>
               <div className="cap" style={{ marginTop: 2 }}>{l}</div>
@@ -646,8 +646,8 @@ function MockScreen({ T }) {
                   <span ref={pauseIconRef} style={{ position: "absolute", inset: 0, opacity: 0, transition: "opacity .15s" }}><Svg s={13}>{Ic.pause}</Svg></span>
                 </span>
               </button>
-              <select className="in" disabled defaultValue="4" style={{ width: 54, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
-                <option value="4">4&times;</option>
+              <select className="in" disabled defaultValue="30m" style={{ width: 66, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
+                <option value="30m">30m</option>
               </select>
               <input ref={scrubRef} type="range" min={0} max={bars.length - 1} defaultValue={REVEAL_FROM} disabled
                 style={{ flex: 1, minWidth: 80, accentColor: T.brand, margin: 0 }} />
