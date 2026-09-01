@@ -100,13 +100,12 @@ export const barMsOf = (id) => INTERVALS.find((i) => i.id === id)?.ms || 60000;
    (4× felt completely different on a 1s chart than on a 1D one). It's a
    step-size picker instead now: literally one of the same INTERVALS values,
    so "30m" means the same thing here as it does in the timeframe tabs. Next
-   / play then advance the replay by that much calendar time, expressed as
-   however many bars of the *currently displayed* interval that covers. */
-export const MAX_STEP_BARS = 500; // batch cap — see stepBarsFor
-export const stepBarsFor = (stepId, chartIntervalId) => {
-  const stepMs = barMsOf(stepId), chartMs = barMsOf(chartIntervalId);
-  return Math.max(1, Math.min(MAX_STEP_BARS, Math.round(stepMs / chartMs)));
-};
+   / play then advance the replay by that much calendar time — either as
+   whole bars of the currently displayed interval (a step size at or above
+   it), or, below it, by actually fetching finer data and building up the
+   still-forming candle live (see datafeed.js's aggregation in control.step).
+   Simulator just passes the raw duration in ms; the replay/datafeed layer
+   works out what that means in bars. */
 
 /* setup tags for journalling — user-extendable in Settings */
 export const DEFAULT_TAGS = [

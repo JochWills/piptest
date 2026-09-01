@@ -5,7 +5,7 @@ import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
 import { IV_TO_TV_RES } from "../tv/marketFeed.js";
-import { SYMBOLS, INTERVALS, barMsOf, stepBarsFor } from "../theme.js";
+import { SYMBOLS, INTERVALS, barMsOf } from "../theme.js";
 import {
   validateSetup, buildSetup, runEngine, bookTrade, openPnl, computeStats, rrOf,
   evaluateChallenge, fmtPrice, fmtMoney, fmtSigned, fmtR, fmtClock, fmtShort, dec,
@@ -46,8 +46,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [playing, setPlaying] = useState(false);
   /* how much calendar time one "next" click or one play-tick advances,
      as an INTERVALS id (e.g. "30m") — independent of the chart's own
-     displayed interval. barsPerStep below converts that into an actual
-     bar count for whatever timeframe is currently on screen. */
+     displayed interval. stepMs below turns that into milliseconds. */
   const [stepId, setStepId] = useState("1m");
   const chartCtlRef = useRef(null);
   const [chartReady, setChartReady] = useState(false);
@@ -155,12 +154,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     seenRef.current = [at]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
   }, [canControl]); // eslint-disable-line
 
-  /* how many bars of the *currently displayed* interval the chosen step
-     size covers — e.g. stepId="4h" on a 30m chart is 8 bars, on a 1m
-     chart is 240. Recomputed whenever either changes; capped (see
-     stepBarsFor) so an extreme combination like "4h" steps on a 1s
-     chart can't try to reveal tens of thousands of bars in one go. */
-  const barsPerStep = useMemo(() => stepBarsFor(stepId, interval), [stepId, interval]);
+  /* the chosen step size, in calendar milliseconds. What that actually
+     means in bars depends on whether it's at/above the chart's own bar
+     duration (whole chart-resolution candles, handled entirely by the
+     seen-buffer walk below) or below it (sub-bar candle-building,
+     handled by control.step in datafeed.js — see stepMs there). */
+  const stepMs = useMemo(() => barMsOf(stepId), [stepId]);
 
   const price = cur?.c ?? null;
   const stats = useMemo(() => computeStats(trades), [trades]);
@@ -311,11 +310,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      re-stepping "forward" within what's already been seen walk the small
      ring buffer of recently-seen bars instead, via jumpTo.
 
-     Both now move by `barsPerStep` bars, not always 1 — the chosen step
-     size (the dropdown next to Play) can span several already-seen bars,
-     several fresh ones, or a mix: whatever's still in the ring buffer is
-     an instant jumpTo, and whatever isn't gets freshly revealed (and run
-     through the trade engine, bar by bar) via replay.stepBars.
+     Both now cover `stepMs` of calendar time, not always one bar — the
+     chosen step size (the dropdown next to Play) can span several
+     already-seen bars, several fresh ones, or a mix: whatever's still in
+     the ring buffer is an instant jumpTo, and whatever isn't gets freshly
+     revealed (and run through the trade engine, bar by bar) via
+     replay.stepFor. If the step size is *finer* than the chart's own
+     bar width, "freshly revealed" means real sub-bar data, and what
+     lands in the buffer is a sub-bar of the still-forming candle rather
+     than a whole new one — see control.step in datafeed.js, which is
+     what actually decides that and builds the candle up on the chart.
 
      jumpTo repositions the chart but — pre-existing, not new here —
      never told Simulator's own OHLC/clock state what it jumped to (only
@@ -328,27 +332,47 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (!b) return; // the one bare anchor entry — nothing revealed there yet
     setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
   };
+  /* how far the seen buffer already reaches, forward or back, before
+     `stepMs` of calendar time (measured from the current position) runs
+     out — always at least one bar/position if the buffer has one to
+     give, same "can't step less than the smallest unit available"
+     floor the old bar-count version had. */
+  const walkSeen = (dir) => {
+    const startT = seenRef.current[seenIdxRef.current];
+    const lastIdx = seenRef.current.length - 1;
+    let idx = seenIdxRef.current;
+    if (dir > 0) {
+      while (idx < lastIdx && seenRef.current[idx + 1] - startT <= stepMs) idx++;
+      if (idx === seenIdxRef.current && idx < lastIdx) idx++;
+    } else {
+      while (idx > 0 && startT - seenRef.current[idx - 1] <= stepMs) idx--;
+      if (idx === seenIdxRef.current && idx > 0) idx--;
+    }
+    return idx;
+  };
   const stepForward = useCallback(() => {
     const ctl = chartCtlRef.current;
     if (!ctl) return;
-    const remaining = seenRef.current.length - 1 - seenIdxRef.current;
-    if (remaining > 0) {
-      const jump = Math.min(barsPerStep, remaining);
-      seenIdxRef.current += jump;
-      ctl.replay.jumpTo(seenRef.current[seenIdxRef.current], ctl.widget);
-      applySeenBar(seenIdxRef.current);
-      if (jump < barsPerStep) ctl.replay.stepBars(barsPerStep - jump);
-    } else {
-      ctl.replay.stepBars(barsPerStep);
+    const startT = seenRef.current[seenIdxRef.current];
+    const lastIdx = seenRef.current.length - 1;
+    const idx = walkSeen(1);
+    const movedWithinBuffer = idx > seenIdxRef.current;
+    const coveredMs = movedWithinBuffer ? seenRef.current[idx] - startT : 0;
+    if (movedWithinBuffer) {
+      seenIdxRef.current = idx;
+      ctl.replay.jumpTo(seenRef.current[idx], ctl.widget);
+      applySeenBar(idx);
     }
-  }, [barsPerStep]);
+    if (idx === lastIdx && coveredMs < stepMs) ctl.replay.stepFor(stepMs - coveredMs);
+  }, [stepMs]);
   const stepBack = useCallback(() => {
     const ctl = chartCtlRef.current;
     if (!ctl || seenIdxRef.current <= 0) return;
-    seenIdxRef.current = Math.max(0, seenIdxRef.current - barsPerStep);
-    ctl.replay.jumpTo(seenRef.current[seenIdxRef.current], ctl.widget);
-    applySeenBar(seenIdxRef.current);
-  }, [barsPerStep]);
+    const idx = walkSeen(-1);
+    seenIdxRef.current = idx;
+    ctl.replay.jumpTo(seenRef.current[idx], ctl.widget);
+    applySeenBar(idx);
+  }, [stepMs]);
   const backToStart = useCallback(() => {
     const ctl = chartCtlRef.current;
     if (!ctl) return;
@@ -365,8 +389,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   }, [playing, chartReady]);
   useEffect(() => {
     if (!chartReady || !chartCtlRef.current) return;
-    chartCtlRef.current.replay.setStep(barsPerStep);
-  }, [barsPerStep, chartReady]);
+    chartCtlRef.current.replay.setStep(stepMs);
+  }, [stepMs, chartReady]);
   /* the replay controller can also stop itself (end of available data) —
      without this, the Play button could keep showing "playing" forever */
   const handleReplayState = useCallback((s) => { if (!s.playing) setPlaying(false); }, []);
