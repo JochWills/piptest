@@ -393,6 +393,49 @@ router.delete("/kv/:key", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+/* A live room is one JSON blob (a plain PUT above replaces the whole
+   thing), and multiplayer means several browsers can all be pushing
+   updates a few hundred milliseconds apart — cursor position, a new
+   drawing, a trade heartbeat, a chat message, all landing at once.
+   Every one of those was a client-side "read the doc, change my one
+   field, write the whole doc back" — and whichever write lands last
+   wins in full, silently reverting every *other* field to whatever
+   that writer's own (already slightly stale) copy of them happened to
+   be. That's what was showing up as vanishing drawings and resyncing
+   viewports: someone just stepping the replay would overwrite someone
+   else's just-added trendline with their own older copy of it.
+   This does the merge inside Postgres instead, with jsonb_set — one
+   UPDATE, so two concurrent patches to *different* fields (or even the
+   same array, for "append") always both survive, because each one is
+   computed from whatever the row actually holds at the moment it runs,
+   never from a client's read that's already a network round-trip old. */
+router.patch("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
+  if (!/^room:[A-Z0-9]{6}$/.test(req.params.key)) {
+    return res.status(400).json({ error: "bad_key", message: "Only room keys can be patched." });
+  }
+  const ops = Array.isArray(req.body?.patches) ? req.body.patches.slice(0, 20) : [];
+  let expr = "value";
+  const params = [req.params.key];
+  for (const op of ops) {
+    if (!Array.isArray(op.path) || !op.path.length || !op.path.every((s) => typeof s === "string")) continue;
+    params.push(op.path);
+    const pathParam = `$${params.length}`;
+    if (op.remove) {
+      expr = `(${expr} #- ${pathParam})`;
+    } else if (op.append !== undefined) {
+      params.push(JSON.stringify(op.append));
+      expr = `jsonb_set(${expr}, ${pathParam}, COALESCE(${expr} #> ${pathParam}, '[]'::jsonb) || $${params.length}::jsonb, true)`;
+    } else {
+      params.push(JSON.stringify(op.value ?? null));
+      expr = `jsonb_set(${expr}, ${pathParam}, $${params.length}::jsonb, true)`;
+    }
+  }
+  if (expr === "value") return res.status(400).json({ error: "no_valid_patches" });
+  const r = await q(`UPDATE kv SET value = ${expr}, updated_at = now() WHERE key = $1 RETURNING value`, params);
+  if (!r.rowCount) return res.status(404).json({ error: "not_found" });
+  res.json({ value: r.rows[0].value });
+});
+
 /* =====================================================
    MARKET DATA — forex & index ETFs via Twelve Data
 

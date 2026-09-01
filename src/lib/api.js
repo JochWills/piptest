@@ -133,9 +133,15 @@ export const api = {
     raw(`/api/market/twelvedata/candles?symbol=${symbol}&interval=${interval}&from=${from}&to=${to}`),
 
   /* rooms */
-  kvGet: (k)      => raw(`/api/kv/${encodeURIComponent(k)}`),
-  kvPut: (k, v)   => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "PUT", body: { value: v } }),
-  kvDel: (k)      => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "DELETE" }),
+  kvGet: (k)        => raw(`/api/kv/${encodeURIComponent(k)}`),
+  kvPut: (k, v)     => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "PUT", body: { value: v } }),
+  kvDel: (k)        => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "DELETE" }),
+  /* atomic partial update (server does the merge in Postgres via
+     jsonb_set) — see server/routes.js for why this exists: a plain PUT
+     is a full-document read-modify-write on the client's side, which
+     multiplayer's several-writers-at-once made into a real, frequent
+     "last push silently reverts everyone else's field" bug. */
+  kvPatch: (k, patches) => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "PATCH", body: { patches } }),
 
   /* admin */
   adminOverview: ()   => raw("/api/admin/overview"),

@@ -69,6 +69,17 @@ export async function roomPut(code, doc) {
   if (!remote) return false;
   try { await api.kvPut(`room:${code}`, doc); return true; } catch (e) { return false; }
 }
+/* `patches`: [{ path: ["a","b"], value }] to set a.b, or
+   [{ path: ["arr"], append: [...] }] to atomically concatenate onto
+   whatever array already lives there, or [{ path: [...], remove: true }]
+   to delete a key — all computed server-side against whatever the row
+   currently holds, not a client-side read. Returns the doc's new value
+   (or null on failure) so a caller can update local state without a
+   separate roomGet. */
+export async function roomPatch(code, patches) {
+  if (!remote) return null;
+  try { return (await api.kvPatch(`room:${code}`, patches)).value; } catch (e) { return null; }
+}
 export async function roomDelete(code) {
   if (!remote) return false;
   /* wipes the whole room doc — including chat — from the kv table */

@@ -562,35 +562,36 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   }, [barPos, barCollapsed, restored]);
 
   /* ================= rooms =================
-     `layout` (drawings + indicators + settings, from the widget's own
-     save()) only gets refreshed in the room doc when it actually changes
-     (see handleDrawingsChanged below) — the regular push below carries
-     whatever layout (and participants/trading/roomLog) the freshest doc
-     has, not this client's own possibly-stale copy of it — see pushRoom's
-     own comment for why that distinction actually matters now. */
+     A read-then-write-the-whole-doc push — even one that reads fresh
+     right before writing — still races: two participants' pushes can
+     each read a doc that doesn't yet have the other's just-landed
+     write, and whichever PUT lands second wins in full, quietly
+     reverting every field the FIRST push had just changed (their new
+     drawing included) back to what the second push's own stale read
+     saw. That's what kept showing up as vanishing drawings and
+     resyncing viewports even after only reading fresh immediately
+     before writing. `data.roomPatch` (server/routes.js) fixes this
+     properly: the merge happens inside Postgres via jsonb_set, computed
+     from whatever the row actually holds at the moment each patch
+     executes, not from anything a client read over the network — so
+     this push only ever touches the exact fields it lists below, full
+     stop, regardless of what anyone else's concurrent patch is doing
+     to layout/trading/participants/etc. */
   const lastAppliedLayoutRef = useRef(null);
   const pushRoom = useCallback(async (extra = {}) => {
     if (!room || !canControl || !API_ENABLED || !roomSyncedRef.current) return;
     const now = Date.now();
     if (!extra.force && now - pushRef.current < 700) return;
     pushRef.current = now;
-    /* Read fresh, don't spread the local `room` state — this client's own
-       copy is only as recent as its last poll (up to ~1.5s, longer if
-       nothing prompted a full-apply since), and this push only actually
-       OWNS symbol/interval/cursor/playing/stepId (plus `extra` when it's
-       a deliberate layout push). Every OTHER field — layout above all —
-       has to come from the server's current copy: multiplayer means any
-       participant can trigger this on every single replayed step, and
-       spreading a stale `room.layout` forward on a routine cursor push
-       would silently revert anyone else's drawing added since this
-       client's last poll, even though this push never touched drawings
-       at all. Same read-fresh-then-write shape sendChat/setRole already
-       use, for the same reason. */
-    const fresh = (await data.roomGet(room.code)) || room;
-    const doc = { ...fresh, symbol, interval, cursor, playing, stepId, updatedBy: account.handle, updatedAt: now, ...extra };
-    delete doc.force;
-    setRoom(doc);
-    await data.roomPut(room.code, doc);
+    const patches = [
+      { path: ["symbol"], value: symbol }, { path: ["interval"], value: interval },
+      { path: ["cursor"], value: cursor }, { path: ["playing"], value: playing },
+      { path: ["stepId"], value: stepId }, { path: ["updatedBy"], value: account.handle },
+      { path: ["updatedAt"], value: now },
+    ];
+    if (extra.layout !== undefined) patches.push({ path: ["layout"], value: extra.layout });
+    const merged = await data.roomPatch(room.code, patches);
+    if (merged) setRoom(merged);
   }, [room, canControl, symbol, interval, cursor, playing, stepId, account.handle]);
 
   const handleDrawingsChanged = useCallback(() => {
@@ -690,35 +691,34 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
       /* ---- multiplayer: heartbeat + live trade/balance broadcast, plus
          (host only, per how this was decided) a stale-participant sweep.
-         Deliberately never touches updatedBy/updatedAt — this is a
-         low-priority side channel onto the same doc, not a chart-state
-         change, so it can't be mistaken for one and never fights
-         pushRoom/setRole/sendChat over "who wrote last". Reads trade/
-         price/equity off refs, not the closed-over state values, since
-         this effect (and this poll fn) is only rebuilt when room.code or
-         account.handle change — see the refs' own comments. */
+         A single atomic roomPatch — never a full-doc PUT — so this can't
+         collide with anyone else's own heartbeat patch (each targets its
+         own `trading.<handle>` path) or with a chart-state push landing
+         at the same moment. Reads trade/price/equity off refs, not the
+         closed-over state values, since this effect (and this poll fn)
+         is only rebuilt when room.code or account.handle change — see
+         the refs' own comments. */
       if (doc.mode === "multiplayer") {
         const t = tradeRef.current;
-        doc.trading = { ...doc.trading,
-          [account.handle]: {
-            avatar: account.avatar || null, lastSeen: Date.now(),
-            balance: equityRef.current, unrealPnl: openPnl(t, priceRef.current),
-            openTrade: t ? { ...t, markPrice: priceRef.current } : null,
-          } };
+        const patches = [{ path: ["trading", account.handle], value: {
+          avatar: account.avatar || null, lastSeen: Date.now(),
+          balance: equityRef.current, unrealPnl: openPnl(t, priceRef.current),
+          openTrade: t ? { ...t, markPrice: priceRef.current } : null,
+        } }];
         if (isHost) {
           const staleBefore = Date.now() - 60000;
-          for (const [who, info] of Object.entries(doc.trading)) {
+          for (const [who, info] of Object.entries(doc.trading || {})) {
             if (who === account.handle || !info.openTrade || info.lastSeen > staleBefore) continue;
             const ot = info.openTrade;
             if (ot.status === "open") {
               const rec = bookTrade(ot, ot.markPrice ?? ot.entry, "left room", Date.now());
-              doc.roomLog = [...(doc.roomLog || []),
-                { ...rec, handle: who, avatar: info.avatar, forcedClose: true }].slice(-500);
+              patches.push({ path: ["roomLog"], append: [{ ...rec, handle: who, avatar: info.avatar, forcedClose: true }] });
             }
-            doc.trading[who] = { ...info, openTrade: null };
+            patches.push({ path: ["trading", who, "openTrade"], value: null });
           }
         }
-        await data.roomPut(room.code, doc);
+        const merged = await data.roomPatch(room.code, patches);
+        if (merged) setRoom((r) => ({ ...r, trading: merged.trading, roomLog: merged.roomLog }));
       }
     };
     poll();
@@ -758,12 +758,13 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (!code) { setRoomMsg("Enter a room code first."); return; }
     if (code.length !== 6) { setRoomMsg(`"${code}" is ${code.length} characters — codes are 6.`); return; }
     setRoomMsg("Looking for that room…");
-    const doc = await data.roomGet(code);
-    if (!doc) { setRoomMsg(`No open room found for ${code}.`); return; }
-    doc.participants = { ...doc.participants,
-      [account.handle]: { role: doc.participants?.[account.handle]?.role || "viewer",
-                          ts: Date.now(), avatar: account.avatar || null } };
-    await data.roomPut(code, doc);
+    const existing = await data.roomGet(code);
+    if (!existing) { setRoomMsg(`No open room found for ${code}.`); return; }
+    const role = existing.participants?.[account.handle]?.role || "viewer";
+    const merged = await data.roomPatch(code, [
+      { path: ["participants", account.handle], value: { role, ts: Date.now(), avatar: account.avatar || null } },
+    ]);
+    const doc = merged || existing;
     appliedRef.current = 0; chatSeenRef.current = doc.messages?.length || 0; setChatUnread(0);
     /* not yet — Simulator's own symbol/interval/cursor/stepId/playing are
        still joinRoomFromDashboard's throwaway placeholder until the poll
@@ -791,21 +792,24 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
-      const d = await data.roomGet(room.code);
-      if (d) {
-        /* fast path: close an open multiplayer position right now, rather
-           than leave it to the host's up-to-60s stale sweep (poll effect
-           below) — that sweep is the safety net for a crash/closed tab,
-           a deliberate Leave click can just do it immediately. */
-        const t = tradeRef.current;
-        if (d.mode === "multiplayer" && t?.status === "open" && priceRef.current) {
-          const rec = bookTrade(t, priceRef.current, "left room", Date.now());
-          d.roomLog = [...(d.roomLog || []), { ...rec, handle: account.handle, avatar: account.avatar || null }].slice(-500);
-        }
-        if (d.participants) delete d.participants[account.handle];
-        if (d.trading) delete d.trading[account.handle];
-        await data.roomPut(room.code, d);
+      const patches = [
+        { path: ["participants", account.handle], remove: true },
+        { path: ["trading", account.handle], remove: true },
+      ];
+      /* fast path: close an open multiplayer position right now, rather
+         than leave it to the host's up-to-60s stale sweep (poll effect
+         below) — that sweep is the safety net for a crash/closed tab,
+         a deliberate Leave click can just do it immediately. room.mode
+         is fixed for the room's whole life (set once at hostRoom/never
+         changed), so the local copy is safe to trust here — no read
+         needed before removing our own two keys either, both patches
+         are no-ops if they don't exist. */
+      const t = tradeRef.current;
+      if (room.mode === "multiplayer" && t?.status === "open" && priceRef.current) {
+        const rec = bookTrade(t, priceRef.current, "left room", Date.now());
+        patches.push({ path: ["roomLog"], append: [{ ...rec, handle: account.handle, avatar: account.avatar || null }] });
       }
+      await data.roomPatch(room.code, patches);
     }
     setRoom(null); setRoomMsg(""); setChatOpen(false);
   };
@@ -818,12 +822,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   };
   const setRole = async (who, r) => {
     if (!isHost) return;
-    const d = await data.roomGet(room.code);
-    if (!d) return;
-    d.participants[who] = { ...d.participants[who], role: r };
-    d.updatedBy = account.handle; d.updatedAt = Date.now();
-    await data.roomPut(room.code, d);
-    setRoom(d);
+    const merged = await data.roomPatch(room.code, [
+      { path: ["participants", who, "role"], value: r },
+      { path: ["updatedBy"], value: account.handle }, { path: ["updatedAt"], value: Date.now() },
+    ]);
+    if (merged) setRoom(merged);
   };
   const sendChat = async () => {
     const text = chatText.trim();
@@ -831,14 +834,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     setChatBusy(true);
     setChatText("");
     try {
-      const d = (await data.roomGet(room.code)) || room;
       const msg = { id: uid(), from: account.handle, avatar: account.avatar || null,
         text: censor(text.slice(0, 500)), ts: Date.now() };
-      d.messages = [...(d.messages || []), msg].slice(-200);
-      d.updatedBy = account.handle; d.updatedAt = Date.now();
-      await data.roomPut(room.code, d);
-      chatSeenRef.current = d.messages.length;
-      setRoom(d);
+      const merged = await data.roomPatch(room.code, [
+        { path: ["messages"], append: [msg] },
+        { path: ["updatedBy"], value: account.handle }, { path: ["updatedAt"], value: Date.now() },
+      ]);
+      if (merged) {
+        chatSeenRef.current = merged.messages?.length || 0;
+        setRoom(merged);
+      }
     } finally {
       setChatBusy(false);
     }
