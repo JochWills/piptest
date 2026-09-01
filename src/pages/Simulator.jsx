@@ -564,16 +564,30 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   /* ================= rooms =================
      `layout` (drawings + indicators + settings, from the widget's own
      save()) only gets refreshed in the room doc when it actually changes
-     (see handleDrawingsChanged below) — not on every cursor push, since
-     that fires on every replayed bar. The regular push below just carries
-     whatever layout is already sitting in `room` forward via the spread. */
+     (see handleDrawingsChanged below) — the regular push below carries
+     whatever layout (and participants/trading/roomLog) the freshest doc
+     has, not this client's own possibly-stale copy of it — see pushRoom's
+     own comment for why that distinction actually matters now. */
   const lastAppliedLayoutRef = useRef(null);
   const pushRoom = useCallback(async (extra = {}) => {
     if (!room || !canControl || !API_ENABLED || !roomSyncedRef.current) return;
     const now = Date.now();
     if (!extra.force && now - pushRef.current < 700) return;
     pushRef.current = now;
-    const doc = { ...room, symbol, interval, cursor, playing, stepId, updatedBy: account.handle, updatedAt: now, ...extra };
+    /* Read fresh, don't spread the local `room` state — this client's own
+       copy is only as recent as its last poll (up to ~1.5s, longer if
+       nothing prompted a full-apply since), and this push only actually
+       OWNS symbol/interval/cursor/playing/stepId (plus `extra` when it's
+       a deliberate layout push). Every OTHER field — layout above all —
+       has to come from the server's current copy: multiplayer means any
+       participant can trigger this on every single replayed step, and
+       spreading a stale `room.layout` forward on a routine cursor push
+       would silently revert anyone else's drawing added since this
+       client's last poll, even though this push never touched drawings
+       at all. Same read-fresh-then-write shape sendChat/setRole already
+       use, for the same reason. */
+    const fresh = (await data.roomGet(room.code)) || room;
+    const doc = { ...fresh, symbol, interval, cursor, playing, stepId, updatedBy: account.handle, updatedAt: now, ...extra };
     delete doc.force;
     setRoom(doc);
     await data.roomPut(room.code, doc);

@@ -154,7 +154,31 @@ export default function TVAdvancedChart({
 
         /* --- layout snapshot: drawings + indicators + settings --- */
         save() { return new Promise((res) => widget.save((s) => res(s))); },
-        load(snapshot) { try { widget.load(snapshot); } catch (e) {} },
+        /* widget.load() restores EVERYTHING it saved, including whichever
+           moment the OTHER person's chart happened to be looking at when
+           they drew something — without this, every incoming drawing from
+           a room-mate yanks your own view back to theirs. Capture/restore
+           the local visible range around it so only the drawings/studies
+           actually change; the small delay is because load() doesn't
+           expose a completion callback to hook setVisibleRange onto
+           directly, and calling it before load() has finished applying
+           just gets overwritten again. */
+        load(snapshot) {
+          try {
+            const range = chart.getVisibleRange();
+            widget.load(snapshot);
+            /* getVisibleRange() can come back {from:0,to:0} (or otherwise
+               degenerate) if the chart hasn't actually painted a real
+               range yet — restoring that verbatim is how a load() ends
+               up snapping the view to 1 Jan 1970 instead of leaving it
+               alone. Only restore something that looks like an actual
+               span of real calendar time. */
+            if (range && Number.isFinite(range.from) && Number.isFinite(range.to)
+                && range.from > 0 && range.to > range.from) {
+              setTimeout(() => { try { chart.setVisibleRange(range); } catch (e) {} }, 150);
+            }
+          } catch (e) {}
+        },
 
         setTheme(next) { try { widget.changeTheme(next === "dark" ? "Dark" : "Light"); } catch (e) {} },
         remove() { try { widget.remove(); } catch (e) {} },
