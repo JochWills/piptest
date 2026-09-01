@@ -3,9 +3,9 @@ import { Card, Field, Stat, Empty, Modal, Svg, Ic } from "../components/ui.jsx";
 import Logo from "../components/Logo.jsx";
 import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
-import ReplayChart, { TOOLS, INDICATORS } from "../chart/ReplayChart.jsx";
+import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
+import { IV_TO_TV_RES } from "../tv/marketFeed.js";
 import { SYMBOLS, INTERVALS, SPEEDS, barMsOf } from "../theme.js";
-import { loadWindow, fetchPaged, nearestIndex, syntheticKlines } from "../lib/candles.js";
 import {
   validateSetup, buildSetup, runEngine, bookTrade, openPnl, computeStats, rrOf,
   evaluateChallenge, fmtPrice, fmtMoney, fmtSigned, fmtR, fmtClock, fmtShort, dec,
@@ -16,35 +16,45 @@ import * as data from "../lib/data.js";
 import { censor } from "../lib/profanity.js";
 import { API_ENABLED } from "../lib/api.js";
 
-const TOOL_ICONS = {
-  cursor:  <path d="M4 3l8.5 6.6-3.8.7L10.4 14 9 14.7 7.2 10.9 4.3 12.6z" fill="currentColor" />,
-  trend:   <><path d="M3 13 13 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="3" cy="13" r="1.7" fill="currentColor" /><circle cx="13" cy="4" r="1.7" fill="currentColor" /></>,
-  ray:     <><path d="M3 12h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="m10.5 7.5 2.5 2.5-2.5 2.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /><circle cx="3" cy="12" r="1.7" fill="currentColor" /></>,
-  hline:   <><path d="M2 8h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="8" cy="8" r="1.7" fill="currentColor" /></>,
-  vline:   <><path d="M8 2v12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="8" cy="8" r="1.7" fill="currentColor" /></>,
-  rect:    <rect x="2.5" y="4" width="11" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.5" fill="none" />,
-  fib:     <path d="M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />,
-  measure: <><path d="M3 11 12 4" stroke="currentColor" strokeWidth="1.4" /><path d="M3 7.5V13h5.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" /></>,
-};
-const PALETTE = ["brand", "up", "down", "muted"];
-const ZOOMS = [{ n: 60, l: "60" }, { n: 120, l: "120" }, { n: 250, l: "250" }, { n: 500, l: "500" }, { n: 0, l: "All" }];
+/* Below this bar-index no saved `cursor` could plausibly be a real
+   millisecond timestamp (that's a UNIX time somewhere in 1970) — it's a
+   leftover from before this file switched the replay cursor from a bar
+   index to a timestamp. Treated as "unrecognised", not "corrupt": the
+   session just resumes from its configured start date instead of the
+   exact bar it was left on. */
+const LEGACY_CURSOR_CUTOFF = 1e12;
 
 export default function Simulator({ meta, account, theme, T, tags, onExit, onSaveSession, onTradesClosed, onToggleTheme, onNav, onSignOut, sessions = [], autoJoinCode, onAutoJoinDone }) {
   /* ---------- market ---------- */
   const [symbol, setSymbol] = useState(meta.symbol);
   const [interval, setIv] = useState(meta.interval);
-  const [bars, setBars] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [synthetic, setSynthetic] = useState(false);
-  const [shortFrom, setShortFrom] = useState(null);
-  const [noOlder, setNoOlder] = useState(false);
-  const fetchingRef = useRef(false), olderRef = useRef(false), anchorRef = useRef(null);
 
-  /* ---------- replay ---------- */
-  const [cursor, setCursor] = useState(100);
+  /* ---------- replay ----------
+     `cursor` is a TIMESTAMP (ms) now, not a bar index — the datafeed in
+     src/tv/ owns fetching/paging, so there's no local `bars` array to
+     index into any more. `cur` (the current bar) comes straight off
+     onBar/onCursor instead of being derived by indexing anything.
+     chartStartRef is the widget's mount-time replay start: it only ever
+     changes inside switchMarket/backToStart, deliberately never on every
+     tick, because TVAdvancedChart fully remounts the widget whenever its
+     startMs prop changes — wiring that straight to the live cursor would
+     remount on every single revealed bar. */
+  const [cursor, setCursor] = useState(meta.startMs);
+  const chartStartRef = useRef(meta.startMs);
+  const [cur, setCur] = useState(null);
+  const prevCloseRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
-  const checkedRef = useRef(-1);
+  const chartCtlRef = useRef(null);
+  const [chartReady, setChartReady] = useState(false);
+  /* a short ring buffer of recently-seen bar timestamps, oldest first —
+     the library can append forward cheaply but resists rewriting history
+     (see TRADINGVIEW.md), so "step back" walks this instead of asking the
+     datafeed for anything; stepping forward past the end of it falls back
+     to the replay controller's own step(). Restore (below) may reset the
+     whole thing to a saved position before the widget ever mounts. */
+  const seenRef = useRef([meta.startMs]);
+  const seenIdxRef = useRef(0);
 
   /* ---------- trading ---------- */
   const [trade, setTrade] = useState(null);
@@ -73,18 +83,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     e.preventDefault();
   }, [blotterH]);
 
-  /* ---------- chart tools ---------- */
-  const [tool, setTool] = useState("cursor");
-  const [colorKey, setColorKey] = useState("brand");
-  const [selected, setSelected] = useState(null);
-  const [drawings, setDrawings] = useState([]);
-  const [indicators, setIndicators] = useState({ volume: true, ema20: false, ema50: false, sma200: false });
-  const [indOpen, setIndOpen] = useState(false);
+  /* ---------- chart chrome ----------
+     Drawing tools, indicators, log/linear, zoom presets are all the
+     library's own now (its native left toolbar and legend) — nothing
+     left here to own that state on PipTest's side. */
   const [profileOpen, setProfileOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
-  const [logScale, setLog] = useState(false);
-  const [zoom, setZoom] = useState(120);
-  const undoRef = useRef([]), redoRef = useRef([]);
 
   /* ---------- room ---------- */
   const [room, setRoom] = useState(null);
@@ -112,15 +116,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const canControl = !room || role === "host" || role === "editor";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
 
-  const barsRef = useRef(bars); barsRef.current = bars;
-  const cur = bars[Math.min(cursor, bars.length - 1)] || null;
-  const prev = bars[Math.min(cursor, bars.length - 1) - 1] || null;
   const price = cur?.c ?? null;
   const stats = useMemo(() => computeStats(trades), [trades]);
   const equity = stats.equity;
   const unreal = openPnl(trade, price);
-  const chg = cur && prev ? cur.c - prev.c : 0;
-  const chgPct = cur && prev ? (chg / prev.c) * 100 : 0;
+  const chg = cur && prevCloseRef.current != null ? cur.c - prevCloseRef.current : 0;
+  const chgPct = cur && prevCloseRef.current ? (chg / prevCloseRef.current) * 100 : 0;
   const challenge = useMemo(() => evaluateChallenge(trades, meta.challenge), [trades, meta.challenge]);
 
   const entryVal = parseFloat(form.entry) || price || 0;
@@ -135,17 +136,23 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return (equity * (r / 100)) / Math.abs(entryVal - s);
   }, [entryVal, form.stop, form.riskPct, equity, setupErrors]);
 
-  /* ================= restore ================= */
+  /* ================= restore =================
+     Chart layout (drawings/indicators/settings) is restored via the
+     widget's own api.load() once it's ready — see the onReady handler
+     below — rather than as React state here. */
+  const pendingLayoutRef = useRef(null);
   useEffect(() => {
     (async () => {
       const body = await data.getSessionState(meta.id);
       if (body) {
-        setCursor(body.cursor ?? 100);
+        const savedCursor = typeof body.cursor === "number" && body.cursor >= LEGACY_CURSOR_CUTOFF ? body.cursor : meta.startMs;
+        setCursor(savedCursor);
+        chartStartRef.current = savedCursor;
+        seenRef.current = [savedCursor]; seenIdxRef.current = 0;
         setTrades(body.trades || []);
         setTrade(body.trade || null);
-        setDrawings(body.drawings || []);
+        pendingLayoutRef.current = body.layout || null;
         setNotes(body.notes || "");
-        if (body.indicators) setIndicators(body.indicators);
         if (body.symbol) setSymbol(body.symbol);
         if (body.interval) setIv(body.interval);
       }
@@ -161,94 +168,44 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     })();
   }, [meta.id]);
 
-  /* ================= market data ================= */
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setLoading(true); setNoOlder(false); fetchingRef.current = false;
-      const target = anchorRef.current || meta.startMs;
-      const { bars: next, synthetic: syn, shortFrom: sf } = await loadWindow(symbol, interval, target);
-      if (!alive) return;
-      setSynthetic(syn); setShortFrom(sf); setBars(next);
-      const idx = Math.max(Math.min(20, next.length - 1), Math.min(nearestIndex(next, target), next.length - 1));
-      anchorRef.current = null;
-      setCursor(idx); checkedRef.current = idx;
-      setLoading(false);
-    })();
-    return () => { alive = false; };
-  }, [symbol, interval, meta.startMs]);
-
-  /* extend forwards */
-  useEffect(() => {
-    if (loading || fetchingRef.current || !bars.length || cursor < bars.length - 120) return;
-    fetchingRef.current = true;
-    let alive = true;
-    (async () => {
-      const ns = bars[bars.length - 1].t + barMsOf(interval);
-      const more = synthetic ? null : await fetchPaged(symbol, interval, ns, 500);
-      if (!alive) { fetchingRef.current = false; return; }
-      if (more && more.length) setBars((b) => (b[b.length - 1].t >= more[0].t ? b : [...b, ...more]));
-      else if (synthetic) setBars((b) => [...b, ...syntheticKlines(symbol, interval, ns, 500)]);
-      fetchingRef.current = false;
-    })();
-    return () => { alive = false; };
-  }, [cursor, bars, loading, synthetic, symbol, interval]);
-
-  /* extend backwards on pan */
-  const loadOlder = useCallback(async () => {
-    if (olderRef.current || noOlder || synthetic || loading) return;
-    const bs = barsRef.current;
-    if (!bs.length) return;
-    olderRef.current = true;
-    const iv = barMsOf(interval), firstT = bs[0].t;
-    const older = await fetchPaged(symbol, interval, firstT - 1000 * iv, 1000);
-    const fresh = (older || []).filter((k) => k.t < firstT);
-    if (!fresh.length) setNoOlder(true);
-    else {
-      setBars((b) => (b.length && b[0].t === firstT ? [...fresh, ...b] : b));
-      setCursor((c) => c + fresh.length);
-      checkedRef.current += fresh.length;
-      setShortFrom(null);
-    }
-    olderRef.current = false;
-  }, [symbol, interval, noOlder, synthetic, loading]);
-
-  /* ================= replay clock ================= */
-  const rafRef = useRef(0), accRef = useRef(0), lastRef = useRef(0);
-  useEffect(() => {
-    if (!playing) { cancelAnimationFrame(rafRef.current); lastRef.current = 0; accRef.current = 0; return; }
-    const tick = (now) => {
-      if (!lastRef.current) lastRef.current = now;
-      accRef.current += now - lastRef.current; lastRef.current = now;
-      const per = 1000 / speed;
-      let steps = 0;
-      while (accRef.current >= per && steps < 40) { accRef.current -= per; steps++; }
-      if (steps) setCursor((c) => Math.min(c + steps, bars.length - 1));
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, speed, bars.length]);
-
-  /* ================= fill engine =================
-     Walks every bar between the last checked index and the cursor,
-     so a 50x burst resolves exactly like 50 single steps. */
+  /* ================= chart ready / bar feed =================
+     The widget (src/tv/) owns fetching, paging and the replay clock
+     itself now — this just wires its output into the trade engine and
+     PipTest's own state, and converts its {time,open,high,low,close}
+     bars to the {t,o,h,l,c} shape the rest of this file already uses. */
   const tradeRef = useRef(null);
   useEffect(() => { tradeRef.current = trade; }, [trade]);
-  useEffect(() => {
-    if (!bars.length) return;
-    const from = checkedRef.current;
-    if (cursor <= from) { checkedRef.current = cursor; return; }
+
+  const toNative = (b) => ({ t: b.time, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume });
+
+  const handleReady = useCallback((api) => {
+    chartCtlRef.current = api;
+    setChartReady(true);
+    if (pendingLayoutRef.current) { api.load(pendingLayoutRef.current); pendingLayoutRef.current = null; }
+  }, []);
+
+  const handleBar = useCallback((rawBar) => {
+    const b = toNative(rawBar);
+    setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
+    const last = seenRef.current[seenRef.current.length - 1];
+    if (last !== b.t) { seenRef.current.push(b.t); if (seenRef.current.length > 500) seenRef.current.shift(); }
+    seenIdxRef.current = seenRef.current.length - 1;
+
     const t0 = tradeRef.current;
-    if (!t0) { checkedRef.current = cursor; return; }
-    const { trade: t1, closed } = runEngine(t0, bars, from, cursor);
-    checkedRef.current = cursor;
-    if (closed.length) {
-      setTrades((list) => [...closed.slice().reverse(), ...list]);
-      onTradesClosed && onTradesClosed(closed);
+    if (t0) {
+      const { trade: t1, closed } = runEngine(t0, [b], -1, 0);
+      if (closed.length) {
+        setTrades((list) => [...closed.slice().reverse(), ...list]);
+        onTradesClosed && onTradesClosed(closed);
+      }
+      if (t1 !== t0) setTrade(t1);
     }
-    if (t1 !== t0) setTrade(t1);
-  }, [cursor, bars]); // eslint-disable-line
+  }, [onTradesClosed]);
+
+  const handleCursor = useCallback((ms, rawBar) => {
+    setCursor(ms);
+    if (rawBar) setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return toNative(rawBar); });
+  }, []);
 
   /* ================= actions ================= */
   const closeNow = () => {
@@ -283,7 +240,13 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     else if (trade) setTrade(null);
     setForm((f) => ({ ...f, entry: "", stop: "", target: "" }));
     setFormErr("");
-    anchorRef.current = cur?.t ?? null;
+    /* freeze the widget's next mount at wherever we currently are — this
+       must only ever be touched here, on an actual switch, never on a
+       normal tick, since TVAdvancedChart remounts whenever its startMs
+       prop changes (see the note by chartStartRef's declaration). */
+    const at = cur?.t ?? cursor;
+    chartStartRef.current = at;
+    seenRef.current = [at]; seenIdxRef.current = 0;
     if (cs) setSymbol(nextSym);
     if (ci) setIv(nextIv);
     /* Twelve Data has no 1-second candles — landing on one of its
@@ -293,13 +256,69 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (nextSource === "TwelveData" && nextInterval === "1s") setIv("1m");
   };
 
-  /* drawings */
-  const applyDrawings = useCallback((next) => setDrawings((p) => (typeof next === "function" ? next(p) : next)), []);
-  const snapshot = useCallback(() => setDrawings((p) => { undoRef.current.push(p); if (undoRef.current.length > 60) undoRef.current.shift(); redoRef.current = []; return p; }), []);
-  const undo = () => { const p = undoRef.current.pop(); if (p) { redoRef.current.push(drawings); setDrawings(p); setSelected(null); } };
-  const redo = () => { const n = redoRef.current.pop(); if (n) { undoRef.current.push(drawings); setDrawings(n); } };
+  /* ================= transport =================
+     Forward is the library's own cheap incremental step. Backward is not
+     (see TRADINGVIEW.md) — it resists rewriting history — so "back" and
+     re-stepping "forward" within what's already been seen walk the small
+     ring buffer of recently-seen bar timestamps instead, via jumpTo. */
+  const stepForward = useCallback(() => {
+    const ctl = chartCtlRef.current;
+    if (!ctl) return;
+    if (seenIdxRef.current < seenRef.current.length - 1) {
+      seenIdxRef.current++;
+      ctl.replay.jumpTo(seenRef.current[seenIdxRef.current], ctl.widget);
+    } else {
+      ctl.replay.step();
+    }
+  }, []);
+  const stepBack = useCallback(() => {
+    const ctl = chartCtlRef.current;
+    if (!ctl || seenIdxRef.current <= 0) return;
+    seenIdxRef.current--;
+    ctl.replay.jumpTo(seenRef.current[seenIdxRef.current], ctl.widget);
+  }, []);
+  const backToStart = useCallback(() => {
+    const ctl = chartCtlRef.current;
+    if (!ctl) return;
+    seenRef.current = [meta.startMs]; seenIdxRef.current = 0;
+    ctl.replay.jumpTo(meta.startMs, ctl.widget);
+  }, [meta.startMs]);
 
-  /* ================= autosave ================= */
+  /* drives the widget's own replay clock off Simulator's playing/speed
+     state, rather than the other way round — room sync and the transport
+     buttons both just flip this state, same as before. */
+  useEffect(() => {
+    if (!chartReady || !chartCtlRef.current) return;
+    if (playing) chartCtlRef.current.replay.play(); else chartCtlRef.current.replay.pause();
+  }, [playing, chartReady]);
+  useEffect(() => {
+    if (!chartReady || !chartCtlRef.current) return;
+    chartCtlRef.current.replay.setSpeed(speed);
+  }, [speed, chartReady]);
+  /* the replay controller can also stop itself (end of available data) —
+     without this, the Play button could keep showing "playing" forever */
+  const handleReplayState = useCallback((s) => { if (!s.playing) setPlaying(false); }, []);
+
+  /* ================= trade zones =================
+     Entry/stop/target as three shapes via the library's own shape API,
+     replacing the hand-drawn canvas rectangles ReplayChart used to paint. */
+  const zoneShapesRef = useRef([]);
+  useEffect(() => {
+    const ctl = chartCtlRef.current;
+    if (!ctl) return;
+    for (const id of zoneShapesRef.current) ctl.removeShape(id);
+    zoneShapesRef.current = [];
+    if (!trade) return;
+    zoneShapesRef.current.push(ctl.drawZone({ price: trade.entry, color: T.brand,
+      text: `${trade.status === "open" ? "Entry" : "Limit"} ${fmtPrice(trade.entry)}` }));
+    if (trade.stop != null) zoneShapesRef.current.push(ctl.drawZone({ price: trade.stop, color: T.down, text: `Stop ${fmtPrice(trade.stop)}` }));
+    if (trade.target != null) zoneShapesRef.current.push(ctl.drawZone({ price: trade.target, color: T.up, text: `Target ${fmtPrice(trade.target)}` }));
+  }, [trade, chartReady]); // eslint-disable-line
+
+  /* ================= autosave =================
+     `layout` is the widget's own save() snapshot — drawings, indicators
+     and chart settings together, replacing what used to be two separate
+     hand-rolled fields. Only taken when the widget is actually up. */
   const saveT = useRef(null);
   useEffect(() => {
     /* a transient (joined-room) session never gets a backend row at all —
@@ -309,8 +328,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     setSaveState("saving");
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
+      const layout = chartReady && chartCtlRef.current ? await chartCtlRef.current.save() : pendingLayoutRef.current;
       const ok = await data.saveSessionState(meta.id, {
-        id: meta.id, cursor, trades, trade, drawings, notes, indicators, symbol, interval,
+        id: meta.id, cursor, trades, trade, layout, notes, symbol, interval,
       });
       const st = computeStats(trades);
       const ch = evaluateChallenge(trades, meta.challenge);
@@ -325,7 +345,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       setSaveState(ok ? "saved" : "failed");
     }, 1000);
     return () => clearTimeout(saveT.current);
-  }, [trades, trade, cursor, drawings, notes, indicators, symbol, interval, restored]); // eslint-disable-line
+  }, [trades, trade, cursor, notes, symbol, interval, restored, chartReady]); // eslint-disable-line
 
   /* remember where the replay bar was left */
   const barSaveT = useRef(null);
@@ -339,19 +359,32 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => clearTimeout(barSaveT.current);
   }, [barPos, barCollapsed, restored]);
 
-  /* ================= rooms ================= */
+  /* ================= rooms =================
+     `layout` (drawings + indicators + settings, from the widget's own
+     save()) only gets refreshed in the room doc when it actually changes
+     (see handleDrawingsChanged below) — not on every cursor push, since
+     that fires on every replayed bar. The regular push below just carries
+     whatever layout is already sitting in `room` forward via the spread. */
+  const lastAppliedLayoutRef = useRef(null);
   const pushRoom = useCallback(async (extra = {}) => {
     if (!room || !canControl || !API_ENABLED) return;
     const now = Date.now();
     if (!extra.force && now - pushRef.current < 700) return;
     pushRef.current = now;
-    const doc = { ...room, symbol, interval, cursor, playing, speed, drawings, updatedBy: account.handle, updatedAt: now, ...extra };
+    const doc = { ...room, symbol, interval, cursor, playing, speed, updatedBy: account.handle, updatedAt: now, ...extra };
     delete doc.force;
     setRoom(doc);
     await data.roomPut(room.code, doc);
-  }, [room, canControl, symbol, interval, cursor, playing, speed, drawings, account.handle]);
+  }, [room, canControl, symbol, interval, cursor, playing, speed, account.handle]);
 
-  useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, speed, drawings, symbol, interval]); // eslint-disable-line
+  const handleDrawingsChanged = useCallback(async () => {
+    if (!room || !canControl || !chartCtlRef.current) return;
+    const layout = await chartCtlRef.current.save();
+    lastAppliedLayoutRef.current = layout;
+    pushRoom({ layout, force: true });
+  }, [room, canControl, pushRoom]);
+
+  useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, speed, symbol, interval]); // eslint-disable-line
 
   useEffect(() => {
     if (!room?.code || !API_ENABLED) return;
@@ -374,11 +407,29 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       }
       appliedRef.current = doc.updatedAt || 0;
       setRoom(doc);
+      /* Synced unconditionally, not just when the symbol/interval also
+         happen to differ — a fresh join's placeholder session defaults to
+         today's date on whatever symbol "New session" defaults to, which
+         can coincidentally already match the host's, and the widget can
+         race to mount before this poll ever runs. Either way, this needs
+         to be right by the time the widget (re)mounts, which is the only
+         moment it's actually read. */
+      chartStartRef.current = doc.cursor;
+      seenRef.current = [doc.cursor]; seenIdxRef.current = 0;
+      const marketChanged = doc.symbol !== symbol || doc.interval !== interval;
       if (doc.symbol !== symbol) setSymbol(doc.symbol);
       if (doc.interval !== interval) setIv(doc.interval);
       setSpeed(doc.speed); setPlaying(doc.playing);
-      setCursor((c) => (Math.abs(c - doc.cursor) > 3 ? doc.cursor : c));
-      if (Array.isArray(doc.drawings)) setDrawings(doc.drawings);
+      /* a couple of bars' worth of drift is normal jitter, not a desync —
+         cursor is milliseconds now, not a bar index, so the old ">3" bar
+         tolerance would resync on every poll */
+      if (!marketChanged && Math.abs(cursor - doc.cursor) > barMsOf(interval) * 2) {
+        chartCtlRef.current?.control.jumpTo(doc.cursor, chartCtlRef.current.widget);
+      }
+      if (doc.layout && doc.layout !== lastAppliedLayoutRef.current) {
+        chartCtlRef.current?.load(doc.layout);
+        lastAppliedLayoutRef.current = doc.layout;
+      }
     };
     poll();
     const id = setInterval(poll, 1500);
@@ -401,7 +452,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const code = makeCode();
     const doc = { code, host: account.handle, symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      drawings, cursor, playing: false, speed, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
+      layout: null, cursor, playing: false, speed, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
@@ -478,34 +529,27 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     }
   };
 
-  /* ================= hotkeys ================= */
+  /* ================= hotkeys =================
+     Drawing-tool shortcuts (T/R/H/L/B/F/M, Cmd+Z, Delete-to-remove-a-
+     drawing) are gone — the library's own left toolbar owns drawing now,
+     with its own shortcuts. What's left is transport and the help modal. */
   useEffect(() => {
     const onKey = (e) => {
       const tg = document.activeElement?.tagName;
       if (tg === "INPUT" || tg === "SELECT" || tg === "TEXTAREA") return;
-      if (e.metaKey || e.ctrlKey) {
-        if (e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
-        return;
-      }
+      if (e.metaKey || e.ctrlKey) return;
       const k = e.key.toLowerCase();
       if (e.key === " ") { e.preventDefault(); if (canControl) setPlaying((p) => !p); return; }
-      if (e.key === "ArrowRight") { e.preventDefault(); if (canControl) setCursor((c) => Math.min(c + (e.shiftKey ? 10 : 1), bars.length - 1)); return; }
-      if (e.key === "ArrowLeft") { e.preventDefault(); if (canControl) setCursor((c) => Math.max(c - (e.shiftKey ? 10 : 1), 0)); return; }
-      if (e.key === "Escape") { setTool("cursor"); setSelected(null); return; }
-      if (e.key === "Delete" || e.key === "Backspace") {
-        if (selected) { e.preventDefault(); snapshot(); applyDrawings((d) => d.filter((x) => x.id !== selected)); setSelected(null); }
-        return;
-      }
+      if (e.key === "ArrowRight") { e.preventDefault(); if (canControl) stepForward(); return; }
+      if (e.key === "ArrowLeft") { e.preventDefault(); if (canControl) stepBack(); return; }
       if (k === "?") { setHelpOpen(true); return; }
-      const t = TOOLS.find((x) => x.key.toLowerCase() === k);
-      if (t && canControl) { setTool(t.id); if (t.id !== "cursor") setSelected(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canControl, bars.length, selected, drawings]); // eslint-disable-line
+  }, [canControl, stepForward, stepBack]);
 
   useEffect(() => {
-    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setIndOpen(false); setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
+    const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
     document.addEventListener("mousedown", away);
     return () => document.removeEventListener("mousedown", away);
   }, []);
@@ -518,7 +562,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   /* Twelve Data has no 1-second candles — hide the option rather than
      let it silently show an empty chart for these symbols */
   const availIntervals = curSource === "TwelveData" ? INTERVALS.filter((i) => i.id !== "1s") : INTERVALS;
-  const visibleDrawings = drawings.filter((d) => !d.market || d.market === symbol).length;
 
   return (
     <div className="sim-page" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
@@ -553,7 +596,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           {chg >= 0 ? "+" : "−"}{fmtPrice(Math.abs(chg))} ({chgPct >= 0 ? "+" : "−"}{Math.abs(chgPct).toFixed(2)}%)
         </span>
         <span className="sm mut hide-sm">{cur ? fmtClock(cur.t, interval) + " UTC" : ""}</span>
-        {synthetic && <span className="pill b">simulated data</span>}
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           <span className="sm" style={{ color: saveState === "failed" ? "var(--down)" : "var(--dim)" }}>
@@ -682,7 +724,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         </div>
       </header>
 
-      {/* ================= timeframe strip ================= */}
+      {/* ================= timeframe strip =================
+          Indicators, undo/redo, log/linear and zoom presets used to live
+          here too — all native to the widget's own toolbar/legend now. */}
       <div style={{ display: "flex", alignItems: "center", gap: 3, padding: "6px 14px",
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexWrap: "wrap", flexShrink: 0 }}>
         {availIntervals.map((i) => (
@@ -690,38 +734,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             style={{ padding: "5px 11px", fontSize: 12.5 }} disabled={!canControl}
             onClick={() => switchMarket(null, i.id)}>{i.label}</button>
         ))}
-        <div className="vsep" style={{ height: 20 }} />
-        <span data-pop style={{ position: "relative" }}>
-          <button className="btn" style={{ padding: "5px 11px", fontSize: 12.5 }} onClick={() => setIndOpen((o) => !o)}>
-            Indicators <Svg s={13}>{Ic.chev}</Svg>
-          </button>
-          {indOpen && (
-            <div className="card" style={{ position: "absolute", top: 34, left: 0, zIndex: 40, padding: 6, width: 176 }}>
-              {[{ id: "volume", label: "Volume" }, ...INDICATORS].map((ind) => (
-                <button key={ind.id} className="btn ghost" style={{ width: "100%", justifyContent: "space-between", padding: "8px 10px" }}
-                  onClick={() => setIndicators((s) => ({ ...s, [ind.id]: !s[ind.id] }))}>
-                  {ind.label}
-                  <span style={{ width: 16, height: 16, borderRadius: 4, border: "1px solid var(--border)",
-                    background: indicators[ind.id] ? "var(--brand)" : "transparent", color: "#fff",
-                    display: "grid", placeItems: "center" }}>
-                    {indicators[ind.id] && <Svg s={10}>{Ic.check}</Svg>}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </span>
-        <button className="btn ghost hide-sm" style={{ padding: "6px 8px" }} onClick={undo} disabled={!canControl} aria-label="Undo"><Svg s={15}>{Ic.undo}</Svg></button>
-        <button className="btn ghost hide-sm" style={{ padding: "6px 8px" }} onClick={redo} disabled={!canControl} aria-label="Redo"><Svg s={15}>{Ic.redo}</Svg></button>
-        <div className="hide-sm" style={{ marginLeft: "auto", display: "flex", gap: 3, alignItems: "center" }}>
-          {ZOOMS.map((z) => (
-            <button key={z.l} className={"btn ghost " + (zoom === z.n ? "on" : "")} style={{ padding: "5px 10px", fontSize: 12.5 }}
-              onClick={() => setZoom(z.n)}>{z.l}</button>
-          ))}
-          <button className={"btn ghost " + (logScale ? "on" : "")} style={{ padding: "5px 10px", fontSize: 12.5 }}
-            onClick={() => setLog((l) => !l)}>log</button>
-          <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12.5 }} onClick={() => setHelpOpen(true)} title="Keyboard shortcuts">?</button>
-        </div>
+        <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12.5, marginLeft: "auto" }}
+          onClick={() => setHelpOpen(true)} title="Keyboard shortcuts">?</button>
       </div>
 
       {/* challenge banner */}
@@ -770,69 +784,23 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         {/* ---- centre: chart ---- */}
         <section className="sim-chart-section" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
           <div className="sim-chartrow" style={{ display: "flex", flex: 1, minHeight: 0 }}>
-            {/* tool rail — mouse-only (no touch handling on the chart's
-                drawing tools), so it's hidden on mobile rather than shown
-                for a feature that doesn't actually work there */}
-            <div className="hide-sm" style={{ display: "flex", flexDirection: "column", gap: 2, padding: "6px 5px",
-              borderRight: "1px solid var(--border)", background: "var(--surface)" }}>
-              {TOOLS.map((t) => (
-                <button key={t.id} title={`${t.title}  (${t.key})`} aria-label={t.title}
-                  disabled={!canControl && t.id !== "cursor"}
-                  onClick={() => { setTool(t.id); if (t.id !== "cursor") setSelected(null); }}
-                  style={{ width: 30, height: 30, display: "grid", placeItems: "center", border: "none",
-                    borderRadius: 7, cursor: "pointer",
-                    background: tool === t.id ? "var(--brandSoft)" : "transparent",
-                    color: tool === t.id ? "var(--brand)" : "var(--muted)" }}>
-                  <Svg s={16}>{TOOL_ICONS[t.id]}</Svg>
-                </button>
-              ))}
-              <div style={{ height: 1, background: "var(--border)", margin: "5px 3px" }} />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, padding: "0 5px" }}>
-                {PALETTE.map((c) => (
-                  <button key={c} onClick={() => setColorKey(c)} title={c} aria-label={`Colour ${c}`}
-                    style={{ width: 14, height: 14, borderRadius: 4, cursor: "pointer", padding: 0,
-                      background: `var(--${c})`, border: "2px solid " + (colorKey === c ? "var(--ink)" : "transparent") }} />
-                ))}
-              </div>
-              <div style={{ height: 1, background: "var(--border)", margin: "5px 3px" }} />
-              <button title="Clear all drawings" aria-label="Clear drawings" disabled={!canControl || !visibleDrawings}
-                onClick={() => { if (confirm("Remove every drawing on this chart?")) { snapshot(); applyDrawings([]); setSelected(null); } }}
-                style={{ width: 30, height: 30, display: "grid", placeItems: "center", border: "none",
-                  borderRadius: 7, cursor: "pointer", background: "transparent", color: "var(--muted)",
-                  opacity: visibleDrawings ? 1 : 0.35 }}>
-                <Svg s={16}>{Ic.trash}</Svg>
-              </button>
-            </div>
-
-            {/* chart */}
+            {/* chart — the tool rail that used to live here (drawing
+                tools, colour swatches, clear-drawings) is the library's
+                own left toolbar now; its own legend already shows the
+                symbol/interval/OHLC, so PipTest doesn't draw a second
+                one on top of it any more either. */}
             <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
-              <div className="num" style={{ position: "absolute", top: 8, left: 12, zIndex: 5,
-                pointerEvents: "none", fontSize: 12 }}>
-                <span style={{ fontWeight: 600 }}>
-                  {SYMBOLS.find((s) => s.id === symbol)?.label} · {INTERVALS.find((i) => i.id === interval)?.label} · PipTest
-                </span>
-                {cur && (
-                  <span className="mut" style={{ marginLeft: 10 }}>
-                    O <b style={{ color: cur.c >= cur.o ? "var(--up)" : "var(--down)" }}>{fmtPrice(cur.o)}</b>{" "}
-                    H <b style={{ color: cur.c >= cur.o ? "var(--up)" : "var(--down)" }}>{fmtPrice(cur.h)}</b>{" "}
-                    L <b style={{ color: cur.c >= cur.o ? "var(--up)" : "var(--down)" }}>{fmtPrice(cur.l)}</b>{" "}
-                    C <b style={{ color: cur.c >= cur.o ? "var(--up)" : "var(--down)" }}>{fmtPrice(cur.c)}</b>
-                  </span>
-                )}
-              </div>
-
-              {loading ? (
+              {!restored ? (
                 <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--dim)", fontSize: 13 }}>
-                  Loading {INTERVALS.find((i) => i.id === interval)?.label} candles…
+                  Loading…
                 </div>
               ) : (
-                <ReplayChart
-                  bars={bars} cursor={cursor} theme={theme} T={T} interval={interval} trade={trade} height={undefined}
-                  drawings={drawings} onDrawings={canControl ? applyDrawings : () => {}}
-                  onSnapshot={canControl ? snapshot : () => {}}
-                  tool={canControl ? tool : "cursor"} setTool={setTool} colorKey={colorKey}
-                  selected={selected} setSelected={setSelected} indicators={indicators}
-                  logScale={logScale} zoom={zoom} onNeedOlder={loadOlder}
+                <TVAdvancedChart
+                  symbol={symbol} interval={IV_TO_TV_RES[interval] || "30"} theme={theme}
+                  startMs={chartStartRef.current}
+                  onReady={handleReady} onBar={handleBar} onCursor={handleCursor}
+                  onState={handleReplayState} onDrawingsChanged={handleDrawingsChanged}
+                  height="100%"
                 />
               )}
             </div>
@@ -921,14 +889,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             label="Replay"
           >
             <div style={{ padding: "6px 10px" }}>
-              {/* one row on desktop — transport, speed, scrubber, clock —
-                  keeps the bar shallow so it covers as little of the chart
-                  as possible. The bar itself is now capped to its
-                  container's width (see FloatingBar), which on a phone is
-                  narrower than this content's natural width; flex-wrap
-                  here means that spills onto a second line inside the
-                  bar's own rounded card instead of past its edge and off
-                  the side of the screen. */}
+              {/* the free-drag scrubber is gone — it needed a bar count
+                  up front, which nothing here has any more now that the
+                  datafeed pages history itself rather than PipTest
+                  fetching a bounded array of it up front (see
+                  TRADINGVIEW.md). Back/forward through anything already
+                  seen this visit still works via the ring buffer in
+                  stepBack/stepForward; jumping to an arbitrary far-off
+                  point doesn't, for now. */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 4 }}>
                 <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
                   style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
@@ -936,15 +904,15 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
                 <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
                   <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                    onClick={() => setCursor(0)} title="Back to the start"><Svg s={13}>{Ic.start}</Svg></button>
+                    onClick={backToStart} title="Back to the start"><Svg s={13}>{Ic.start}</Svg></button>
                   <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                    onClick={() => setCursor((c) => Math.max(0, c - 1))} title="Step back (←)"><Svg s={13}>{Ic.back}</Svg></button>
+                    onClick={stepBack} title="Step back (←)"><Svg s={13}>{Ic.back}</Svg></button>
                   <button className="btn pri" style={{ padding: "4px 11px" }} disabled={!canControl}
                     onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
                     <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
                   </button>
                   <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                    onClick={() => setCursor((c) => Math.min(bars.length - 1, c + 1))} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
+                    onClick={stepForward} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
                 </div>
 
                 <select className="in" value={speed} disabled={!canControl}
@@ -954,12 +922,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                   {SPEEDS.map((sp) => <option key={sp} value={sp}>{sp}&times;</option>)}
                 </select>
 
-                <input type="range" min={0} max={Math.max(0, bars.length - 1)} value={cursor} disabled={!canControl}
-                  onChange={(e) => setCursor(+e.target.value)}
-                  title={`Bar ${cursor + 1} of ${bars.length}`}
-                  style={{ flex: 1, minWidth: 90, accentColor: T.brand, margin: 0 }} />
-
-                <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0, marginLeft: "auto" }}>
                   {cur ? fmtClock(cur.t, interval) : ""}
                 </span>
               </div>
@@ -1311,10 +1274,7 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
 function ShortcutHelp({ open, onClose }) {
   const rows = [
     ["Space", "Play / pause replay"], ["→ / ←", "Step one bar forward / back"],
-    ["Shift + → / ←", "Step ten bars"], ["V", "Cursor"], ["T", "Trend line"], ["R", "Ray"],
-    ["H", "Horizontal line"], ["L", "Vertical line"], ["B", "Rectangle"], ["F", "Fib retracement"],
-    ["M", "Measure"], ["Delete", "Remove selected drawing"], ["Esc", "Cancel tool / deselect"],
-    ["Ctrl/⌘ Z", "Undo drawing"], ["Ctrl/⌘ ⇧ Z", "Redo drawing"], ["?", "This panel"],
+    ["?", "This panel"],
   ];
   return (
     <Modal open={open} onClose={onClose} title="Keyboard shortcuts" width={440}>

@@ -97,7 +97,13 @@ export const rrOf = (entry, stop, target) => {
    a burst of 50 bars resolves identically to 50 single steps. */
 export function runEngine(trade, bars, fromIdx, toIdx) {
   if (!trade) return { trade, closed: [] };
-  let t = { ...trade };
+  /* not a clone up front — `t` only ever gets reassigned to a genuinely
+     new object below (fill, close), never mutated in place, so a bar
+     that changes nothing leaves `t === trade`. Callers (this file's own
+     Simulator.jsx integration in particular) rely on that reference
+     equality to skip re-rendering/re-drawing trade UI on every single
+     replayed bar instead of just the ones that actually change something. */
+  let t = trade;
   const closed = [];
   for (let i = fromIdx + 1; i <= toIdx && t; i++) {
     const b = bars[i];

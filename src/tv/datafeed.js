@@ -9,33 +9,54 @@
    The cursor is a TIMESTAMP, never a bar index. That is what
    makes switching timeframe free — the same instant resolves
    correctly on 1s and on 1D with no conversion.
+
+   Every market PipTest offers (crypto via Binance, forex/index
+   ETFs via Twelve Data — see theme.js's SYMBOLS) is resolvable
+   here, not just the original crypto set. Twelve Data has no
+   sub-minute candles, so those symbols simply don't advertise
+   the 1s resolution — see SYMBOLS in theme.js for the source of
+   truth on which markets exist and where each one's data comes
+   from.
    ============================================================ */
 
-import { feed, RES_MS, SUPPORTED_RESOLUTIONS } from "./binanceFeed.js";
+import { feed, SUPPORTED_RESOLUTIONS, TV_RES_TO_IV } from "./marketFeed.js";
+import { SYMBOLS as MARKETS } from "../theme.js";
 
 /* The library requires every callback to be invoked asynchronously.
    Calling one synchronously can blow the stack inside the library. */
 const async_ = (fn) => setTimeout(fn, 0);
+
+const EXCHANGE_LABEL = { Binance: "BINANCE", TwelveData: "PIPTEST" };
 
 const CONFIG = {
   supported_resolutions: SUPPORTED_RESOLUTIONS,
   supports_marks: false,
   supports_timescale_marks: false,
   supports_time: true,
-  exchanges: [{ value: "BINANCE", name: "Binance", desc: "Binance Spot" }],
-  symbols_types: [{ name: "crypto", value: "crypto" }],
+  exchanges: [
+    { value: "BINANCE", name: "Binance", desc: "Binance Spot" },
+    { value: "PIPTEST", name: "PipTest", desc: "Forex & index ETFs (Twelve Data)" },
+  ],
+  symbols_types: [{ name: "crypto", value: "crypto" }, { name: "forex", value: "forex" }, { name: "index", value: "index" }],
 };
 
-const SYMBOLS = [
-  "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
-  "DOGEUSDT", "ADAUSDT", "LINKUSDT", "AVAXUSDT", "LTCUSDT",
-];
+/* price precision per instrument — pricescale is 10^decimals.
+   Picked per how the instrument actually quotes, not guessed from a
+   regex: crypto majors to 2dp, low-price crypto to 4dp, JPY forex
+   pairs to 3dp (their convention), other forex pairs to 5dp, index
+   ETFs to 2dp like any other equity-priced instrument. */
+const PRICESCALE = {
+  BTCUSDT: 100, ETHUSDT: 100, SOLUSDT: 100, BNBUSDT: 100, LTCUSDT: 100, AVAXUSDT: 100,
+  XRPUSDT: 10000, DOGEUSDT: 10000, ADAUSDT: 10000, LINKUSDT: 1000,
+  USDJPY: 1000,
+  EURUSD: 100000, GBPUSD: 100000, USDCHF: 100000, USDCAD: 100000, AUDUSD: 100000, NZDUSD: 100000,
+  SPY: 100, DIA: 100, QQQ: 100,
+};
 
-/* price precision per instrument — pricescale is 10^decimals */
-function priceScaleFor(symbol) {
-  if (/^(BTC|ETH|BNB|SOL|LTC|AVAX)/.test(symbol)) return 100;
-  if (/^(LINK|ADA)/.test(symbol)) return 10000;
-  return 100000;
+function typeOf(cls) {
+  if (cls === "Crypto") return "crypto";
+  if (cls === "Forex") return "forex";
+  return "index";
 }
 
 export function createDatafeed(opts = {}) {
@@ -53,42 +74,61 @@ export function createDatafeed(opts = {}) {
 
     searchSymbols(userInput, exchange, symbolType, onResult) {
       const q = (userInput || "").toUpperCase();
-      const out = SYMBOLS.filter((s) => s.includes(q)).map((s) => ({
-        symbol: s, full_name: `BINANCE:${s}`, description: s,
-        exchange: "BINANCE", ticker: s, type: "crypto",
-      }));
+      const out = MARKETS
+        .filter((m) => m.id.includes(q) || m.label.toUpperCase().includes(q))
+        .map((m) => ({
+          symbol: m.id, full_name: `${EXCHANGE_LABEL[m.source]}:${m.id}`, description: m.label,
+          exchange: EXCHANGE_LABEL[m.source], ticker: m.id, type: typeOf(m.cls),
+        }));
       async_(() => onResult(out));
     },
 
     resolveSymbol(symbolName, onResolve, onError) {
-      const name = String(symbolName).replace("BINANCE:", "").toUpperCase();
-      if (!SYMBOLS.includes(name)) { async_(() => onError("unknown symbol")); return; }
+      const name = String(symbolName).split(":").pop().toUpperCase();
+      const m = MARKETS.find((x) => x.id === name);
+      if (!m) { async_(() => onError("unknown symbol")); return; }
+      const isCrypto = m.source === "Binance";
+      const resolutions = isCrypto ? SUPPORTED_RESOLUTIONS : SUPPORTED_RESOLUTIONS.filter((r) => TV_RES_TO_IV[r] !== "1s");
       const info = {
-        name, ticker: name, description: name,
-        type: "crypto",
-        session: "24x7",
+        name: m.id, ticker: m.id, description: m.label,
+        type: typeOf(m.cls),
+        session: isCrypto ? "24x7" : "24x7", // replay serves whatever history exists; the library doesn't need real session hours to page through it
         timezone: "Etc/UTC",
-        exchange: "BINANCE", listed_exchange: "BINANCE",
+        exchange: EXCHANGE_LABEL[m.source], listed_exchange: EXCHANGE_LABEL[m.source],
         format: "price",
         minmov: 1,
-        pricescale: priceScaleFor(name),
+        pricescale: PRICESCALE[m.id] || 100,
         has_intraday: true,
-        has_seconds: true,
-        seconds_multipliers: ["1", "5", "15", "30"],
+        has_seconds: isCrypto,
+        seconds_multipliers: isCrypto ? ["1"] : [],
         has_daily: true,
         has_weekly_and_monthly: false,
-        supported_resolutions: SUPPORTED_RESOLUTIONS,
-        volume_precision: 4,
+        supported_resolutions: resolutions,
+        volume_precision: isCrypto ? 4 : 0,
         data_status: "streaming",
       };
       async_(() => onResolve(info));
     },
 
     async getBars(symbolInfo, resolution, periodParams, onResult, onError) {
-      const { from, to, countBack, firstDataRequest } = periodParams;
-      const fromMs = from * 1000;
-      /* Never reveal the future. This single clamp is the whole replay. */
-      const toMs = state.live ? to * 1000 : Math.min(to * 1000, state.cursorMs + 1);
+      const { from, to, countBack } = periodParams;
+      const rawFromMs = from * 1000, rawToMs = to * 1000;
+      /* Never reveal the future. This clamp is the whole replay — but with
+         no saved layout to tell it otherwise, the library's very first
+         request for a symbol defaults its viewport to wall-clock "now",
+         which can be nowhere near a replay session's start date (this one
+         defaults to whatever `startMs`/`meta.startMs` is, often months or
+         years in the past). Clamping `to` alone and leaving `from` at its
+         original, now-irrelevant value produces a `from` sitting *after*
+         the clamped `to` — an inverted, permanently empty range. Re-anchor
+         the whole requested span onto the cursor instead of just capping
+         one end of it, so a first request for "500 bars ending now" becomes
+         "500 bars ending at the cursor" rather than nothing at all. */
+      let toMs = rawToMs, fromMs = rawFromMs;
+      if (!state.live && rawToMs > state.cursorMs + 1) {
+        toMs = state.cursorMs + 1;
+        fromMs = toMs - (rawToMs - rawFromMs);
+      }
 
       if (toMs <= fromMs) { async_(() => onResult([], { noData: true })); return; }
 
@@ -145,7 +185,7 @@ export function createDatafeed(opts = {}) {
     },
 
     /* Resolution changed: keep the same moment and snap to the open of the
-       bar containing it. If the exchange has no data that far back at this
+       bar containing it. If the feed has no data that far back at this
        granularity, say so instead of silently dragging the cursor to the
        oldest bar that happens to exist — that is how you end up looking at
        09:47 when every other timeframe says 00:00. */
@@ -154,7 +194,7 @@ export function createDatafeed(opts = {}) {
       if (!covered) {
         const e = feed.entry(symbol, resolution);
         return { cursorMs: state.cursorMs, covered: false,
-                 earliest: e.bars.length ? e.bars[0].time : null };
+                 earliest: e.bars.length ? e.bars[0].t : null };
       }
       const bar = feed.barAt(symbol, resolution, state.cursorMs);
       if (bar) { state.cursorMs = bar.time; state.onCursor(bar.time, bar); }

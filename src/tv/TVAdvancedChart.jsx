@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { createDatafeed } from "./datafeed.js";
 import { createReplayController } from "./replayController.js";
-import { feed } from "./binanceFeed.js";
+import { feed } from "./marketFeed.js";
 
 /* ============================================================
    TVAdvancedChart
@@ -39,6 +39,8 @@ export default function TVAdvancedChart({
   onBar,            // (bar) => void  — every bar the replay reveals
   onCursor,         // (ms, bar) => void
   onDrawingsChanged,// () => void     — for room sync
+  onState,          // (state) => void — { playing, atEnd, speed, covered, earliest }; fires when the
+                     // replay controller's own state changes, including reaching the end of data on its own
   height = 520,
 }) {
   const boxRef = useRef(null);
@@ -47,8 +49,8 @@ export default function TVAdvancedChart({
   const status = useLibrary();
   const [err, setErr] = useState("");
 
-  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady });
-  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady };
+  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady, onState });
+  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady, onState };
 
   useEffect(() => {
     if (status !== "ready" || !boxRef.current) return;
@@ -62,6 +64,7 @@ export default function TVAdvancedChart({
     const replay = createReplayController({
       control,
       onBar: (bar) => cbs.current.onBar && cbs.current.onBar(bar),
+      onState: (s) => cbs.current.onState && cbs.current.onState(s),
     });
     replay.setMarket(symbol, interval);
 
@@ -83,9 +86,11 @@ export default function TVAdvancedChart({
         "go_to_date",
         "timeframes_toolbar",
       ],
+      /* left toolbar shown by default — PipTest no longer has its own
+         drawing-tool rail (§5, TRADINGVIEW.md), so this is now the only
+         way to draw at all. */
       enabled_features: [
         "seconds_resolution",
-        "hide_left_toolbar_by_default",
         "use_localstorage_for_settings",
         "chart_property_page_trading",
       ],
@@ -107,12 +112,16 @@ export default function TVAdvancedChart({
       if (dead) return;
       const chart = widget.activeChart();
 
-      /* keep the replay engine pointed at whatever the user switches to */
+      /* keep the replay engine pointed at whatever the user switches to.
+         Symbols now come from two exchanges (BINANCE for crypto, PIPTEST
+         for the Twelve Data-backed forex/index markets — see datafeed.js),
+         so strip whichever prefix is present rather than assuming one. */
+      const bareSymbol = () => chart.symbol().split(":").pop();
       chart.onIntervalChanged().subscribe(null, (res) => {
-        replay.setMarket(chart.symbol().replace("BINANCE:", ""), res);
+        replay.setMarket(bareSymbol(), res);
       });
       chart.onSymbolChanged().subscribe(null, () => {
-        replay.setMarket(chart.symbol().replace("BINANCE:", ""), chart.resolution());
+        replay.setMarket(bareSymbol(), chart.resolution());
       });
       /* drawing changes drive room sync */
       widget.subscribe("drawing_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged());
