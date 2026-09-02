@@ -224,6 +224,19 @@ export default function TVAdvancedChart({
       const mirrored = new Map();
       const PENDING = "__pending__";
 
+      /* The actual fix for a viewer being able to edit a mirrored
+         drawing. createMultipointShape's own disableSelection option
+         is not enough on its own — verified directly against a real
+         shape: one created with only that option still answers
+         isUserEditEnabled() true. Selection and edit are separate
+         switches here, so both get set explicitly through the
+         documented per-shape API, on every shape this mirror ever
+         touches. */
+      function lockDown(shape) {
+        try { shape.setSelectionEnabled(false); } catch (e) {}
+        try { shape.setUserEditEnabled(false); } catch (e) {}
+      }
+
       const api = {
         widget, chart, replay, control, feed,
 
@@ -319,6 +332,7 @@ export default function TVAdvancedChart({
                 if (shape) {
                   shape.setPoints(d.points);
                   if (d.props) { try { shape.setProperties(d.props); } catch (e) {} }
+                  lockDown(shape);
                   continue;
                 }
               } catch (e) { /* gone from under us — fall through and recreate */ }
@@ -335,16 +349,24 @@ export default function TVAdvancedChart({
             try {
               creating = chart.createMultipointShape(d.points, {
                 shape: d.name,
-                /* A mirror is not the viewer's own work: they can't
-                   select or edit it, it stays out of their objects
-                   tree, and disableSave keeps it out of their own
-                   saved session layout — otherwise a viewer would
-                   quietly inherit the host's drawings permanently. */
+                /* A mirror is not the viewer's own work: it stays out
+                   of their objects tree, and disableSave keeps it out
+                   of their own saved session layout — otherwise a
+                   viewer would quietly inherit the host's drawings
+                   permanently.
+
+                   disableSelection alone turned out NOT to be enough
+                   to stop a viewer editing it — confirmed directly: a
+                   shape created with only this option still reports
+                   isUserEditEnabled() true. Selection and edit are
+                   apparently separate switches in this library, so
+                   lockDown() below calls both explicitly right after
+                   creation, which is the only place actually verified
+                   to close it. */
                 /* deliberately NOT `lock: true` — a locked drawing
                    refuses setPoints without reporting failure, which
                    would quietly freeze every mirror at wherever it was
-                   first created. disableSelection already keeps the
-                   viewer's hands off it. */
+                   first created. */
                 disableSelection: true, disableSave: true, disableUndo: true,
                 showInObjectsTree: false,
               });
@@ -356,9 +378,11 @@ export default function TVAdvancedChart({
               /* the host may have deleted it while this was in flight */
               if (mirrored.get(d.key) !== PENDING) { try { chart.removeEntity(newId); } catch (e) {} return; }
               mirrored.set(d.key, newId);
-              if (d.props) {
-                try { chart.getShapeById(newId).setProperties(d.props); } catch (e) {}
-              }
+              try {
+                const shape = chart.getShapeById(newId);
+                if (d.props) { try { shape.setProperties(d.props); } catch (e) {} }
+                lockDown(shape);
+              } catch (e) {}
             }).catch(() => { mirrored.delete(d.key); });
           }
 
