@@ -57,6 +57,7 @@ export default function TVAdvancedChart({
   useEffect(() => {
     if (status !== "ready" || !boxRef.current) return;
     let dead = false;
+    let loadGen = 0; // see api.load() below
 
     /* `dead` already guards onChartReady below against a stale widget's
        late callback — it needs to guard these three too. datafeed/replay
@@ -152,20 +153,44 @@ export default function TVAdvancedChart({
         removeShape(sid) { try { chart.removeEntity(sid); } catch (e) {} },
         clearShapes() { try { chart.removeAllShapes(); } catch (e) {} },
 
-        /* --- layout snapshot: drawings + indicators + settings --- */
+        /* --- layout snapshot: indicators + panes + settings ---
+           NOT drawings, it turns out — confirmed empirically that a
+           saved snapshot never contains a hand-drawn shape at all, no
+           matter how it's captured/restored. This is a pre-existing
+           gap that predates rooms entirely (a solo session loses its
+           drawings across a plain page reload too) — every reference
+           to "load a layout" in this file and Simulator.jsx means
+           "indicators/panes/settings", not drawings, until that's
+           fixed separately. charting_library.d.ts has a real
+           getLineToolsState()/applyLineToolsState() pair for exactly
+           this, but they need the `saveload_separate_drawings_storage`
+           featureset AND (per testing) a real save_load_adapter
+           actually wired up before they return anything — a
+           genuinely bigger, separate piece of work, not attempted
+           here. */
         save() { return new Promise((res) => widget.save((s) => res(s))); },
         /* widget.load() restores EVERYTHING it saved, including whichever
            moment the OTHER person's chart happened to be looking at when
            they drew something — without this, every incoming drawing from
            a room-mate yanks your own view back to theirs. Capture/restore
            the local visible range around it so only the drawings/studies
-           actually change; the small delay is because load() doesn't
-           expose a completion callback to hook setVisibleRange onto
-           directly, and calling it before load() has finished applying
-           just gets overwritten again. */
+           actually change.
+
+           load() has no completion callback to hook the restore onto
+           directly, and a single guessed delay either fires too early
+           (gets overwritten right back once load() actually finishes
+           applying, worse over a slow connection than on localhost) or
+           flashes the wrong view first — so this fires the same
+           restore repeatedly instead (immediately, next frame, and at
+           a spread of delays), same fix as datafeed.js's jumpTo, so
+           whichever attempt actually lands after load() has settled
+           has nothing left to flash into. `loadGen` guards against a
+           second load() landing before this one's retries finish and
+           fighting over which range wins. */
         load(snapshot) {
           try {
             const range = chart.getVisibleRange();
+            const gen = ++loadGen;
             widget.load(snapshot);
             /* getVisibleRange() can come back {from:0,to:0} (or otherwise
                degenerate) if the chart hasn't actually painted a real
@@ -175,7 +200,19 @@ export default function TVAdvancedChart({
                span of real calendar time. */
             if (range && Number.isFinite(range.from) && Number.isFinite(range.to)
                 && range.from > 0 && range.to > range.from) {
-              setTimeout(() => { try { chart.setVisibleRange(range); } catch (e) {} }, 150);
+              const restore = () => {
+                if (dead || gen !== loadGen) return;
+                /* setVisibleRange can reject asynchronously (a real,
+                   observed uncaught error from the library's own
+                   internals when a second call landed while an
+                   earlier one on the same chart was still in flight)
+                   — a synchronous try/catch alone doesn't catch that,
+                   so this also swallows the rejection explicitly. */
+                try { Promise.resolve(chart.setVisibleRange(range)).catch(() => {}); } catch (e) {}
+              };
+              restore();
+              if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+              [100, 300, 800, 1500, 3000].forEach((t) => setTimeout(restore, t));
             }
           } catch (e) {}
         },

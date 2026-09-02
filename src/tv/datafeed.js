@@ -345,7 +345,10 @@ export function createDatafeed(opts = {}) {
           && range.from > 0 && range.to > range.from) {
         const restore = () => {
           if (state.jumpGen !== gen) return;
-          try { chart.setVisibleRange(range); } catch (e) {}
+          /* setVisibleRange can reject asynchronously — a synchronous
+             try/catch alone doesn't catch that (see the matching note
+             on TVAdvancedChart.jsx's own restore). */
+          try { Promise.resolve(chart.setVisibleRange(range)).catch(() => {}); } catch (e) {}
         };
         state.afterBarsSettled = restore;
         restore();

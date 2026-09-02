@@ -270,7 +270,28 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const handleReady = useCallback((api) => {
     chartCtlRef.current = api;
     setChartReady(true);
-    if (pendingLayoutRef.current) { api.load(pendingLayoutRef.current); pendingLayoutRef.current = null; }
+    /* a fresh widget instance has nothing loaded onto it yet, no
+       matter what was loaded onto whatever instance came before it, so
+       this can't just leave lastAppliedLayoutRef holding a stale value
+       from the torn-down instance — a poll's content-comparison would
+       wrongly conclude "already applied" and skip it forever on the
+       new one. But *only* nulling it and leaving the actual apply to
+       "whichever poll happens to run next" raced with this same
+       pendingLayoutRef apply below — two near-simultaneous load()
+       calls on a chart that just mounted is what was throwing real
+       (uncaught, async) errors out of the library's own
+       setVisibleRange. Applying here AND marking it applied in the
+       same breath closes that race: a poll landing right after this
+       sees content that already matches and skips, instead of
+       queuing its own redundant call. */
+    if (pendingLayoutRef.current) {
+      const snap = pendingLayoutRef.current;
+      pendingLayoutRef.current = null;
+      lastAppliedLayoutRef.current = JSON.stringify(snap);
+      api.load(snap);
+    } else {
+      lastAppliedLayoutRef.current = null;
+    }
   }, []);
 
   const handleBar = useCallback((rawBar, stepRes) => {
@@ -583,6 +604,15 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      this push only ever touches the exact fields it lists below, full
      stop, regardless of what anyone else's concurrent patch is doing
      to layout/trading/participants/etc. */
+  /* Holds the JSON-*stringified* layout last applied/pushed, not the
+     raw object — every poll's doc.layout is freshly deserialized from
+     the network response, a brand-new object even when the content is
+     byte-for-byte identical to last time, so comparing by `!==` was
+     never actually catching "unchanged", only "a new object landed" —
+     which is every single poll. That meant `.load()` (below) was
+     firing on every ~1.5s tick regardless of whether anyone had
+     actually drawn anything, each one a real, visible viewport
+     glitch — not just on real edits. */
   const lastAppliedLayoutRef = useRef(null);
   const pushRoom = useCallback(async (extra = {}) => {
     if (!room || !canControl || !API_ENABLED || !roomSyncedRef.current) return;
@@ -608,7 +638,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (!room || !canControl || !chartCtlRef.current) return;
     (async () => {
       const layout = await chartCtlRef.current.save();
-      lastAppliedLayoutRef.current = layout;
+      lastAppliedLayoutRef.current = JSON.stringify(layout);
       pushRoom({ layout, force: true });
     })();
   }, [room, canControl, pushRoom]);
@@ -689,8 +719,9 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           roomSyncedRef.current = true;
         }
 
-        if (doc.layout && doc.layout !== lastAppliedLayoutRef.current) {
-          lastAppliedLayoutRef.current = doc.layout;
+        const docLayoutStr = doc.layout ? JSON.stringify(doc.layout) : null;
+        if (docLayoutStr && docLayoutStr !== lastAppliedLayoutRef.current) {
+          lastAppliedLayoutRef.current = docLayoutStr;
           /* if a remount is imminent (marketChanged) or the widget isn't
              up, load() on whatever chartCtlRef currently holds would
              either hit a stale/about-to-be-torn-down instance or no-op —
@@ -779,14 +810,22 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const hostRoom = async () => {
     if (!API_ENABLED) { setRoomMsg("Live rooms need the API. Set VITE_API_URL and redeploy."); return; }
     const code = makeCode();
+    /* seed the room with whatever's already drawn, not a blank
+       `layout: null` — a guest only ever gets a layout push when
+       handleDrawingsChanged actually fires, i.e. on the NEXT drawing
+       edit, which meant every pre-existing drawing from before the
+       room was even opened stayed invisible to anyone who joined
+       until the host happened to touch the chart again. */
+    const layout = chartCtlRef.current ? await chartCtlRef.current.save() : null;
     const doc = { code, host: account.handle, sessionId: meta.id,
       symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      layout: null, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
+      layout, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
     roomSyncedRef.current = true; // the doc IS the host's own already-correct local state
     lastKnownDocCursorRef.current = cursor;
+    if (layout) lastAppliedLayoutRef.current = JSON.stringify(layout);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
   };
   const joinRoom = async (codeArg) => {
