@@ -74,7 +74,7 @@ export default function TVAdvancedChart({
 
     const replay = createReplayController({
       control,
-      onBar: (bar) => !dead && cbs.current.onBar && cbs.current.onBar(bar),
+      onBar: (bar, stepRes) => !dead && cbs.current.onBar && cbs.current.onBar(bar, stepRes),
       onState: (s) => !dead && cbs.current.onState && cbs.current.onState(s),
     });
     replay.setMarket(symbol, interval);

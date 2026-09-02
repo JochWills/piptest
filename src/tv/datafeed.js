@@ -82,6 +82,26 @@ function typeOf(cls) {
   return "index";
 }
 
+/* Shared by control.step() (a bar just fetched locally) and
+   control.pushRemoteBar() (a bar delivered over the room WebSocket
+   by whoever's actually driving the replay — see roomSocket.js /
+   Simulator.jsx) — both need to fold a sub-bar into the growing
+   chart-resolution candle the exact same way, or a room viewer's
+   chart would build visibly different candles than the host's own.
+   Returns the bar to hand to onTick and updates state.agg in place. */
+function aggregateDisplay(state, bar, symbol, resolution, chartMs, stepRes) {
+  if (stepRes === resolution) { state.agg = null; return bar; }
+  const bucketStart = Math.floor(bar.time / chartMs) * chartMs;
+  const agg = state.agg;
+  const display = (agg && agg.symbol === symbol && agg.resolution === resolution && agg.time === bucketStart)
+    ? { ...agg, high: Math.max(agg.high, bar.high), low: Math.min(agg.low, bar.low),
+        close: bar.close, volume: (agg.volume || 0) + (bar.volume || 0) }
+    : { symbol, resolution, time: bucketStart, open: bar.open, high: bar.high, low: bar.low,
+        close: bar.close, volume: bar.volume || 0 };
+  state.agg = display;
+  return display;
+}
+
 export function createDatafeed(opts = {}) {
   const state = {
     cursorMs: opts.cursorMs ?? Date.now(),
@@ -194,8 +214,12 @@ export function createDatafeed(opts = {}) {
     setStepMs(ms) { state.stepMs = ms; },
 
     /* Move the cursor forward one bar and push the revealed bar to the
-       chart. Returns the raw bar (always at whatever resolution was
-       actually stepped — see below), or null at the end of data.
+       chart. Returns { bar, stepRes } — bar is the raw bar (always at
+       whatever resolution was actually stepped — see below), stepRes
+       is that resolution itself, which a host/editor's room-sync
+       broadcast (see Simulator.jsx) needs to hand a viewer's
+       pushRemoteBar (below) so it aggregates the exact same way — or
+       null at the end of data.
 
        Normally that's just the chart's own displayed resolution, same
        as ever. But when the chosen step size is *finer* than the
@@ -223,24 +247,36 @@ export function createDatafeed(opts = {}) {
       state.cursorMs = bar.time;
       state.onCursor(bar.time, bar);
 
-      let display = bar;
-      if (stepRes !== resolution) {
-        const bucketStart = Math.floor(bar.time / chartMs) * chartMs;
-        const agg = state.agg;
-        display = (agg && agg.symbol === symbol && agg.resolution === resolution && agg.time === bucketStart)
-          ? { ...agg, high: Math.max(agg.high, bar.high), low: Math.min(agg.low, bar.low),
-              close: bar.close, volume: (agg.volume || 0) + (bar.volume || 0) }
-          : { symbol, resolution, time: bucketStart, open: bar.open, high: bar.high, low: bar.low,
-              close: bar.close, volume: bar.volume || 0 };
-        state.agg = display;
-      } else {
-        state.agg = null; // stepping at the chart's own resolution — each bar is already complete, nothing to build up
-      }
-
+      const display = aggregateDisplay(state, bar, symbol, resolution, chartMs, stepRes);
       for (const s of state.subs.values()) {
         if (s.symbol === symbol && s.resolution === resolution) s.onTick({ ...display });
       }
-      return bar;
+      return { bar, stepRes };
+    },
+
+    /* Room viewer path: a host/editor's step() (above) already ran
+       this exact bar through the same aggregation and broadcast it
+       over the room WebSocket. Feeding it in here — via the same
+       onTick a live tick would use — is what lets a viewer's chart
+       extend forward exactly like one, with no resetData()/re-fetch
+       at all for the ordinary case of just watching someone else
+       play; jumpTo (below) is still what handles a symbol/interval
+       change or an actual rewind, both of which need a real reset
+       regardless of how the moment was reached. `subRes` is the
+       resolution the sender actually stepped at (its own `stepRes`)
+       — passed explicitly rather than re-derived from this side's
+       own stepMs, so a viewer's chart can't build a differently-
+       bucketed candle just because its local step-size sync happens
+       to be a beat behind the sender's. */
+    pushRemoteBar(bar, symbol, resolution, subRes) {
+      if (bar.time < state.cursorMs) return; // stale/out-of-order delivery — never move the cursor backwards
+      state.cursorMs = bar.time;
+      state.onCursor(bar.time, bar);
+      const chartMs = barMsOf(TV_RES_TO_IV[resolution]);
+      const display = aggregateDisplay(state, bar, symbol, resolution, chartMs, subRes || resolution);
+      for (const s of state.subs.values()) {
+        if (s.symbol === symbol && s.resolution === resolution) s.onTick({ ...display });
+      }
     },
 
     /* Jump anywhere, including backwards. The library caches bars and

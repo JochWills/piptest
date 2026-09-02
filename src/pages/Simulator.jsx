@@ -15,6 +15,7 @@ import { store, K } from "../lib/store.js";
 import * as data from "../lib/data.js";
 import { censor } from "../lib/profanity.js";
 import { API_ENABLED } from "../lib/api.js";
+import { connectRoomSocket } from "../lib/roomSocket.js";
 
 /* Below this bar-index no saved `cursor` could plausibly be a real
    millisecond timestamp (that's a UNIX time somewhere in 1970) — it's a
@@ -119,6 +120,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [roomOpen, setRoomOpen] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [roomMsg, setRoomMsg] = useState("");
+  /* just a UI indicator (RoomPanel) — nothing else reads this, since
+     every consumer of the socket's health checks roomSocketRef
+     directly at the moment it matters instead of re-rendering on it. */
+  const [wsLive, setWsLive] = useState(false);
   const pushRef = useRef(0), appliedRef = useRef(0), missRef = useRef(0);
   /* Only host/editor can ever push chart state, and a freshly-JOINED
      editor's own local symbol/interval/cursor/stepId/playing is still
@@ -244,6 +249,21 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      bars to the {t,o,h,l,c} shape the rest of this file already uses. */
   const tradeRef = useRef(null);
   useEffect(() => { tradeRef.current = trade; }, [trade]);
+  /* handleBar (below) is memoized narrowly ([onTradesClosed]) so it
+     doesn't go stale mid-play, same reasoning as tradeRef — these
+     back it with the current symbol/interval/room for the room
+     WebSocket broadcast without widening that dependency array. */
+  const symbolRef = useRef(symbol);
+  useEffect(() => { symbolRef.current = symbol; }, [symbol]);
+  const intervalRef = useRef(interval);
+  useEffect(() => { intervalRef.current = interval; }, [interval]);
+  const roomRef = useRef(room);
+  useEffect(() => { roomRef.current = room; }, [room]);
+  /* the room's real-time relay connection (see roomSocket.js /
+     server/ws.js) — opened/closed by the effect further down,
+     alongside the existing REST poll which keeps running unmodified
+     as the fallback if this is ever unavailable. */
+  const roomSocketRef = useRef(null);
 
   const toNative = (b) => ({ t: b.time, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume });
 
@@ -253,7 +273,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (pendingLayoutRef.current) { api.load(pendingLayoutRef.current); pendingLayoutRef.current = null; }
   }, []);
 
-  const handleBar = useCallback((rawBar) => {
+  const handleBar = useCallback((rawBar, stepRes) => {
     const b = toNative(rawBar);
     setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
     const last = seenRef.current[seenRef.current.length - 1];
@@ -262,6 +282,21 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       if (seenRef.current.length > 500) { seenRef.current.shift(); seenBarsRef.current.shift(); }
     }
     seenIdxRef.current = seenRef.current.length - 1;
+
+    /* broadcast every bar WE reveal locally to the room's real-time
+       relay, so a viewer's chart can extend forward the instant it
+       happens instead of waiting on the next poll — see roomSocket.js
+       and control.pushRemoteBar in datafeed.js. Only a host/editor's
+       own local stepping ever reaches here with canControl true; a
+       pure viewer's bars arrive via applyRemoteBar instead (below),
+       which re-fires this same callback — canControlRef being false
+       there is what stops it echoing straight back out. */
+    if (canControlRef.current && roomRef.current) {
+      roomSocketRef.current?.send({
+        type: "bar", symbol: symbolRef.current, resolution: IV_TO_TV_RES[intervalRef.current] || "30", subRes: stepRes,
+        time: rawBar.time, open: rawBar.open, high: rawBar.high, low: rawBar.low, close: rawBar.close, volume: rawBar.volume,
+      });
+    }
 
     const t0 = tradeRef.current;
     if (t0) {
@@ -337,7 +372,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
        symbols while 1s is selected would just show an empty chart */
     const nextSource = cs ? SYMBOLS.find((s) => s.id === nextSym)?.source : curSource;
     const nextInterval = ci ? nextIv : interval;
+    const finalIv = nextSource === "TwelveData" && nextInterval === "1s" ? "1m" : nextInterval;
     if (nextSource === "TwelveData" && nextInterval === "1s") setIv("1m");
+    /* tell a viewer's chart to remount at the new market right away,
+       rather than waiting on the next ~1.5s poll (still the fallback
+       — see the room WebSocket effect further down). */
+    if (room && canControl) {
+      roomSocketRef.current?.send({ type: "market", symbol: cs ? nextSym : symbol, interval: finalIv, cursor: at });
+    }
   };
 
   /* ================= transport =================
@@ -425,13 +467,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      it forward at the host's actual pace (both sides free-run their own
      independent 260ms tick loop, see replayController.js, with nothing
      keeping them phase-locked), so a viewer's local clock would drift
-     from the host's within seconds and the room poll's periodic
-     correction (jumpTo, below) would end up firing on essentially every
-     ~1.5s tick — which is what used to show up as the chart constantly
-     "refreshing" and snapping back to the same point for a guest. A
-     viewer's chart only ever moves forward via that same room-sync
-     jumpTo instead, so it stays exactly in step with the host and only
-     that one correction path ever touches its viewport. */
+     from the host's within seconds. A viewer's chart instead moves
+     forward exclusively via the room WebSocket's `bar` messages
+     (applyRemoteBar, below) — or, if that connection isn't up, the
+     room poll's periodic jumpTo correction as a fallback — so it stays
+     exactly in step with the host without ever running its own clock. */
   useEffect(() => {
     if (!chartReady || !chartCtlRef.current) return;
     if (canControl && playing) chartCtlRef.current.replay.play();
@@ -441,6 +481,20 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (!chartReady || !chartCtlRef.current) return;
     chartCtlRef.current.replay.setStep(stepMs);
   }, [stepMs, chartReady]);
+  /* real-time room broadcasts for the two bits of transport state a
+     bar reveal doesn't already carry — everything else (drawings,
+     the actual bars) is sent from handleBar/handleDrawingsChanged
+     right where it happens instead of a generic effect like this,
+     since those need the freshest possible value, not whatever this
+     effect's own dependency array last saw. */
+  useEffect(() => {
+    if (!room || !canControl) return;
+    roomSocketRef.current?.send({ type: playing ? "play" : "pause" });
+  }, [playing, canControl, room?.code]); // eslint-disable-line
+  useEffect(() => {
+    if (!room || !canControl) return;
+    roomSocketRef.current?.send({ type: "step", stepId });
+  }, [stepId, canControl, room?.code]); // eslint-disable-line
   /* the replay controller can also stop itself (end of available data) —
      without this, the Play button could keep showing "playing" forever */
   const handleReplayState = useCallback((s) => { if (!s.playing) setPlaying(false); }, []);
@@ -602,6 +656,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
              tick. */
           chartStartRef.current = doc.cursor;
           seenRef.current = [doc.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
+        } else if (roomSocketRef.current?.isOpen()) {
+          /* the room WebSocket is live and feeding bars directly via
+             applyRemoteBar as they happen (see the WS message handler
+             below) — this poll-based correction is only the fallback
+             for when that connection isn't up, and forcing a
+             jumpTo/resetData here anyway would fight the smooth,
+             tick-by-tick bar delivery for no reason. */
+          roomSyncedRef.current = true;
         } else if (Math.abs(cursor - doc.cursor) > barMsOf(interval) * 2) {
           /* a couple of bars' worth of drift is normal jitter, not a
              desync — cursor is milliseconds now, not a bar index, so the
@@ -636,6 +698,64 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const id = setInterval(poll, 1500);
     return () => { alive = false; clearInterval(id); };
   }, [room?.code, account.handle]); // eslint-disable-line
+
+  /* ---- room WebSocket: real-time relay for a viewer's chart ----
+     Applies host/editor-originated bar/market/play/pause/step
+     messages — only for a pure viewer (canControl true means this
+     side IS a source of truth, not a follower; see handleBar's own
+     broadcast guard for the other half of that split). Defined fresh
+     every render, not memoized, and stashed in a ref the connect
+     effect below reads from — so it always sees the latest
+     symbol/interval/chartCtlRef without the effect itself needing to
+     tear down and reconnect the socket whenever any of those change. */
+  const handleRoomSocketMessage = (msg) => {
+    if (canControl || !chartCtlRef.current) return;
+    switch (msg.type) {
+      case "bar":
+        chartCtlRef.current.replay.applyRemoteBar(
+          { time: msg.time, open: msg.open, high: msg.high, low: msg.low, close: msg.close, volume: msg.volume },
+          msg.symbol, msg.resolution, msg.subRes
+        );
+        break;
+      case "play":
+        setPlaying(true);
+        break;
+      case "pause":
+        setPlaying(false);
+        break;
+      case "step":
+        if (msg.stepId) setStepId(msg.stepId);
+        break;
+      case "market": {
+        const marketChanged = (msg.symbol && msg.symbol !== symbol) || (msg.interval && msg.interval !== interval);
+        if (msg.symbol) setSymbol(msg.symbol);
+        if (msg.interval) setIv(msg.interval);
+        if (marketChanged && typeof msg.cursor === "number") {
+          chartStartRef.current = msg.cursor;
+          seenRef.current = [msg.cursor]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
+          setCursor(msg.cursor);
+        }
+        break;
+      }
+      default: break;
+    }
+  };
+  const roomMsgHandlerRef = useRef(handleRoomSocketMessage);
+  roomMsgHandlerRef.current = handleRoomSocketMessage;
+
+  useEffect(() => {
+    if (!room?.code || !API_ENABLED) { setWsLive(false); return; }
+    const sock = connectRoomSocket(room.code, {
+      onMessage: (msg) => roomMsgHandlerRef.current(msg),
+      onOpen: () => setWsLive(true),
+      onClose: () => setWsLive(false),
+    });
+    roomSocketRef.current = sock;
+    return () => {
+      sock.close();
+      if (roomSocketRef.current === sock) roomSocketRef.current = null;
+    };
+  }, [room?.code]); // eslint-disable-line
 
   /* unread badge on the chat toggle while the panel is closed */
   useEffect(() => {
@@ -871,7 +991,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               title="Live room" aria-label="Live room" style={{ padding: "6px 9px" }}>
               <Svg s={15}>{Ic.users}</Svg>
             </button>
-            {roomOpen && <RoomPanel {...{ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose: () => setRoomOpen(false) }} />}
+            {roomOpen && <RoomPanel {...{ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose: () => setRoomOpen(false) }} />}
           </span>
           {room && (
             <span data-pop style={{ position: "relative" }}>
@@ -1374,7 +1494,7 @@ function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel }) {
   );
 }
 
-function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose }) {
+function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose }) {
   return (
     <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 15, width: 272 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -1398,7 +1518,15 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, host
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div>
               <div className="num" style={{ fontSize: 21, fontWeight: 700, letterSpacing: ".08em" }}>{room.code}</div>
-              <div className="sm mut">host {room.host}</div>
+              <div className="sm mut" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                host {room.host}
+                <span title={wsLive ? "Real-time sync connected" : "Falling back to periodic sync"}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5,
+                    color: wsLive ? "var(--up)" : "var(--dim)" }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 4, background: "currentColor" }} />
+                  {wsLive ? "live" : "syncing…"}
+                </span>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               {isHost && <button className="btn" onClick={closeRoom}>Close</button>}

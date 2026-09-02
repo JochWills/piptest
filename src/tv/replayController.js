@@ -31,10 +31,10 @@ export function createReplayController({ control, onBar, onState }) {
     if (state.busy) return false;
     state.busy = true;
     try {
-      const bar = await control.step(state.symbol, state.resolution);
-      if (!bar) { state.atEnd = true; stop(); emitState(); return false; }
+      const result = await control.step(state.symbol, state.resolution);
+      if (!result) { state.atEnd = true; stop(); emitState(); return false; }
       state.atEnd = false;
-      onBar && onBar(bar);
+      onBar && onBar(result.bar, result.stepRes);
       return true;
     } finally { state.busy = false; }
   }
@@ -119,6 +119,23 @@ export function createReplayController({ control, onBar, onState }) {
       return state.covered !== false;
     },
     jumpTo(ms, widget) { stop(); state.atEnd = false; control.jumpTo(ms, widget, state.symbol, state.resolution); emitState(); },
+    /* Room viewer path (see Simulator.jsx's room WebSocket wiring): a
+       bar someone else's step() already revealed and broadcast, fed
+       in here the same way stepOnce() feeds a locally-revealed one —
+       same onBar callback, same aggregation (control.pushRemoteBar
+       mirrors control.step's own, see datafeed.js) — so a viewer's
+       chart, price ticker and OHLC display all extend forward exactly
+       like a live tick, never touching jumpTo/resetData for the
+       ordinary case of just watching someone else play. Ignored if it
+       arrives for a market this side isn't even displaying any more —
+       a stale message from just before a symbol/interval switch. */
+    applyRemoteBar(bar, symbol, resolution, stepRes) {
+      if (symbol !== state.symbol || resolution !== state.resolution) return;
+      state.atEnd = false;
+      control.pushRemoteBar(bar, symbol, resolution, stepRes);
+      onBar && onBar(bar, stepRes);
+      emitState();
+    },
     get state() { return { ...state }; },
   };
 }

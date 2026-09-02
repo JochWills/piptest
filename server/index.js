@@ -11,6 +11,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { migrate, startSweeper, pool } from "./db.js";
 import { router } from "./routes.js";
+import { attachRoomSocket } from "./ws.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -63,6 +64,10 @@ if (!origins.length) console.warn("ALLOWED_ORIGIN is not set — CORS is open. S
 migrate()
   .then(() => {
     startSweeper();
-    app.listen(PORT, () => console.log(`PipTest API listening on :${PORT}`));
+    const server = app.listen(PORT, () => console.log(`PipTest API listening on :${PORT}`));
+    /* real-time room relay (bar-by-bar replay sync) rides the same
+       HTTP server/port as the REST API — see ws.js for what this
+       does and doesn't carry. */
+    attachRoomSocket(server);
   })
   .catch((e) => { console.error("migration failed:", e); process.exit(1); });
