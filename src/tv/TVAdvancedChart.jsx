@@ -65,6 +65,36 @@ function keepLocalViewport(incoming, mine) {
   };
 }
 
+/* Returns `snapshot` with every hand-drawn shape removed from every
+   pane, leaving indicators, panes, styling and the series itself.
+
+   Drawings get their own sync channel (getDrawings/applyDrawings
+   below) precisely so they DON'T have to travel inside a layout
+   snapshot — applying one of those means widget.load(), which tears
+   the whole chart down and rebuilds it. Leaving drawings in as well
+   would undo the point twice over: every pen stroke would change the
+   snapshot and trigger that rebuild, and each drawing would then
+   exist twice on the receiving chart (once restored by the load, once
+   mirrored). Stripped here, a snapshot only changes when something
+   structural does — adding an indicator — so a room-mate's chart
+   stops reloading during ordinary drawing work entirely. */
+function stripDrawings(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.charts)) return snapshot;
+  return {
+    ...snapshot,
+    charts: snapshot.charts.map((c) => {
+      if (!Array.isArray(c.panes)) return c;
+      return {
+        ...c,
+        panes: c.panes.map((pane) => {
+          if (!Array.isArray(pane.sources)) return pane;
+          return { ...pane, sources: pane.sources.filter((s) => !String(s?.type || "").startsWith("LineTool")) };
+        }),
+      };
+    }),
+  };
+}
+
 export default function TVAdvancedChart({
   symbol = "BTCUSDT",
   interval = "30",
@@ -172,21 +202,41 @@ export default function TVAdvancedChart({
       chart.onSymbolChanged().subscribe(null, () => {
         replay.setMarket(bareSymbol(), chart.resolution());
       });
-      /* drawing changes drive room sync */
-      widget.subscribe("drawing_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged());
-      widget.subscribe("study_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged());
+      /* Drawing and indicator changes drive room sync, but down two
+         completely different paths now (drawing-level mirror vs.
+         layout snapshot), so the caller needs to know which just
+         happened — see stripDrawings above. */
+      widget.subscribe("drawing_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("drawing"));
+      widget.subscribe("study_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("study"));
+
+      /* Shapes PipTest draws itself (entry/stop/target zones) — they're
+         derived from trade state that each side already has, so they
+         must never be picked up as "the user drew this" and mirrored
+         to a room, or a viewer would get two of each. */
+      const ownShapes = new Set();
+      /* host's entity id -> our local entity id for the copy of it.
+         Keying on the AUTHOR's id, rather than on the drawing's
+         contents, is what lets a shape the host drags be updated in
+         place here (setPoints) instead of being deleted and recreated
+         on every mouse-move frame. PENDING marks a create that's
+         in-flight, so a second sync arriving mid-create doesn't make
+         a duplicate. */
+      const mirrored = new Map();
+      const PENDING = "__pending__";
 
       const api = {
         widget, chart, replay, control, feed,
 
         /* --- trade visualisation (entry / stop / target zones) --- */
         drawZone({ id, price, color, text }) {
-          return chart.createShape({ time: Math.floor(control.cursorMs / 1000), price },
+          const sid = chart.createShape({ time: Math.floor(control.cursorMs / 1000), price },
             { shape: "horizontal_line", disableSelection: true, disableSave: true,
               overrides: { linecolor: color, linewidth: 1, linestyle: 2, showLabel: true, text } });
+          if (sid != null) ownShapes.add(sid);
+          return sid;
         },
-        removeShape(sid) { try { chart.removeEntity(sid); } catch (e) {} },
-        clearShapes() { try { chart.removeAllShapes(); } catch (e) {} },
+        removeShape(sid) { ownShapes.delete(sid); try { chart.removeEntity(sid); } catch (e) {} },
+        clearShapes() { ownShapes.clear(); mirrored.clear(); try { chart.removeAllShapes(); } catch (e) {} },
 
         /* --- layout snapshot: indicators + panes + settings ---
            NOT drawings, it turns out — confirmed empirically that a
@@ -204,6 +254,126 @@ export default function TVAdvancedChart({
            genuinely bigger, separate piece of work, not attempted
            here. */
         save() { return new Promise((res) => widget.save((s) => res(s))); },
+
+        /* ---- drawing sync, without touching the chart itself ----
+
+           What a room actually needs to share is the drawings, and
+           routing those through a layout snapshot was the whole
+           problem: widget.load() is a full teardown-and-rebuild of
+           the chart (series destroyed, bars re-requested, panes
+           reconstructed), so every stroke the host made reloaded the
+           viewer's chart from scratch. Splicing the local viewport
+           into the incoming snapshot fixed WHERE it landed but not
+           the rebuild itself, which is the visible flash.
+
+           So don't send a snapshot for drawings at all. Read the
+           shapes out one by one here, send that list, and let the
+           receiver add/move/remove individual shapes on its live
+           chart. Nothing is torn down, so there is nothing to flash:
+           the view cannot move because it is never rebuilt. */
+        getDrawings() {
+          let all = [];
+          try { all = chart.getAllShapes() || []; } catch (e) { return []; }
+          const out = [];
+          /* Copies of someone else's drawings are not ours to
+             re-publish. Two editors in one room both mirror and both
+             push, so without this each would keep re-broadcasting the
+             other's shapes back as if newly drawn — every round trip
+             adding another copy. */
+          const mirrorIds = new Set(mirrored.values());
+          for (const { id, name } of all) {
+            if (ownShapes.has(id) || mirrorIds.has(id)) continue;
+            try {
+              const shape = chart.getShapeById(id);
+              if (!shape) continue;
+              const points = shape.getPoints().map((p) => ({ time: p.time, price: p.price }));
+              if (!points.length) continue;
+              /* getProperties/setProperties are a documented round
+                 trip, so the styling travels without having to know
+                 which override keys each of the ~90 tool types uses.
+                 JSON-cycled because whatever ends up here is going
+                 into a room document over the wire regardless. */
+              let props = null;
+              try { props = JSON.parse(JSON.stringify(shape.getProperties())); } catch (e) {}
+              out.push({ key: String(id), name, points, props });
+            } catch (e) { /* a shape mid-creation can't be read yet — next event catches it */ }
+          }
+          return out;
+        },
+
+        applyDrawings(list) {
+          if (!Array.isArray(list)) return;
+          const seen = new Set();
+
+          for (const d of list) {
+            if (!d || !d.key || !Array.isArray(d.points) || !d.points.length) continue;
+            seen.add(d.key);
+            const existing = mirrored.get(d.key);
+            if (existing === PENDING) continue; // its create will land with the current points
+
+            if (existing != null) {
+              /* Update in place — this is the path a host dragging a
+                 line takes, and it's why the key is the host's id. */
+              try {
+                const shape = chart.getShapeById(existing);
+                if (shape) {
+                  shape.setPoints(d.points);
+                  if (d.props) { try { shape.setProperties(d.props); } catch (e) {} }
+                  continue;
+                }
+              } catch (e) { /* gone from under us — fall through and recreate */ }
+              mirrored.delete(d.key);
+            }
+
+            mirrored.set(d.key, PENDING);
+            let creating;
+            try {
+              creating = chart.createMultipointShape(d.points, {
+                shape: d.name,
+                /* A mirror is not the viewer's own work: they can't
+                   select or edit it, it stays out of their objects
+                   tree, and disableSave keeps it out of their own
+                   saved session layout — otherwise a viewer would
+                   quietly inherit the host's drawings permanently. */
+                /* deliberately NOT `lock: true` — a locked drawing
+                   refuses setPoints without reporting failure, which
+                   would quietly freeze every mirror at wherever it was
+                   first created. disableSelection already keeps the
+                   viewer's hands off it. */
+                disableSelection: true, disableSave: true, disableUndo: true,
+                showInObjectsTree: false,
+              });
+            } catch (e) { mirrored.delete(d.key); continue; }
+
+            Promise.resolve(creating).then((newId) => {
+              if (dead) return;
+              if (newId == null) { mirrored.delete(d.key); return; }
+              /* the host may have deleted it while this was in flight */
+              if (mirrored.get(d.key) !== PENDING) { try { chart.removeEntity(newId); } catch (e) {} return; }
+              mirrored.set(d.key, newId);
+              if (d.props) {
+                try { chart.getShapeById(newId).setProperties(d.props); } catch (e) {}
+              }
+            }).catch(() => { mirrored.delete(d.key); });
+          }
+
+          for (const [key, id] of Array.from(mirrored)) {
+            if (seen.has(key)) continue;
+            if (id === PENDING) { mirrored.delete(key); continue; }
+            mirrored.delete(key);
+            try { chart.removeEntity(id); } catch (e) {}
+          }
+        },
+
+        /* What a room gets: the structural snapshot with drawings
+           taken out, plus the drawings as their own list. Distinct
+           from save() above, which stays whole because a solo
+           session restoring itself genuinely does want everything
+           back in one go. */
+        async saveShared() {
+          const layout = await new Promise((res) => widget.save((s) => res(s)));
+          return { layout: stripDrawings(layout), drawings: api.getDrawings() };
+        },
         /* The viewport is stored INSIDE the snapshot itself — the
            chart's `timeScale` (m_barSpacing = zoom, m_rightOffset =
            scroll) and each pane's axis state. So loading a room-mate's

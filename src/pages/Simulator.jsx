@@ -215,6 +215,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      widget's own api.load() once it's ready — see the onReady handler
      below — rather than as React state here. */
   const pendingLayoutRef = useRef(null);
+  /* Room drawings that arrived from a poll before the widget existed
+     (a guest's very first poll routinely beats the chart's mount).
+     Separate from pendingLayoutRef because they're applied by a
+     different call — see handleReady. */
+  const pendingDrawingsRef = useRef(null);
   useEffect(() => {
     (async () => {
       const body = await data.getSessionState(meta.id);
@@ -291,6 +296,18 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       api.load(snap);
     } else {
       lastAppliedLayoutRef.current = null;
+    }
+    /* Same reasoning for the mirrored drawings: a new widget carries
+       none of the previous one's, and TVAdvancedChart's own key->id
+       map went with it, so both the map and this ref have to start
+       from scratch or a poll would skip re-mirroring them. */
+    if (pendingDrawingsRef.current) {
+      const list = pendingDrawingsRef.current;
+      pendingDrawingsRef.current = null;
+      lastAppliedDrawingsRef.current = JSON.stringify(list);
+      api.applyDrawings(list);
+    } else {
+      lastAppliedDrawingsRef.current = null;
     }
   }, []);
 
@@ -626,22 +643,71 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
       { path: ["updatedAt"], value: now },
     ];
     if (extra.layout !== undefined) patches.push({ path: ["layout"], value: extra.layout });
+    if (extra.drawings !== undefined) patches.push({ path: ["drawings"], value: extra.drawings });
     const merged = await data.roomPatch(room.code, patches);
     if (merged) setRoom(merged);
   }, [room, canControl, symbol, interval, cursor, playing, stepId, account.handle]);
 
-  const handleDrawingsChanged = useCallback(() => {
+  /* Same content-comparison reasoning as lastAppliedLayoutRef — a
+     freshly-deserialized array is a new object every poll. */
+  const lastAppliedDrawingsRef = useRef(null);
+
+  const handleDrawingsChanged = useCallback((kind) => {
     /* always bump this, room or not — it's what makes the autosave effect
        below (which otherwise only reacts to trades/cursor/notes/symbol/
        interval) also pick up a layout-only edit and persist it. */
     setLayoutTick((n) => n + 1);
+    if (kind !== "study") return; // drawings are handled by the watcher below
     if (!room || !canControl || !chartCtlRef.current) return;
     (async () => {
-      const layout = await chartCtlRef.current.save();
+      /* Drawings and indicators take different routes to a room-mate
+         (a per-shape mirror vs. a whole-chart snapshot — see
+         TVAdvancedChart's stripDrawings), and drawing edits are by far
+         the more frequent of the two. Pushing only the one that
+         actually changed is what keeps the layout snapshot stable
+         while someone is drawing, so the receiving chart never
+         reloads. */
+      const { layout, drawings } = await chartCtlRef.current.saveShared();
       lastAppliedLayoutRef.current = JSON.stringify(layout);
-      pushRoom({ layout, force: true });
+      lastAppliedDrawingsRef.current = JSON.stringify(drawings);
+      pushRoom({ layout, drawings, force: true });
     })();
   }, [room, canControl, pushRoom]);
+
+  /* ---- what actually publishes drawings to a room ----
+
+     The library's `drawing_event` looked like the natural trigger and
+     isn't: measured against the real widget, it fires exactly once per
+     drawing, at the instant the tool creates it — when a two-point
+     line still has BOTH points on the first click — and then never
+     again. Not when the drawing is completed, and not when an existing
+     one is dragged. So anything driven off that event alone publishes
+     a half-finished shape and nothing afterwards, which is why a
+     drawing only ever reached a room-mate on the *next* edit, always
+     one behind, and why dragging one never reached them at all.
+
+     Comparing the actual serialized shapes on a short timer is
+     immune to which events the library chooses to emit: whatever
+     changed, however it changed, shows up as different content. The
+     read only walks shapes already in memory, and only runs while
+     actually hosting/co-editing a room. */
+  const pushRoomRef = useRef(pushRoom);
+  useEffect(() => { pushRoomRef.current = pushRoom; }, [pushRoom]);
+
+  useEffect(() => {
+    if (!room?.code || !canControl || !chartReady || !API_ENABLED) return;
+    const id = setInterval(() => {
+      const api = chartCtlRef.current;
+      if (!api || !roomSyncedRef.current) return;
+      const drawings = api.getDrawings();
+      const str = JSON.stringify(drawings);
+      if (str === lastAppliedDrawingsRef.current) return;
+      lastAppliedDrawingsRef.current = str;
+      setLayoutTick((n) => n + 1); // persist it to the host's own session too
+      pushRoomRef.current({ drawings, force: true });
+    }, 800);
+    return () => clearInterval(id);
+  }, [room?.code, canControl, chartReady]);
 
   useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, stepId, symbol, interval]); // eslint-disable-line
 
@@ -731,6 +797,18 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           if (marketChanged || !chartCtlRef.current) pendingLayoutRef.current = doc.layout;
           else chartCtlRef.current.load(doc.layout);
         }
+
+        /* Drawings, unlike the layout above, never go through load()
+           — applyDrawings adds/moves/removes individual shapes on the
+           live chart, so this runs as often as the host draws without
+           the chart being rebuilt (and therefore without the viewport
+           moving) even once. */
+        const docDrawingsStr = doc.drawings ? JSON.stringify(doc.drawings) : null;
+        if (docDrawingsStr && docDrawingsStr !== lastAppliedDrawingsRef.current) {
+          lastAppliedDrawingsRef.current = docDrawingsStr;
+          if (chartCtlRef.current) chartCtlRef.current.applyDrawings(doc.drawings);
+          else pendingDrawingsRef.current = doc.drawings;
+        }
       }
     };
     poll();
@@ -816,16 +894,21 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
        edit, which meant every pre-existing drawing from before the
        room was even opened stayed invisible to anyone who joined
        until the host happened to touch the chart again. */
-    const layout = chartCtlRef.current ? await chartCtlRef.current.save() : null;
+    const shared = chartCtlRef.current ? await chartCtlRef.current.saveShared() : { layout: null, drawings: [] };
+    const { layout, drawings } = shared;
     const doc = { code, host: account.handle, sessionId: meta.id,
       symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      layout, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
+      layout, drawings, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
     roomSyncedRef.current = true; // the doc IS the host's own already-correct local state
     lastKnownDocCursorRef.current = cursor;
     if (layout) lastAppliedLayoutRef.current = JSON.stringify(layout);
+    /* the host's own chart already has these — it's where they came
+       from — so mark them applied, or its next poll would mirror the
+       host's drawings on top of themselves. */
+    if (drawings) lastAppliedDrawingsRef.current = JSON.stringify(drawings);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
   };
   const joinRoom = async (codeArg) => {
