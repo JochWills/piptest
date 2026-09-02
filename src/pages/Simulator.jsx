@@ -418,11 +418,25 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
   /* drives the widget's own replay clock off Simulator's playing/step
      state, rather than the other way round — room sync and the transport
-     buttons both just flip this state, same as before. */
+     buttons both just flip this state, same as before.
+
+     A room viewer (canControl false) never runs this locally, even
+     though `playing` still mirrors the host's — it has nothing driving
+     it forward at the host's actual pace (both sides free-run their own
+     independent 260ms tick loop, see replayController.js, with nothing
+     keeping them phase-locked), so a viewer's local clock would drift
+     from the host's within seconds and the room poll's periodic
+     correction (jumpTo, below) would end up firing on essentially every
+     ~1.5s tick — which is what used to show up as the chart constantly
+     "refreshing" and snapping back to the same point for a guest. A
+     viewer's chart only ever moves forward via that same room-sync
+     jumpTo instead, so it stays exactly in step with the host and only
+     that one correction path ever touches its viewport. */
   useEffect(() => {
     if (!chartReady || !chartCtlRef.current) return;
-    if (playing) chartCtlRef.current.replay.play(); else chartCtlRef.current.replay.pause();
-  }, [playing, chartReady]);
+    if (canControl && playing) chartCtlRef.current.replay.play();
+    else chartCtlRef.current.replay.pause();
+  }, [playing, chartReady, canControl]);
   useEffect(() => {
     if (!chartReady || !chartCtlRef.current) return;
     chartCtlRef.current.replay.setStep(stepMs);

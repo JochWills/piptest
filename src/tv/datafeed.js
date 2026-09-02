@@ -253,7 +253,27 @@ export function createDatafeed(opts = {}) {
       state.agg = null;
       state.onCursor(ms, null);
       for (const s of state.subs.values()) s.reset && s.reset();
+      /* resetData() forces the chart to drop its cached bars and
+         re-request them — necessary, since the library refuses to
+         rewrite history — but left alone it also resets the chart's own
+         idea of what range to frame, snapping the visible viewport back
+         to a default view around the new cursor. That's exactly what a
+         room viewer sees as "the chart keeps refreshing and jumping
+         back to the same point": a viewer never plays its own replay
+         locally (see the play/pause effect in Simulator.jsx — only a
+         host/editor does), so every room-sync poll finds its cursor
+         behind the host's and corrects via this same jumpTo, on a
+         ~1.5s cadence, for as long as the host keeps playing. Capture
+         the visible range first and restore it once the reset settles —
+         the same fix TVAdvancedChart's load() already uses for the
+         equivalent widget.load() case. */
+      let range = null;
+      try { range = widget && widget.activeChart().getVisibleRange(); } catch (e) {}
       try { widget && widget.activeChart().resetData(); } catch (e) {}
+      if (range && Number.isFinite(range.from) && Number.isFinite(range.to)
+          && range.from > 0 && range.to > range.from) {
+        setTimeout(() => { try { widget.activeChart().setVisibleRange(range); } catch (e) {} }, 150);
+      }
       /* best-effort: once the feed actually has data at this position,
          hand Simulator a real bar so its own price/clock/OHLC display
          doesn't sit stale until the next explicit step reveals one —
