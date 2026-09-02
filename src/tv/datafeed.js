@@ -90,6 +90,7 @@ export function createDatafeed(opts = {}) {
     onCursor: opts.onCursor || (() => {}),
     stepMs: 60000,                // calendar time one control.step() call should aim to cover
     agg: null,                    // the chart-resolution candle currently being built from sub-bars, if any — see control.step
+    jumpGen: 0,                    // bumped on every jumpTo — lets its own retried viewport-restores (below) tell a stale attempt from the current one
   };
 
   const datafeed = {
@@ -263,16 +264,35 @@ export function createDatafeed(opts = {}) {
          locally (see the play/pause effect in Simulator.jsx — only a
          host/editor does), so every room-sync poll finds its cursor
          behind the host's and corrects via this same jumpTo, on a
-         ~1.5s cadence, for as long as the host keeps playing. Capture
-         the visible range first and restore it once the reset settles —
-         the same fix TVAdvancedChart's load() already uses for the
-         equivalent widget.load() case. */
-      let range = null;
-      try { range = widget && widget.activeChart().getVisibleRange(); } catch (e) {}
-      try { widget && widget.activeChart().resetData(); } catch (e) {}
-      if (range && Number.isFinite(range.from) && Number.isFinite(range.to)
+         ~1.5s cadence, for as long as the host keeps playing.
+
+         Capturing the range and restoring it once, after a single fixed
+         delay, still visibly flashed the default view first and only
+         then snapped back — the reset itself paints before that one
+         delayed restore lands, and there's no callback telling us when
+         resetData's own re-fetch (getBars, a real network round trip)
+         actually finishes settling the view on its own, so a single
+         guess at the delay is always either too early (gets overwritten
+         right back) or too late (the flash is visible). Firing the same
+         restore repeatedly instead — immediately, next frame, and at a
+         few short delays — means whichever one actually lands after the
+         library's own reset has no visible gap to flash in, without
+         needing to know its timing. `gen` guards against a second jumpTo
+         landing before this one's retries finish and fighting over the
+         range to restore. */
+      const gen = ++state.jumpGen;
+      let chart = null, range = null;
+      try { chart = widget && widget.activeChart(); range = chart && chart.getVisibleRange(); } catch (e) {}
+      try { chart && chart.resetData(); } catch (e) {}
+      if (chart && range && Number.isFinite(range.from) && Number.isFinite(range.to)
           && range.from > 0 && range.to > range.from) {
-        setTimeout(() => { try { widget.activeChart().setVisibleRange(range); } catch (e) {} }, 150);
+        const restore = () => {
+          if (state.jumpGen !== gen) return;
+          try { chart.setVisibleRange(range); } catch (e) {}
+        };
+        restore();
+        if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+        [30, 80, 150, 300, 600].forEach((t) => setTimeout(restore, t));
       }
       /* best-effort: once the feed actually has data at this position,
          hand Simulator a real bar so its own price/clock/OHLC display
