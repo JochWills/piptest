@@ -322,6 +322,11 @@ export default function TVAdvancedChart({
                   continue;
                 }
               } catch (e) { /* gone from under us — fall through and recreate */ }
+              /* Recreating without clearing the old one first is how a
+                 failed update turns into a permanent duplicate: the
+                 shape is still on the chart, we've just stopped
+                 tracking it, so nothing will ever remove it again. */
+              try { chart.removeEntity(existing); } catch (e) {}
               mirrored.delete(d.key);
             }
 

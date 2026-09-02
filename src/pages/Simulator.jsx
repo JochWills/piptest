@@ -215,11 +215,11 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      widget's own api.load() once it's ready — see the onReady handler
      below — rather than as React state here. */
   const pendingLayoutRef = useRef(null);
-  /* Room drawings that arrived from a poll before the widget existed
-     (a guest's very first poll routinely beats the chart's mount).
-     Separate from pendingLayoutRef because they're applied by a
-     different call — see handleReady. */
-  const pendingDrawingsRef = useRef(null);
+  /* The room's latest known chart state, refreshed by every poll. No
+     queueing counterpart to pendingLayoutRef for drawings: the
+     reconciler effect further down compares against this whenever it
+     ticks, so "the widget wasn't up yet" needs no special case. */
+  const roomChartRef = useRef(null);
   useEffect(() => {
     (async () => {
       const body = await data.getSessionState(meta.id);
@@ -297,18 +297,15 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     } else {
       lastAppliedLayoutRef.current = null;
     }
-    /* Same reasoning for the mirrored drawings: a new widget carries
-       none of the previous one's, and TVAdvancedChart's own key->id
-       map went with it, so both the map and this ref have to start
-       from scratch or a poll would skip re-mirroring them. */
-    if (pendingDrawingsRef.current) {
-      const list = pendingDrawingsRef.current;
-      pendingDrawingsRef.current = null;
-      lastAppliedDrawingsRef.current = JSON.stringify(list);
-      api.applyDrawings(list);
-    } else {
-      lastAppliedDrawingsRef.current = null;
-    }
+    /* Mirrored drawings just get forgotten here rather than re-applied
+       — a new widget carries none of the previous one's, and
+       TVAdvancedChart's key->id map went with it, so this has to start
+       from scratch. The reconciler effect further down notices the
+       mismatch and re-mirrors on its next tick. Doing it there instead
+       of here on purpose: at this moment the chart is "ready" but its
+       bars may still be arriving, and shapes created against data that
+       isn't there yet come out malformed. */
+    lastAppliedDrawingsRef.current = null;
   }, []);
 
   const handleBar = useCallback((rawBar, stepRes) => {
@@ -709,6 +706,36 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     return () => clearInterval(id);
   }, [room?.code, canControl, chartReady]);
 
+  /* ---- and the mirror image of it, on a viewer ----
+
+     Comparing what the room holds against what's actually mirrored,
+     rather than acting on the moment a change arrives, is what makes
+     this self-healing. Every way the two can drift apart converges
+     here on the next tick: the widget remounting (a guest's chart is
+     replaced as it joins, when the room's market turns out not to be
+     the throwaway session's) and losing every mirror; an apply landing
+     while the chart was still fetching bars; a poll that skipped
+     because the doc hadn't changed since the last one, which is every
+     poll while the host sits still. The room's own poll can't cover
+     those on its own — it only ever acts on a doc it considers new,
+     and a host who isn't touching anything never produces one, so a
+     single missed apply would otherwise stay missed indefinitely.
+     That is exactly what "the drawings aren't there until the host
+     makes a change" was. */
+  useEffect(() => {
+    if (!room?.code || canControl || !chartReady || !API_ENABLED) return;
+    const id = setInterval(() => {
+      const api = chartCtlRef.current;
+      const want = roomChartRef.current?.drawings;
+      if (!api || !want) return;
+      const str = JSON.stringify(want);
+      if (str === lastAppliedDrawingsRef.current) return;
+      lastAppliedDrawingsRef.current = str;
+      api.applyDrawings(want);
+    }, 800);
+    return () => clearInterval(id);
+  }, [room?.code, canControl, chartReady]);
+
   useEffect(() => { if (room && canControl) pushRoom(); }, [cursor, playing, stepId, symbol, interval]); // eslint-disable-line
 
   useEffect(() => {
@@ -727,6 +754,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         return;
       }
       missRef.current = 0;
+      /* The room's current chart state, kept fresh on EVERY poll —
+         including the echo branch below, which skips everything else.
+         A doc that nobody has touched since it was last applied still
+         describes what the room looks like, and a widget that mounts
+         after that point needs it: see handleReady. */
+      roomChartRef.current = { layout: doc.layout || null, drawings: doc.drawings || null };
       const isMyOwnEcho = doc.updatedBy === account.handle || (doc.updatedAt || 0) <= appliedRef.current;
       if (isMyOwnEcho) {
         setRoom((r) => ({ ...r, participants: doc.participants, messages: doc.messages }));
@@ -803,12 +836,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
            live chart, so this runs as often as the host draws without
            the chart being rebuilt (and therefore without the viewport
            moving) even once. */
-        const docDrawingsStr = doc.drawings ? JSON.stringify(doc.drawings) : null;
-        if (docDrawingsStr && docDrawingsStr !== lastAppliedDrawingsRef.current) {
-          lastAppliedDrawingsRef.current = docDrawingsStr;
-          if (chartCtlRef.current) chartCtlRef.current.applyDrawings(doc.drawings);
-          else pendingDrawingsRef.current = doc.drawings;
-        }
+        /* Drawings are deliberately NOT applied here. Reaching this
+           branch at all depends on the doc looking new, and the
+           reconciler below has to handle the times it doesn't anyway
+           (a widget that mounts later, an apply that lands while the
+           chart is still filling in) — so it owns the job outright
+           rather than splitting it across two places that each cover
+           half the cases. roomChartRef, set above on every poll, is
+           how it learns what the room currently holds. */
       }
     };
     poll();
