@@ -165,6 +165,8 @@ export function attachRoomSocket(httpServer) {
         return;
       }
 
+      if (msg.type === "ping") { send(ws, { type: "pong" }); return; }
+
       if (!ws._code) return; // must join before anything else is meaningful
       if (CONTROL_TYPES.has(msg.type)) {
         if (ws._role !== "host" && ws._role !== "editor") return; // server-side enforcement — the client's own canControl gate isn't trusted alone

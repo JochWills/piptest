@@ -473,8 +473,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      room poll's periodic jumpTo correction as a fallback — so it stays
      exactly in step with the host without ever running its own clock. */
   useEffect(() => {
-    if (!chartReady || !chartCtlRef.current) return;
-    if (canControl && playing) chartCtlRef.current.replay.play();
+    /* a viewer must never call play() (see the comment above), but it
+       used to still call pause() unconditionally on every render this
+       depends on — pause() -> stop() emits state with playing:false,
+       which handleReplayState (below) turns straight back into
+       setPlaying(false), stomping the `true` a WS "play" message (or
+       the poll) had just set. canControl false now leaves the replay
+       controller's own play state alone entirely, so Simulator's own
+       `playing` — a viewer's only source for it — sticks. */
+    if (!chartReady || !chartCtlRef.current || !canControl) return;
+    if (playing) chartCtlRef.current.replay.play();
     else chartCtlRef.current.replay.pause();
   }, [playing, chartReady, canControl]);
   useEffect(() => {
