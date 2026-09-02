@@ -111,7 +111,22 @@ export function createDatafeed(opts = {}) {
     stepMs: 60000,                // calendar time one control.step() call should aim to cover
     agg: null,                    // the chart-resolution candle currently being built from sub-bars, if any — see control.step
     jumpGen: 0,                    // bumped on every jumpTo — lets its own retried viewport-restores (below) tell a stale attempt from the current one
+    afterBarsSettled: null,        // one-shot callback — see notifyBarsSettled and jumpTo's own comment on why this exists
   };
+
+  /* Called at the end of every getBars completion path (a real result,
+     an empty one, or an error) — this is our own datafeed method, so
+     it's the one place that actually knows when the library's post-
+     resetData() re-fetch has come back and it's about to redraw with
+     real data, rather than guessing at a delay from the outside. See
+     jumpTo's own comment for why that distinction matters over a real
+     network. */
+  function notifyBarsSettled() {
+    if (!state.afterBarsSettled) return;
+    const cb = state.afterBarsSettled;
+    state.afterBarsSettled = null;
+    cb();
+  }
 
   const datafeed = {
     onReady(cb) {
@@ -176,16 +191,16 @@ export function createDatafeed(opts = {}) {
         fromMs = toMs - (rawToMs - rawFromMs);
       }
 
-      if (toMs <= fromMs) { async_(() => onResult([], { noData: true })); return; }
+      if (toMs <= fromMs) { async_(() => { onResult([], { noData: true }); notifyBarsSettled(); }); return; }
 
       try {
         const { bars, noData } = await feed.getRange(symbolInfo.name, resolution, fromMs, toMs, countBack);
         /* Do not include a bar stamped exactly `to` — the library already
            holds that one from the previous response. */
         const clean = bars.filter((b) => b.time < toMs);
-        async_(() => onResult(clean, { noData: noData && !clean.length }));
+        async_(() => { onResult(clean, { noData: noData && !clean.length }); notifyBarsSettled(); });
       } catch (e) {
-        async_(() => onError(String(e && e.message ? e.message : e)));
+        async_(() => { onError(String(e && e.message ? e.message : e)); notifyBarsSettled(); });
       }
     },
 
@@ -302,34 +317,42 @@ export function createDatafeed(opts = {}) {
          behind the host's and corrects via this same jumpTo, on a
          ~1.5s cadence, for as long as the host keeps playing.
 
-         Capturing the range and restoring it once, after a single fixed
-         delay, still visibly flashed the default view first and only
-         then snapped back — the reset itself paints before that one
-         delayed restore lands, and there's no callback telling us when
-         resetData's own re-fetch (getBars, a real network round trip)
-         actually finishes settling the view on its own, so a single
-         guess at the delay is always either too early (gets overwritten
-         right back) or too late (the flash is visible). Firing the same
-         restore repeatedly instead — immediately, next frame, and at a
-         few short delays — means whichever one actually lands after the
-         library's own reset has no visible gap to flash in, without
-         needing to know its timing. `gen` guards against a second jumpTo
-         landing before this one's retries finish and fighting over the
-         range to restore. */
+         Capturing the range and restoring it after a fixed guessed
+         delay visibly flashed the default view first and only then
+         snapped back — worse, over a real (not localhost) network,
+         resetData's own re-fetch (getBars below, a real round trip to
+         our API/Binance/Twelve Data) can easily take longer than any
+         short guessed delay, so the restore landed too early, got
+         overwritten right back by the library's own reset once data
+         actually arrived, and the view sat wrong until whatever NEXT
+         correction happened to come along — which is what showed up as
+         "sometimes it takes a few attempts, snapping back and forth
+         a few times before it settles". notifyBarsSettled (above) is
+         the real fix: getBars is OUR OWN method, so it's the one place
+         that actually knows the moment the library's post-reset
+         re-fetch has come back, rather than guessing at its timing
+         from the outside — afterBarsSettled fires the restore exactly
+         then, deterministically. The short timed retries stay too, as
+         a safety net for the one case that callback can't cover: the
+         library already had this range cached and never calls getBars
+         again at all, so nothing would otherwise fire the restore.
+         `gen` guards against a second jumpTo landing before this one's
+         restore fires and fighting over which range wins. */
       const gen = ++state.jumpGen;
       let chart = null, range = null;
       try { chart = widget && widget.activeChart(); range = chart && chart.getVisibleRange(); } catch (e) {}
-      try { chart && chart.resetData(); } catch (e) {}
       if (chart && range && Number.isFinite(range.from) && Number.isFinite(range.to)
           && range.from > 0 && range.to > range.from) {
         const restore = () => {
           if (state.jumpGen !== gen) return;
           try { chart.setVisibleRange(range); } catch (e) {}
         };
+        state.afterBarsSettled = restore;
         restore();
         if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
-        [30, 80, 150, 300, 600].forEach((t) => setTimeout(restore, t));
+        [100, 300, 800, 1500, 3000].forEach((t) => setTimeout(restore, t));
       }
+      try { chart && chart.resetData(); } catch (e) {}
       /* best-effort: once the feed actually has data at this position,
          hand Simulator a real bar so its own price/clock/OHLC display
          doesn't sit stale until the next explicit step reveals one —
