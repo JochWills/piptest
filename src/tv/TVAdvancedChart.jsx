@@ -30,6 +30,41 @@ function useLibrary() {
   return status;
 }
 
+/* Returns `incoming` with every viewport-carrying field replaced by
+   the equivalent from `mine` — the chart's timeScale (m_barSpacing is
+   zoom, m_rightOffset is scroll position) and each pane's axis state
+   and stretch. Those are the fields that make widget.load() move the
+   view; everything else in a snapshot (drawings, indicators, styling)
+   is what a room sync actually wants to apply. Anything missing on
+   either side is simply left alone, so an unexpected snapshot shape
+   degrades to "applies as-is" rather than throwing. */
+function keepLocalViewport(incoming, mine) {
+  if (!incoming || !Array.isArray(incoming.charts) || !mine || !Array.isArray(mine.charts)) return incoming;
+  return {
+    ...incoming,
+    charts: incoming.charts.map((c, i) => {
+      const m = mine.charts[i];
+      if (!m) return c;
+      const out = { ...c };
+      if (m.timeScale) out.timeScale = m.timeScale;
+      if (Array.isArray(c.panes) && Array.isArray(m.panes)) {
+        out.panes = c.panes.map((pane, j) => {
+          const mp = m.panes[j];
+          if (!mp) return pane;
+          const p = { ...pane };
+          if (mp.leftAxisesState) p.leftAxisesState = mp.leftAxisesState;
+          if (mp.rightAxisesState) p.rightAxisesState = mp.rightAxisesState;
+          if (mp.overlayPriceScales) p.overlayPriceScales = mp.overlayPriceScales;
+          if (mp.priceScaleRatio !== undefined) p.priceScaleRatio = mp.priceScaleRatio;
+          if (mp.stretchFactor !== undefined) p.stretchFactor = mp.stretchFactor;
+          return p;
+        });
+      }
+      return out;
+    }),
+  };
+}
+
 export default function TVAdvancedChart({
   symbol = "BTCUSDT",
   interval = "30",
@@ -169,29 +204,32 @@ export default function TVAdvancedChart({
            genuinely bigger, separate piece of work, not attempted
            here. */
         save() { return new Promise((res) => widget.save((s) => res(s))); },
-        /* widget.load() restores EVERYTHING it saved, including whichever
-           moment the OTHER person's chart happened to be looking at when
-           they drew something — without this, every incoming drawing from
-           a room-mate yanks your own view back to theirs. Capture/restore
-           the local visible range around it so only the drawings/studies
-           actually change.
+        /* The viewport is stored INSIDE the snapshot itself — the
+           chart's `timeScale` (m_barSpacing = zoom, m_rightOffset =
+           scroll) and each pane's axis state. So loading a room-mate's
+           snapshot verbatim drags your view to wherever THEY were
+           looking, which is exactly what a viewer sees as the chart
+           jumping sideways every time a drawing syncs across.
 
-           load() has no completion callback to hook the restore onto
-           directly, and a single guessed delay either fires too early
-           (gets overwritten right back once load() actually finishes
-           applying, worse over a slow connection than on localhost) or
-           flashes the wrong view first — so this fires the same
-           restore repeatedly instead (immediately, next frame, and at
-           a spread of delays), same fix as datafeed.js's jumpTo, so
-           whichever attempt actually lands after load() has settled
-           has nothing left to flash into. `loadGen` guards against a
-           second load() landing before this one's retries finish and
-           fighting over which range wins. */
+           Letting it move and then yanking it back afterwards is what
+           produced the visible "jumps to the side and snaps back" — so
+           don't let it move at all: splice OUR OWN current values for
+           those specific fields into the incoming snapshot first, and
+           everything else (drawings, indicators, styling) applies with
+           the view left exactly where it was. The old capture/restore
+           stays underneath as a safety net for anything that still
+           slips through; when the splice does its job those calls are
+           no-ops, restoring a range that never changed. `loadGen`
+           guards against a second load() landing mid-flight and
+           fighting this one over which view wins. */
         load(snapshot) {
-          try {
-            const range = chart.getVisibleRange();
-            const gen = ++loadGen;
-            widget.load(snapshot);
+          const gen = ++loadGen;
+          let range = null;
+          try { range = chart.getVisibleRange(); } catch (e) {}
+
+          const apply = (toApply) => {
+            if (dead || gen !== loadGen) return;
+            try { widget.load(toApply); } catch (e) {}
             /* getVisibleRange() can come back {from:0,to:0} (or otherwise
                degenerate) if the chart hasn't actually painted a real
                range yet — restoring that verbatim is how a load() ends
@@ -212,9 +250,20 @@ export default function TVAdvancedChart({
               };
               restore();
               if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
-              [100, 300, 800, 1500, 3000].forEach((t) => setTimeout(restore, t));
+              [100, 300, 800, 1500].forEach((t) => setTimeout(restore, t));
             }
-          } catch (e) {}
+          };
+
+          /* our own snapshot is the only place the local viewport
+             values exist in the same shape the incoming one uses, so
+             take one to splice from; if that fails for any reason,
+             fall back to applying theirs as-is rather than dropping
+             the drawing update entirely. */
+          try {
+            widget.save((mine) => apply(keepLocalViewport(snapshot, mine)));
+          } catch (e) {
+            apply(snapshot);
+          }
         },
 
         setTheme(next) { try { widget.changeTheme(next === "dark" ? "Dark" : "Light"); } catch (e) {} },
