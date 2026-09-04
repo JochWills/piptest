@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { PageHead } from "../components/Shell.jsx";
-import { Card, Field, Stat, Empty, Modal, Svg, Ic } from "../components/ui.jsx";
+import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic } from "../components/ui.jsx";
 import { SYMBOLS, INTERVALS } from "../theme.js";
 import { computeStats, fmtSigned, fmtMoney, fmtShort, fmtR, uid, START_BALANCE, CHALLENGE_PRESETS } from "../lib/trading.js";
 
@@ -41,6 +41,11 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
   const [joinOpen, setJoinOpen] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState("");
   const [joinErr, setJoinErr] = useState("");
+
+  /* session pending deletion — holds the whole session (not just an id)
+     so the confirm dialog can still show its name after the click that
+     opened it, without a second lookup */
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const submitJoin = () => {
     const code = joinCodeInput.trim().toUpperCase();
     if (code.length !== 6) { setJoinErr(`Codes are 6 characters — "${code}" is ${code.length}.`); return; }
@@ -180,7 +185,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
                     </div>
                   </div>
                   <button className="btn ghost" style={{ padding: "3px 8px", fontSize: 12 }}
-                    onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${s.name}"? This can't be undone.`)) onDelete(s.id); }}>
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(s); }}>
                     <Svg s={13}>{Ic.trash}</Svg>
                   </button>
                 </div>
@@ -295,6 +300,15 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete session?"
+        body={deleteTarget && <>Delete <b style={{ color: "var(--ink)" }}>"{deleteTarget.name}"</b>? This can't be undone.</>}
+        confirmLabel="Delete"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => { onDelete(deleteTarget.id); setDeleteTarget(null); }}
+      />
     </div>
   );
 }

@@ -340,12 +340,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (t0) {
       const { trade: t1, closed } = runEngine(t0, [b], -1, 0);
       if (closed.length) {
-        setTrades((list) => [...closed.slice().reverse(), ...list]);
-        onTradesClosed && onTradesClosed(closed);
+        /* tagged with the session it happened in, so deleting the
+           session can take its trades with it — see deleteSession in
+           App.jsx and the matching server-side cascade. */
+        const tagged = closed.map((c) => ({ ...c, sessionId: meta.id }));
+        setTrades((list) => [...tagged.slice().reverse(), ...list]);
+        onTradesClosed && onTradesClosed(tagged);
       }
       if (t1 !== t0) setTrade(t1);
     }
-  }, [onTradesClosed]);
+  }, [onTradesClosed, meta.id]);
 
   const handleCursor = useCallback((ms, rawBar) => {
     setCursor(ms);
@@ -368,7 +372,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const t = tradeRef.current;
     if (!t || !price) return;
     if (t.status === "watching") { setTrade(null); return; }
-    const rec = bookTrade(t, price, "manual", cur?.t);
+    const rec = { ...bookTrade(t, price, "manual", cur?.t), sessionId: meta.id };
     setTrades((l) => [rec, ...l]);
     onTradesClosed && onTradesClosed([rec]);
     setTrade(null);

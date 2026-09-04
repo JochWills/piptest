@@ -238,7 +238,16 @@ export default function App() {
   const deleteSession = async (id) => {
     const next = sessions.filter((s) => s.id !== id);
     setSessions(next);
-    await data.deleteSession(id, next);
+    /* takes its trades with it, so a deleted session's numbers stop
+       counting toward the Dashboard/Journal/Analytics totals rather than
+       lingering as orphaned rows — see the matching server-side cascade
+       in server/routes.js and the sessionId tagging in Simulator.jsx.
+       Only trades made after that tagging shipped carry a sessionId, so
+       older trades (from before this existed) have nothing to match on
+       and are left alone rather than guessed at. */
+    const remainingTrades = trades.filter((t) => t.sessionId !== id);
+    if (remainingTrades.length !== trades.length) setTrades(remainingTrades);
+    await data.deleteSession(id, next, remainingTrades);
   };
 
   const patchSession = useCallback((id, patch) => {

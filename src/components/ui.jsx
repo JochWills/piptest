@@ -52,6 +52,8 @@ a  { color: inherit; text-decoration: none; }
 .btn.buy  { color: var(--up);   border-color: color-mix(in srgb, var(--up) 40%, transparent);   background: var(--upSoft); font-weight: 600; }
 .btn.sell { color: var(--down); border-color: color-mix(in srgb, var(--down) 40%, transparent); background: var(--downSoft); font-weight: 600; }
 .btn.on { background: var(--brand); color: var(--brandInk); border-color: var(--brand); }
+.btn.danger { background: var(--down); color: #fff; border-color: var(--down); font-weight: 600; }
+.btn.danger:hover:not(:disabled) { filter: brightness(1.08); }
 
 .in {
   font-family: inherit; font-size: 13.5px; width: 100%;
@@ -298,6 +300,36 @@ export function Modal({ open, onClose, title, children, width = 520 }) {
           <button className="btn ghost" onClick={onClose} aria-label="Close" style={{ padding: "4px 9px" }}>✕</button>
         </div>
         <div style={{ padding: 18 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* A styled stand-in for window.confirm(). The browser's own dialog can't
+   be themed or reworded per-button ("OK"/"Cancel" always, no way to make
+   a destructive action visually read as destructive), and on some setups
+   it's prefixed with the page's raw origin, which reads as broken chrome
+   rather than part of the app. Same open/onClose shape as Modal so it
+   drops in wherever a confirm() call used to be. */
+export function ConfirmDialog({ open, title = "Are you sure?", body, confirmLabel = "Delete", cancelLabel = "Cancel", danger = true, onConfirm, onCancel }) {
+  if (!open) return null;
+  return (
+    <div
+      onMouseDown={(e) => e.target === e.currentTarget && onCancel()}
+      style={{
+        position: "fixed", inset: 0, zIndex: 220, background: "rgba(6,8,12,.62)",
+        display: "grid", placeItems: "center", padding: 20, backdropFilter: "blur(2px)",
+      }}
+    >
+      <div className="card fade-in" style={{ width: "100%", maxWidth: 380, padding: 20 }}>
+        <h3 style={{ fontSize: 16.5, marginBottom: 8 }}>{title}</h3>
+        {body && <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 18 }}>{body}</p>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button className="btn" onClick={onCancel}>{cancelLabel}</button>
+          <button className={"btn" + (danger ? " danger" : " pri")} onClick={onConfirm} autoFocus>
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );

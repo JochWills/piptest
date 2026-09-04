@@ -309,6 +309,12 @@ router.put("/sessions/:id", requireAuth, writeLimiter, async (req, res) => {
 });
 
 router.delete("/sessions/:id", requireAuth, async (req, res) => {
+  /* trades.session_id has no FK to bt_sessions (a trade can outlive an
+     import, or belong to no session at all), so nothing cascades this
+     on its own — delete the session's trades explicitly, or they sit
+     around forever and keep counting toward Dashboard/Journal/Analytics
+     for a session that no longer exists. */
+  await q("DELETE FROM trades WHERE session_id=$1 AND user_id=$2", [req.params.id, req.user.id]);
   await q("DELETE FROM bt_sessions WHERE id=$1 AND user_id=$2", [req.params.id, req.user.id]);
   res.json({ ok: true });
 });

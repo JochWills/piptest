@@ -28,10 +28,13 @@ export async function saveSession(meta, all) {
   await store.set(K.sessions, all);
 }
 
-export async function deleteSession(id, remaining) {
+export async function deleteSession(id, remaining, remainingTrades) {
+  /* remote: the server cascades the session's trades itself (see
+     DELETE /sessions/:id) — one round trip, no separate trades call. */
   if (remote) { await api.deleteSession(id); return; }
   await store.set(K.sessions, remaining);
   await store.del(K.session(id));
+  if (remainingTrades) await store.set(K.trades, remainingTrades);
 }
 
 export async function getSessionState(id) {
