@@ -29,7 +29,7 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 export default function FloatingBar({
   pos, onPos, children, collapsed, onToggleCollapse,
-  minWidth = 320, label = "Replay",
+  minWidth = 320, label = "Replay", fitContent = false,
 }) {
   const elRef = useRef(null);
   const dragRef = useRef(null);
@@ -108,8 +108,20 @@ export default function FloatingBar({
            rendering at its full desktop width regardless, hanging off
            the right edge of the screen. maxWidth caps it to whatever the
            container actually has room for; the transport row's own
-           flex-shrink (the scrubber especially) absorbs the squeeze. */
-        width: collapsed ? "auto" : minWidth,
+           flex-shrink (the scrubber especially) absorbs the squeeze.
+
+           fitContent instead sizes to the content's own natural width
+           (minWidth becomes a true CSS floor, not a forced width) — for
+           a caller with no elastic middle element (no scrubber to
+           absorb slack), a fixed width has to be hand-tuned to exactly
+           match the content, and it goes stale the moment that content
+           changes by even a couple of pixels (a wider date string, a
+           font substitution before webfonts load, …): the row wraps
+           and a flex item with marginLeft:auto lands stranded on its
+           own line. Sizing to content sidesteps needing that number to
+           ever be exactly right. */
+        width: collapsed ? "auto" : (fitContent ? "auto" : minWidth),
+        minWidth: !collapsed && fitContent ? minWidth : undefined,
         maxWidth: "calc(100% - 16px)",
         background: "var(--surface)",
         border: "1px solid var(--borderStrong)",

@@ -1421,7 +1421,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             onPos={setBarPos}
             collapsed={barCollapsed}
             onToggleCollapse={() => setBarCollapsed((c) => !c)}
-            minWidth={430}
+            minWidth={280}
+            fitContent
             label="Replay"
           >
             <div style={{ padding: "6px 10px" }}>
@@ -1453,7 +1454,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   {INTERVALS.map((iv) => <option key={iv.id} value={iv.id}>{iv.label}</option>)}
                 </select>
 
-                <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0, marginLeft: "auto" }}>
+                <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
                   {cur ? fmtClock(cur.t, interval) : ""}
                 </span>
               </div>

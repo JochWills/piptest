@@ -376,15 +376,41 @@ export default function TVAdvancedChart({
       const api = {
         widget, chart, replay, control, feed,
 
-        /* --- trade visualisation (entry / stop / target zones) --- */
-        drawZone({ id, price, color, text }) {
-          const sid = chart.createShape({ time: Math.floor(control.cursorMs / 1000), price },
+        /* --- trade visualisation (entry / stop / target zones) ---
+           createShape resolves asynchronously (Promise<EntityId>, per
+           charting_library.d.ts) — it does NOT hand back an id
+           synchronously. Treating its return value as if it were
+           already the id (the bug this replaced) meant removeShape
+           was later called with the pending Promise object itself,
+           chart.removeEntity() silently failed on it, and the line
+           stayed on the chart until something else tore the whole
+           chart down (a refresh, a market/session switch). A handle
+           that resolves in place — and remembers a removal that
+           arrives before creation finishes — fixes that, and as a
+           side effect fixes ownShapes too: it was previously being
+           filled with Promises that could never match a real shape
+           id, so getDrawings() below never actually recognised these
+           as "ours" and would have offered to mirror them into a room
+           as if a viewer had hand-drawn them. */
+        drawZone({ price, color, text }) {
+          const handle = { id: null, dead: false };
+          chart.createShape({ time: Math.floor(control.cursorMs / 1000), price },
             { shape: "horizontal_line", disableSelection: true, disableSave: true,
-              overrides: { linecolor: color, linewidth: 1, linestyle: 2, showLabel: true, text } });
-          if (sid != null) ownShapes.add(sid);
-          return sid;
+              overrides: { linecolor: color, linewidth: 1, linestyle: 2, showLabel: true, text } })
+            .then((sid) => {
+              if (sid == null) return;
+              if (handle.dead) { try { chart.removeEntity(sid); } catch (e) {} return; }
+              handle.id = sid;
+              ownShapes.add(sid);
+            })
+            .catch(() => {});
+          return handle;
         },
-        removeShape(sid) { ownShapes.delete(sid); try { chart.removeEntity(sid); } catch (e) {} },
+        removeShape(handle) {
+          if (!handle) return;
+          handle.dead = true;
+          if (handle.id != null) { ownShapes.delete(handle.id); try { chart.removeEntity(handle.id); } catch (e) {} }
+        },
         clearShapes() { ownShapes.clear(); mirrored.clear(); try { chart.removeAllShapes(); } catch (e) {} },
 
         /* --- layout snapshot: indicators + panes + settings ---
