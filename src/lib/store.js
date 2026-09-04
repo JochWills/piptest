@@ -67,10 +67,6 @@ export const K = {
      confirms it's still real. See Simulator's room-rehydrate effect
      and joinRoomFromDashboard in App.jsx. */
   roomLink: (sessionId) => `roomLink:${sessionId}`,
-  /* Most-recently-picked symbol ids in the new-session asset picker —
-     purely a local UI convenience (fastest path to what you last used),
-     never synced or shown to anyone else. */
-  recentSymbols: "recentSymbols",
 };
 
 export async function loadAccount() { return store.get(K.account); }

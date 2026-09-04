@@ -3,7 +3,6 @@ import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic } from "../components/ui.jsx";
 import { SYMBOLS, INTERVALS } from "../theme.js";
 import { computeStats, fmtSigned, fmtMoney, fmtShort, fmtR, uid, START_BALANCE, CHALLENGE_PRESETS } from "../lib/trading.js";
-import { store, K } from "../lib/store.js";
 
 /* ---------- asset picker ----------
    A searchable, category-filtered combobox for the "Market" field —
@@ -11,8 +10,6 @@ import { store, K } from "../lib/store.js";
    handful of options across several asset classes, so this trades it
    for a search box + class pills + grouped results, the same shape as
    the asset pickers on other platforms. */
-const RECENT_SYMBOLS_MAX = 5;
-
 function AssetRow({ s, active, onPick }) {
   return (
     <button type="button" onClick={() => onPick(s.id)}
@@ -27,15 +24,12 @@ function AssetRow({ s, active, onPick }) {
   );
 }
 
-function AssetPicker({ value, onChange }) {
+function AssetPicker({ value, onChange, sessions }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [cls, setCls] = useState("All");
-  const [recent, setRecent] = useState([]);
   const rootRef = useRef(null);
   const inputRef = useRef(null);
-
-  useEffect(() => { store.get(K.recentSymbols).then((r) => setRecent(r || [])); }, []);
 
   // Outside click / Escape closes it — mousedown (not blur) so clicking a
   // pill or a row inside the panel never races the panel's own onClick.
@@ -61,18 +55,22 @@ function AssetPicker({ value, onChange }) {
     return [...m.entries()];
   }, [filtered]);
 
-  // Only worth showing when it's not competing with an active search/filter.
-  const recentSymbols = !text && cls === "All"
-    ? recent.map((id) => SYMBOLS.find((s) => s.id === id)).filter(Boolean)
-    : [];
+  /* "Recently used" reflects markets you've actually replayed, not just
+     ones you've clicked past in this dropdown — the last two sessions
+     you created (most recent first), deduped so the same market once
+     doesn't show up twice. Only worth showing when it's not already
+     competing with an active search/filter. */
+  const recentSymbols = useMemo(() => {
+    if (text || cls !== "All") return [];
+    const out = [];
+    for (const sess of [...sessions].sort((a, b) => b.createdAt - a.createdAt).slice(0, 2)) {
+      const sym = SYMBOLS.find((s) => s.id === sess.symbol);
+      if (sym && !out.some((s) => s.id === sym.id)) out.push(sym);
+    }
+    return out;
+  }, [sessions, text, cls]);
 
-  const pick = (id) => {
-    onChange(id);
-    setOpen(false); setQ("");
-    const next = [id, ...recent.filter((r) => r !== id)].slice(0, RECENT_SYMBOLS_MAX);
-    setRecent(next);
-    store.set(K.recentSymbols, next);
-  };
+  const pick = (id) => { onChange(id); setOpen(false); setQ(""); };
   const openPicker = () => { setOpen(true); setQ(""); };
 
   return (
@@ -359,7 +357,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
              decision with no lasting effect, so this just starts every session
              on form.interval's default and leaves the real choice to the chart. */}
           <Field label="Market">
-            <AssetPicker value={form.symbol} onChange={(id) => setForm({ ...form, symbol: id })} />
+            <AssetPicker value={form.symbol} onChange={(id) => setForm({ ...form, symbol: id })} sessions={savedSessions} />
           </Field>
 
           <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
