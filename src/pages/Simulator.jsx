@@ -36,8 +36,9 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      index into any more. `cur` (the current bar) comes straight off
      onBar/onCursor instead of being derived by indexing anything.
      chartStartRef is the widget's mount-time replay start: it only ever
-     changes inside switchInterval/backToStart, deliberately never on every
-     tick, because TVAdvancedChart fully remounts the widget whenever its
+     changes at a handful of reset points (switchInterval, session restore,
+     a room resync), deliberately never on every tick, because
+     TVAdvancedChart fully remounts the widget whenever its
      startMs prop changes — wiring that straight to the live cursor would
      remount on every single revealed bar. */
   const [cursor, setCursor] = useState(meta.startMs);
@@ -57,21 +58,23 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      on its own, so without this the layout only got persisted incidentally
      whenever one of those *also* happened to change. */
   const [layoutTick, setLayoutTick] = useState(0);
-  /* a short ring buffer of recently-seen bar timestamps, oldest first —
-     the library can append forward cheaply but resists rewriting history
-     (see TRADINGVIEW.md), so "step back" walks this instead of asking the
-     datafeed for anything; stepping forward past the end of it falls back
-     to the replay controller's own step(). Restore (below) may reset the
-     whole thing to a saved position before the widget ever mounts. */
+  /* Replay is forward-only by design — no rewinding once you've seen how
+     a bar played out, same as a real market. This ring buffer of
+     recently-seen bar timestamps, oldest first, used to also back
+     stepping backward through them (removed); what's left of its job is
+     letting stepForward catch up cheaply through anything already seen —
+     e.g. right after a room resync — instead of always asking the
+     datafeed for a fresh bar. Restore (below) may reset the whole thing
+     to a saved position before the widget ever mounts. */
   const seenRef = useRef([meta.startMs]);
   const seenIdxRef = useRef(0);
   /* index-aligned with seenRef — the full {t,o,h,l,c,v} bar for every
      entry that's actually been revealed (handleBar), or null for the
      one bare anchor timestamp seenRef starts life with (mount/restore/
      switchInterval — nothing's been revealed at that position yet, so
-     there's no bar to show). Lets stepBack/stepForward update the
-     displayed clock/price/OHLC immediately when they jump within
-     already-seen history, instead of only on a freshly revealed bar. */
+     there's no bar to show). Lets stepForward update the displayed
+     clock/price/OHLC immediately when it catches up through already-seen
+     history, instead of only on a freshly revealed bar. */
   const seenBarsRef = useRef([null]);
 
   /* ---------- trading ---------- */
@@ -473,12 +476,16 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   };
 
   /* ================= transport =================
-     Forward is the library's own cheap incremental step. Backward is not
-     (see TRADINGVIEW.md) — it resists rewriting history — so "back" and
-     re-stepping "forward" within what's already been seen walk the small
-     ring buffer of recently-seen bars instead, via jumpTo.
+     Replay only ever moves forward — no stepping back, deliberately: once
+     a bar's played out you've seen the outcome, and rewinding to "redo"
+     a decision against a result you already know isn't a real backtest.
+     Re-stepping forward within what's already been seen this visit
+     (e.g. right after a room resync) still walks the small ring buffer
+     of recently-seen bars via jumpTo rather than asking the datafeed for
+     something it already has; anything actually new comes from
+     replay.stepFor.
 
-     Both now cover `stepMs` of calendar time, not always one bar — the
+     This covers `stepMs` of calendar time, not always one bar — the
      chosen step size (the dropdown next to Play) can span several
      already-seen bars, several fresh ones, or a mix: whatever's still in
      the ring buffer is an instant jumpTo, and whatever isn't gets freshly
@@ -489,12 +496,10 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      than a whole new one — see control.step in datafeed.js, which is
      what actually decides that and builds the candle up on the chart.
 
-     jumpTo repositions the chart but — pre-existing, not new here —
-     never told Simulator's own OHLC/clock state what it jumped to (only
-     a freshly *revealed* bar does, via handleBar), so stepping back used
-     to visibly leave the clock/price stuck at wherever the last reveal
-     left them. applySeenBar fixes that using the bar this ring buffer
-     already has on hand for anything actually re-visited. */
+     jumpTo repositions the chart but never tells Simulator's own
+     OHLC/clock state what it jumped to (only a freshly *revealed* bar
+     does, via handleBar) — applySeenBar fixes that using the bar this
+     ring buffer already has on hand for anything actually re-visited. */
   const applySeenBar = (idx) => {
     const b = seenBarsRef.current[idx];
     if (!b) return; // the one bare anchor entry — nothing revealed there yet
@@ -536,21 +541,6 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     }
     if (idx === lastIdx && coveredMs < stepMs) ctl.replay.stepFor(stepMs - coveredMs);
   }, [stepMs]);
-  const stepBack = useCallback(() => {
-    const ctl = chartCtlRef.current;
-    if (!ctl || seenIdxRef.current <= 0) return;
-    const idx = walkSeen(-1);
-    seenIdxRef.current = idx;
-    ctl.replay.jumpTo(seenRef.current[idx], ctl.widget, true);
-    applySeenBar(idx);
-  }, [stepMs]);
-  const backToStart = useCallback(() => {
-    const ctl = chartCtlRef.current;
-    if (!ctl) return;
-    seenRef.current = [meta.startMs]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
-    ctl.replay.jumpTo(meta.startMs, ctl.widget);
-  }, [meta.startMs]);
-
   /* drives the widget's own replay clock off Simulator's playing/step
      state, rather than the other way round — room sync and the transport
      buttons both just flip this state, same as before.
@@ -1095,12 +1085,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       const k = e.key.toLowerCase();
       if (e.key === " ") { e.preventDefault(); if (canControl) setPlaying((p) => !p); return; }
       if (e.key === "ArrowRight") { e.preventDefault(); if (canControl) stepForward(); return; }
-      if (e.key === "ArrowLeft") { e.preventDefault(); if (canControl) stepBack(); return; }
       if (k === "?") { setHelpOpen(true); return; }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canControl, stepForward, stepBack]);
+  }, [canControl, stepForward]);
 
   useEffect(() => {
     const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
@@ -1440,20 +1429,15 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   up front, which nothing here has any more now that the
                   datafeed pages history itself rather than PipTest
                   fetching a bounded array of it up front (see
-                  TRADINGVIEW.md). Back/forward through anything already
-                  seen this visit still works via the ring buffer in
-                  stepBack/stepForward; jumping to an arbitrary far-off
-                  point doesn't, for now. */}
+                  TRADINGVIEW.md). Replay is forward-only by design: no
+                  rewinding once you've seen how a bar played out — see
+                  stepForward's own note on why. */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 4 }}>
                 <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
                   style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
                     background: playing ? "var(--up)" : "var(--dim)" }} />
 
                 <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
-                  <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                    onClick={backToStart} title="Back to the start"><Svg s={13}>{Ic.start}</Svg></button>
-                  <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
-                    onClick={stepBack} title="Step back (←)"><Svg s={13}>{Ic.back}</Svg></button>
                   <button className="btn pri" style={{ padding: "4px 11px" }} disabled={!canControl}
                     onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
                     <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
@@ -1822,7 +1806,7 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
 
 function ShortcutHelp({ open, onClose }) {
   const rows = [
-    ["Space", "Play / pause replay"], ["→ / ←", "Step one bar forward / back"],
+    ["Space", "Play / pause replay"], ["→", "Step one bar forward"],
     ["?", "This panel"],
   ];
   return (
