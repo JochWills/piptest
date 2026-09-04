@@ -152,7 +152,12 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
             Shared Live Sessions
           </span>
           <h1 style={{ maxWidth: 760, margin: "0 auto 18px" }}>
-            Replay the markets.<br />Together. Completely Free.
+            {/* a plain space between "Completely" and "Free" lets a narrow
+                mobile width wrap the line right between them, stranding
+                "Free" alone — a non-breaking space keeps that pair as one
+                unit, so it either fits on the line together or the whole
+                pair wraps down together. */}
+            Replay the markets.<br />Together. Completely&nbsp;Free.
           </h1>
           <p className="mut" style={{ maxWidth: 580, margin: "0 auto 30px", fontSize: 17, lineHeight: 1.65 }}>
             PipTest replays real historical markets bar by bar so you can practise your setups
@@ -345,7 +350,7 @@ function MockScreen({ T }) {
   const rawLo = Math.min(...bars.map((b) => b.l)), rawHi = Math.max(...bars.map((b) => b.h));
   const margin = (rawHi - rawLo) * 0.14;
   const lo = rawLo - margin * 0.7, hi = rawHi + margin; // breathing room top/bottom, not edge to edge
-  const W = 1000, H = 320, axisW = 56, axisH = 24, padL = 14, padT = 14;
+  const W = 1000, H = 380, axisW = 56, axisH = 24, padL = 14, padT = 14;
   const plotR = W - axisW, plotB = H - axisH;
   const y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (plotB - padT);
   // candles occupy a portion of the canvas, not the full width — the rest
@@ -397,7 +402,14 @@ function MockScreen({ T }) {
     barElRefs.current[i][key] = el;
   };
 
-  const [barPos, setBarPos] = useState({ x: 26, y: 24 });
+  /* Bottom-left, not top-left — the price series trends upward over
+     the reveal, so candle highs climb toward the top of the chart as
+     the loop plays; a bar sitting up there ends up with rising wicks
+     passing right behind it later in the cycle. Bottom stays clear:
+     the chart reserves real breathing room below the lowest low
+     (`lo` above), and unlike the top there's no upward trend eating
+     into it over time. */
+  const [barPos, setBarPos] = useState({ x: 26, y: H - 92 });
   const [barCollapsed, setBarCollapsed] = useState(false);
 
   const setPlayingVisual = (playing) => {
@@ -660,9 +672,11 @@ function MockScreen({ T }) {
               fake cursor arrives. Positioned off barPos directly (same
               place the bar itself starts each cycle) rather than measured
               off the live DOM, since it only ever needs to be right for
-              that first moment. */}
+              that first moment. Above the bar, not below — the bar now
+              sits at the bottom of the chart, and there's no room under
+              it for anything to sit below. */}
           <div ref={dragHintRef} className="mock-hint-bob" style={{
-            position: "absolute", left: barPos.x + 2, top: barPos.y + 46, zIndex: 96,
+            position: "absolute", left: barPos.x + 2, top: barPos.y - 38, zIndex: 96,
             display: "flex", alignItems: "center", gap: 6, opacity: 0, pointerEvents: "none",
             background: "var(--surface)", border: "1px solid var(--borderStrong)", borderRadius: 7,
             padding: "5px 10px 5px 8px", fontSize: 11.5, fontWeight: 500, color: "var(--muted)",
