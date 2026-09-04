@@ -61,8 +61,18 @@ async function raw(path, { method = "GET", body, auth = true, retry = true } = {
    A network-level failure here (fetch throwing, not the server
    answering with a real rejection) is that wake-up in progress, not
    an invalid session — so it's retried with backoff generous enough
-   to ride out a cold start, rather than an instant, wrong logout. */
-const REFRESH_RETRY_DELAYS_MS = [3000, 6000, 12000, 20000];
+   to ride out a cold start, rather than an instant, wrong logout.
+
+   A real redeploy (not just an idle wake-up) is slower than that —
+   Render rebuilds and boots a fresh instance, commonly 1-3 minutes —
+   and every attempt in that window comes back as a genuine (if
+   temporary) 502/503 from Render's own proxy, not a network failure.
+   The budget below rides that out too: a real 401 (an actually
+   invalid/expired refresh token) still gives up immediately below,
+   so this only ever makes a currently-redeploying server wait
+   longer before being treated as a real logout, never a genuinely
+   signed-out visitor wait longer to see the sign-in page. */
+const REFRESH_RETRY_DELAYS_MS = [3000, 6000, 12000, 20000, 30000, 45000, 60000];
 
 export async function refresh() {
   if (refreshing) return refreshing;
