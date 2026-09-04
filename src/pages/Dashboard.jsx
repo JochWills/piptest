@@ -46,6 +46,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
      so the confirm dialog can still show its name after the click that
      opened it, without a second lookup */
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [createErr, setCreateErr] = useState("");
   const submitJoin = () => {
     const code = joinCodeInput.trim().toUpperCase();
     if (code.length !== 6) { setJoinErr(`Codes are 6 characters — "${code}" is ${code.length}.`); return; }
@@ -71,6 +72,15 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
       startMs = Date.parse(`${form.date}T${form.time}:00Z`);
     }
     if (!startMs || Number.isNaN(startMs)) return;
+    const name = form.name.trim() || (form.random ? `Blind ${SYMBOLS.find((s) => s.id === form.symbol)?.label}` : `${form.symbol} ${form.interval}`);
+    /* Checked against the name that would actually be saved, not just what
+       was typed — two untitled sessions on the same market fall back to the
+       same default name, and would collide just as much as a duplicate
+       someone typed on purpose. */
+    if (savedSessions.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
+      setCreateErr(`You already have a session named "${name}" — rename it or pick a different one.`);
+      return;
+    }
     /* Clamped rather than rejected outright — a stray character or an
        emptied field shouldn't block creating the session, it should just
        fall back to something sane. Floored at 100: a starting balance of
@@ -80,13 +90,14 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
     const rules = CHALLENGE_PRESETS.find((c) => c.id === form.challenge) || CHALLENGE_PRESETS[0];
     onCreate({
       id: uid(),
-      name: form.name.trim() || (form.random ? `Blind ${SYMBOLS.find((s) => s.id === form.symbol)?.label}` : `${form.symbol} ${form.interval}`),
+      name,
       symbol: form.symbol, interval: form.interval, startMs, startBalance,
       blind: form.random,
       challenge: rules.id === "none" ? null : { id: rules.id, label: rules.label, daily: rules.daily, total: rules.total, target: rules.target },
       createdAt: Date.now(),
     });
     setOpen(false);
+    setCreateErr("");
     setForm((f) => ({ ...f, name: "" }));
   };
 
@@ -216,12 +227,13 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
       )}
 
       {/* ---------- new session ---------- */}
-      <Modal open={open} onClose={() => setOpen(false)} title="New replay session" width={560}>
+      <Modal open={open} onClose={() => { setOpen(false); setCreateErr(""); }} title="New replay session" width={560}>
         <div style={{ display: "grid", gap: 14 }}>
           <Field label="Session name" hint="Optional — something you'll recognise in the list.">
             <input className="in" value={form.name} placeholder="London open sweep"
-              onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              onChange={(e) => { setForm({ ...form, name: e.target.value }); setCreateErr(""); }} />
           </Field>
+          {createErr && <p className="sm" style={{ color: "var(--down)", margin: 0 }}>{createErr}</p>}
 
           {/* Timeframe used to be picked here too, but the chart itself already
              has a full interval switcher once the session opens (see Simulator's
@@ -278,7 +290,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
 
           <div style={{ display: "flex", gap: 9, marginTop: 4 }}>
             <button className="btn pri" onClick={create}>Create and open</button>
-            <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn" onClick={() => { setOpen(false); setCreateErr(""); }}>Cancel</button>
           </div>
         </div>
       </Modal>
