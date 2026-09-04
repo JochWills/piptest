@@ -184,6 +184,27 @@ export default function TVAdvancedChart({
     });
     replay.setMarket(symbol, interval);
 
+    /* Applied both at widget construction (below) AND again after every
+       widget.load() (see the api.load() reapply, further down). A saved
+       session's own snapshot carries its own paneProperties/candle colors
+       from whenever it was last saved — often from before this palette
+       existed, or from the dark theme's own 'gradient' background default
+       (see ChartPropertiesOverrides in charting_library.d.ts) rather than
+       our flat #161A21 — and widget.load() restores that verbatim,
+       silently undoing the constructor's overrides. Reasserting these
+       right after every load() is what actually pins the color for good,
+       instead of only fixing it for a chart with nothing saved yet. */
+    const chartOverrides = {
+      "paneProperties.background": theme === "dark" ? "#161A21" : "#FFFFFF",
+      "paneProperties.backgroundType": "solid",
+      "mainSeriesProperties.candleStyle.upColor": theme === "dark" ? "#22C55E" : "#16A34A",
+      "mainSeriesProperties.candleStyle.downColor": theme === "dark" ? "#EF4444" : "#DC2626",
+      "mainSeriesProperties.candleStyle.borderUpColor": theme === "dark" ? "#22C55E" : "#16A34A",
+      "mainSeriesProperties.candleStyle.borderDownColor": theme === "dark" ? "#EF4444" : "#DC2626",
+      "mainSeriesProperties.candleStyle.wickUpColor": theme === "dark" ? "#22C55E" : "#16A34A",
+      "mainSeriesProperties.candleStyle.wickDownColor": theme === "dark" ? "#EF4444" : "#DC2626",
+    };
+
     const widget = new window.TradingView.widget({
       container: boxRef.current,
       library_path: LIBRARY_PATH,
@@ -236,16 +257,7 @@ export default function TVAdvancedChart({
         backgroundColor: theme === "dark" ? "#161A21" : "#FFFFFF",
         foregroundColor: theme === "dark" ? "#161A21" : "#FFFFFF",
       },
-      overrides: {
-        "paneProperties.background": theme === "dark" ? "#161A21" : "#FFFFFF",
-        "paneProperties.backgroundType": "solid",
-        "mainSeriesProperties.candleStyle.upColor": theme === "dark" ? "#22C55E" : "#16A34A",
-        "mainSeriesProperties.candleStyle.downColor": theme === "dark" ? "#EF4444" : "#DC2626",
-        "mainSeriesProperties.candleStyle.borderUpColor": theme === "dark" ? "#22C55E" : "#16A34A",
-        "mainSeriesProperties.candleStyle.borderDownColor": theme === "dark" ? "#EF4444" : "#DC2626",
-        "mainSeriesProperties.candleStyle.wickUpColor": theme === "dark" ? "#22C55E" : "#16A34A",
-        "mainSeriesProperties.candleStyle.wickDownColor": theme === "dark" ? "#EF4444" : "#DC2626",
-      },
+      overrides: chartOverrides,
     });
 
     widgetRef.current = widget;
@@ -553,7 +565,17 @@ export default function TVAdvancedChart({
 
           const apply = (toApply) => {
             if (dead || gen !== loadGen) return;
-            try { widget.load(toApply); } catch (e) {}
+            /* widget.load() resolves once the restore actually lands —
+               reasserting overrides before that finishes would just get
+               overwritten by the load itself. Reassert once it settles
+               (and, defensively, once more synchronously in case this
+               build's load() doesn't actually return a thenable). */
+            const reassert = () => { if (!dead && gen === loadGen) { try { chart.applyOverrides(chartOverrides); } catch (e) {} } };
+            try {
+              const p = widget.load(toApply);
+              if (p && typeof p.then === "function") p.then(reassert).catch(() => {});
+            } catch (e) {}
+            reassert();
             /* getVisibleRange() can come back {from:0,to:0} (or otherwise
                degenerate) if the chart hasn't actually painted a real
                range yet — restoring that verbatim is how a load() ends
