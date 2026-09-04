@@ -272,7 +272,7 @@ router.delete("/me", requireAuth, async (req, res) => {
    ===================================================== */
 router.get("/sessions", requireAuth, async (req, res) => {
   const { rows } = await q(
-    `SELECT id, name, symbol, interval, start_ms, blind, challenge, stats,
+    `SELECT id, name, symbol, interval, start_ms, start_balance, blind, challenge, stats,
             extract(epoch from created_at)*1000 AS created_at
        FROM bt_sessions WHERE user_id=$1 ORDER BY updated_at DESC`, [req.user.id]);
   res.json({ sessions: rows.map(rowToSession) });
@@ -280,22 +280,28 @@ router.get("/sessions", requireAuth, async (req, res) => {
 
 const rowToSession = (r) => ({
   id: r.id, name: r.name, symbol: r.symbol, interval: r.interval,
-  startMs: Number(r.start_ms), blind: r.blind, challenge: r.challenge,
+  startMs: Number(r.start_ms), startBalance: Number(r.start_balance),
+  blind: r.blind, challenge: r.challenge,
   stats: r.stats || {}, createdAt: Number(r.created_at),
 });
 
 router.put("/sessions/:id", requireAuth, writeLimiter, async (req, res) => {
   const s = req.body || {};
+  /* start_balance isn't updated on conflict, unlike the other columns —
+     it's chosen once on the "New session" form (see Dashboard.jsx) and
+     fixed for the session's whole life, same as symbol/interval/start_ms
+     already were; this is just the row actually agreeing with that now. */
   const { rows } = await q(
-    `INSERT INTO bt_sessions (id, user_id, name, symbol, interval, start_ms, blind, challenge, stats)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO bt_sessions (id, user_id, name, symbol, interval, start_ms, start_balance, blind, challenge, stats)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (id) DO UPDATE SET
        name=EXCLUDED.name, symbol=EXCLUDED.symbol, interval=EXCLUDED.interval,
        challenge=EXCLUDED.challenge, stats=EXCLUDED.stats, updated_at=now()
      WHERE bt_sessions.user_id = $2
      RETURNING *`,
     [req.params.id, req.user.id, s.name || "Session", s.symbol || "BTCUSDT",
-     s.interval || "30m", s.startMs || Date.now(), !!s.blind,
+     s.interval || "30m", s.startMs || Date.now(),
+     Math.max(100, Math.round(Number(s.startBalance)) || 10000), !!s.blind,
      s.challenge ? JSON.stringify(s.challenge) : null, JSON.stringify(s.stats || {})]
   );
   if (!rows[0]) return res.status(403).json({ error: "forbidden" });

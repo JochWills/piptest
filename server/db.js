@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS bt_sessions (
   symbol     text NOT NULL,
   interval   text NOT NULL,
   start_ms   bigint NOT NULL,
+  start_balance integer NOT NULL DEFAULT 10000,
   blind      boolean NOT NULL DEFAULT false,
   challenge  jsonb,
   stats      jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -140,6 +141,7 @@ export async function migrate() {
   await q(SCHEMA);
   /* added after the first release, so bring existing tables forward */
   await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar text");
+  await q("ALTER TABLE bt_sessions ADD COLUMN IF NOT EXISTS start_balance integer NOT NULL DEFAULT 10000");
   console.log("schema ready");
 }
 

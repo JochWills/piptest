@@ -95,6 +95,38 @@ function stripDrawings(snapshot) {
   };
 }
 
+/* Collapses duplicate `study_Volume` sources in every pane down to
+   one. Self-heals a session whose saved snapshot already accumulated
+   several — see the `create_volume_indicator_by_default` note by the
+   widget constructor below for how that happened. Scoped to Volume
+   specifically, not "any duplicate study": collapsing same-type
+   duplicates in general would delete a second EMA or RSI someone
+   actually added on purpose with different settings, which this bug
+   never touched. */
+function dedupeVolume(snapshot) {
+  if (!snapshot || !Array.isArray(snapshot.charts)) return snapshot;
+  return {
+    ...snapshot,
+    charts: snapshot.charts.map((c) => {
+      if (!Array.isArray(c.panes)) return c;
+      return {
+        ...c,
+        panes: c.panes.map((pane) => {
+          if (!Array.isArray(pane.sources)) return pane;
+          let seenVolume = false;
+          const sources = pane.sources.filter((s) => {
+            if (s?.type !== "study_Volume") return true;
+            if (seenVolume) return false;
+            seenVolume = true;
+            return true;
+          });
+          return sources.length === pane.sources.length ? pane : { ...pane, sources };
+        }),
+      };
+    }),
+  };
+}
+
 export default function TVAdvancedChart({
   symbol = "BTCUSDT",
   interval = "30",
@@ -166,6 +198,21 @@ export default function TVAdvancedChart({
         "header_compare",
         "go_to_date",
         "timeframes_toolbar",
+        /* The library adds its own Volume study on every widget mount by
+           default — its own "_once" bookkeeping for not repeating that is
+           scoped to the browser's localStorage, which has nothing to do
+           with PipTest's own saved layout coming back from the server a
+           moment later via api.load(). Every reopen mounted a fresh
+           widget (one new auto-added Volume) on top of whatever the
+           saved snapshot already had (which already included one from
+           last time) — the visible "another Volume every time I reopen
+           this session" bug. The saved layout is the single source of
+           truth for what's on the chart; nothing needs the library to
+           add its own guess on top of that. (dedupeVolume in load(),
+           below, is the other half of this fix — it's what un-stacks a
+           session that already accumulated several before this line
+           existed.) */
+        "create_volume_indicator_by_default",
         ...(canDraw ? [] : ["left_toolbar"]),
       ],
       enabled_features: [
@@ -421,7 +468,8 @@ export default function TVAdvancedChart({
            no-ops, restoring a range that never changed. `loadGen`
            guards against a second load() landing mid-flight and
            fighting this one over which view wins. */
-        load(snapshot) {
+        load(rawSnapshot) {
+          const snapshot = dedupeVolume(rawSnapshot);
           const gen = ++loadGen;
           let range = null;
           try { range = chart.getVisibleRange(); } catch (e) {}

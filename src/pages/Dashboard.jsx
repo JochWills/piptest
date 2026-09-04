@@ -30,7 +30,7 @@ export function Spark({ curve, h = 40, w = 240 }) {
 export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete, onNav, onJoinRoom, loading }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
-    name: "", symbol: "BTCUSDT", interval: "30m",
+    name: "", symbol: "BTCUSDT", interval: "30m", startBalance: String(START_BALANCE),
     date: "2025-03-13", time: "10:00", challenge: "none", random: false,
   });
 
@@ -66,11 +66,17 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
       startMs = Date.parse(`${form.date}T${form.time}:00Z`);
     }
     if (!startMs || Number.isNaN(startMs)) return;
+    /* Clamped rather than rejected outright — a stray character or an
+       emptied field shouldn't block creating the session, it should just
+       fall back to something sane. Floored at 100: a starting balance of
+       0 (or negative) makes every risk-% calculation downstream divide
+       by nothing meaningful. */
+    const startBalance = Math.max(100, Math.round(Number(form.startBalance)) || START_BALANCE);
     const rules = CHALLENGE_PRESETS.find((c) => c.id === form.challenge) || CHALLENGE_PRESETS[0];
     onCreate({
       id: uid(),
       name: form.name.trim() || (form.random ? `Blind ${SYMBOLS.find((s) => s.id === form.symbol)?.label}` : `${form.symbol} ${form.interval}`),
-      symbol: form.symbol, interval: form.interval, startMs,
+      symbol: form.symbol, interval: form.interval, startMs, startBalance,
       blind: form.random,
       challenge: rules.id === "none" ? null : { id: rules.id, label: rules.label, daily: rules.daily, total: rules.total, target: rules.target },
       createdAt: Date.now(),
@@ -250,14 +256,21 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
             </div>
           )}
 
-          <Field label="Challenge rules" hint="Apply prop-firm style limits to this session.">
-            <select className="in" value={form.challenge} onChange={(e) => setForm({ ...form, challenge: e.target.value })}>
-              {CHALLENGE_PRESETS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-            </select>
-          </Field>
-
-          <div className="sm mut" style={{ lineHeight: 1.6 }}>
-            Every session starts with a {fmtMoney(START_BALANCE)} simulated balance.
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label="Starting balance" hint="Simulated — fixed for the life of this session.">
+              <div style={{ position: "relative" }}>
+                <span aria-hidden style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)",
+                  color: "var(--muted)", fontSize: 13, pointerEvents: "none" }}>$</span>
+                <input className="in" type="number" min="100" step="100" value={form.startBalance}
+                  style={{ paddingLeft: 22 }}
+                  onChange={(e) => setForm({ ...form, startBalance: e.target.value })} />
+              </div>
+            </Field>
+            <Field label="Challenge rules" hint="Apply prop-firm style limits to this session.">
+              <select className="in" value={form.challenge} onChange={(e) => setForm({ ...form, challenge: e.target.value })}>
+                {CHALLENGE_PRESETS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+            </Field>
           </div>
 
           <div style={{ display: "flex", gap: 9, marginTop: 4 }}>

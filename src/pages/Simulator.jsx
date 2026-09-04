@@ -36,7 +36,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      index into any more. `cur` (the current bar) comes straight off
      onBar/onCursor instead of being derived by indexing anything.
      chartStartRef is the widget's mount-time replay start: it only ever
-     changes inside switchMarket/backToStart, deliberately never on every
+     changes inside switchInterval/backToStart, deliberately never on every
      tick, because TVAdvancedChart fully remounts the widget whenever its
      startMs prop changes — wiring that straight to the live cursor would
      remount on every single revealed bar. */
@@ -68,7 +68,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   /* index-aligned with seenRef — the full {t,o,h,l,c,v} bar for every
      entry that's actually been revealed (handleBar), or null for the
      one bare anchor timestamp seenRef starts life with (mount/restore/
-     switchMarket — nothing's been revealed at that position yet, so
+     switchInterval — nothing's been revealed at that position yet, so
      there's no bar to show). Lets stepBack/stepForward update the
      displayed clock/price/OHLC immediately when they jump within
      already-seen history, instead of only on a freshly revealed bar. */
@@ -170,8 +170,8 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
   /* the widget only reads canDraw at mount, so a role change (promoted
      or demoted mid-session) has to remount it — same tradeoff as an
-     actual symbol/interval switch. Freeze the position first, exactly
-     like switchMarket does, so the remount lands back where the replay
+     actual timeframe switch. Freeze the position first, exactly like
+     switchInterval does, so the remount lands back where the replay
      actually is rather than snapping to wherever the widget last mounted. */
   const canControlRef = useRef(canControl);
   useEffect(() => {
@@ -190,13 +190,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const stepMs = useMemo(() => barMsOf(stepId), [stepId]);
 
   const price = cur?.c ?? null;
-  const startBalance = START_BALANCE;
+  /* Chosen once, at session creation (see Dashboard's "Starting balance"
+     field) — meta.startBalance is missing only for sessions saved before
+     that field existed, which is what the fallback is for. */
+  const startBalance = meta.startBalance || START_BALANCE;
   const stats = useMemo(() => computeStats(trades, startBalance), [trades, startBalance]);
   const equity = stats.equity;
   const unreal = openPnl(trade, price);
   const chg = cur && prevCloseRef.current != null ? cur.c - prevCloseRef.current : 0;
   const chgPct = cur && prevCloseRef.current ? (chg / prevCloseRef.current) * 100 : 0;
-  const challenge = useMemo(() => evaluateChallenge(trades, meta.challenge), [trades, meta.challenge]);
+  const challenge = useMemo(() => evaluateChallenge(trades, meta.challenge, startBalance), [trades, meta.challenge, startBalance]);
 
   const entryVal = parseFloat(form.entry) || price || 0;
   const rr = useMemo(() => rrOf(entryVal, parseFloat(form.stop), parseFloat(form.target)), [entryVal, form.stop, form.target]);
@@ -384,9 +387,15 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     setTrade((t) => (t && t.status === "open" ? { ...t, stop: t.entry } : t));
   };
 
-  const switchMarket = (nextSym, nextIv) => {
-    const cs = nextSym && nextSym !== symbol, ci = nextIv && nextIv !== interval;
-    if (!cs && !ci) return;
+  /* Timeframe only — the market itself is chosen once, when the session
+     is created (see Dashboard's "Market" field), and fixed for its whole
+     life from there. Was symbol-or-timeframe (switchMarket), but a
+     session locked to one pair means the symbol half of it can never
+     fire any more; keeping the dead branch around would just be a second
+     place for "can this session's market actually change?" to have an
+     answer, and a wrong one. */
+  const switchInterval = (nextIv) => {
+    if (!nextIv || nextIv === interval) return;
     if (trade && !confirm(trade.status === "open"
       ? "You have an open position. Switching will close it at the current price. Continue?"
       : "You have a working order. Switching will cancel it. Continue?")) return;
@@ -401,19 +410,16 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const at = cur?.t ?? cursor;
     chartStartRef.current = at;
     seenRef.current = [at]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
-    if (cs) setSymbol(nextSym);
-    if (ci) setIv(nextIv);
-    /* Twelve Data has no 1-second candles — landing on one of its
-       symbols while 1s is selected would just show an empty chart */
-    const nextSource = cs ? SYMBOLS.find((s) => s.id === nextSym)?.source : curSource;
-    const nextInterval = ci ? nextIv : interval;
-    const finalIv = nextSource === "TwelveData" && nextInterval === "1s" ? "1m" : nextInterval;
-    if (nextSource === "TwelveData" && nextInterval === "1s") setIv("1m");
-    /* tell a viewer's chart to remount at the new market right away,
+    setIv(nextIv);
+    /* Twelve Data has no 1-second candles — landing on 1s on one of its
+       symbols would just show an empty chart */
+    const finalIv = curSource === "TwelveData" && nextIv === "1s" ? "1m" : nextIv;
+    if (curSource === "TwelveData" && nextIv === "1s") setIv("1m");
+    /* tell a viewer's chart to remount at the new timeframe right away,
        rather than waiting on the next ~1.5s poll (still the fallback
        — see the room WebSocket effect further down). */
     if (room && canControl) {
-      roomSocketRef.current?.send({ type: "market", symbol: cs ? nextSym : symbol, interval: finalIv, cursor: at });
+      roomSocketRef.current?.send({ type: "market", symbol, interval: finalIv, cursor: at });
     }
   };
 
@@ -576,7 +582,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         id: meta.id, cursor, trades, trade, layout, notes, symbol, interval,
       });
       const st = computeStats(trades, startBalance);
-      const ch = evaluateChallenge(trades, meta.challenge);
+      const ch = evaluateChallenge(trades, meta.challenge, startBalance);
       onSaveSession(meta.id, {
         symbol, interval,
         stats: {
@@ -1082,10 +1088,14 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         </button>
         <div className="vsep" style={{ height: 24 }} />
 
-        <select className="in" style={{ width: "auto", fontWeight: 600, minWidth: 128 }} value={symbol}
-          disabled={!canControl} onChange={(e) => switchMarket(e.target.value, null)}>
-          {SYMBOLS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-        </select>
+        {/* fixed for the life of the session — chosen once on the "New
+            session" form and never a <select> here any more, so there's
+            no path left, host or guest, for the pair to change under a
+            trade or a room mid-session. */}
+        <span title="The market is set when a session is created and can't be changed here"
+          style={{ fontWeight: 600, fontSize: 13.5 }}>
+          {SYMBOLS.find((s) => s.id === symbol)?.label || symbol}
+        </span>
 
         <span className="num" style={{ fontSize: 18, fontWeight: 600 }}>{fmtPrice(price)}</span>
         <span className="num sm" style={{ fontWeight: 500, color: chg >= 0 ? "var(--up)" : "var(--down)" }}>
@@ -1228,7 +1238,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
         {availIntervals.map((i) => (
           <button key={i.id} className={"btn ghost " + (interval === i.id ? "on" : "")}
             style={{ padding: "5px 11px", fontSize: 12.5 }} disabled={!canControl}
-            onClick={() => switchMarket(null, i.id)}>{i.label}</button>
+            onClick={() => switchInterval(i.id)}>{i.label}</button>
         ))}
         <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12.5, marginLeft: "auto" }}
           onClick={() => setHelpOpen(true)} title="Keyboard shortcuts">?</button>
