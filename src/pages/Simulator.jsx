@@ -353,7 +353,22 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
 
   const handleCursor = useCallback((ms, rawBar) => {
     setCursor(ms);
-    if (rawBar) setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return toNative(rawBar); });
+    if (rawBar) {
+      setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return toNative(rawBar); });
+      /* The ring buffer's index 0 starts life as a bare anchor with no
+         bar attached (see seenBarsRef's own declaration) — nothing's
+         been revealed at that exact position yet at the point it's
+         created. But setMarket's own realign() (see replayController.js)
+         fetches a real bar for that same moment moments later, right
+         here, and that's the only bar this position will ever get: it
+         doesn't come from handleBar (nothing was "stepped" to reach it)
+         and applySeenBar has no bar to substitute either. Without this,
+         stepping back all the way to the start leaves the display
+         showing whatever the last real step left on screen — a stale
+         reading dressed up as the session's actual start — rather than
+         going stale outright, since the fields still look plausible. */
+      if (!seenBarsRef.current[0] && seenRef.current[0] === ms) seenBarsRef.current[0] = toNative(rawBar);
+    }
     /* confirm room-sync only once a cursor actually lands near where the
        room doc says it should be — see roomSyncedRef's own comment for
        why "we attempted a correction" isn't good enough on its own. A
@@ -514,7 +529,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const coveredMs = movedWithinBuffer ? seenRef.current[idx] - startT : 0;
     if (movedWithinBuffer) {
       seenIdxRef.current = idx;
-      ctl.replay.jumpTo(seenRef.current[idx], ctl.widget);
+      /* skipBarLookup: applySeenBar below hands Simulator the exact bar
+         from the buffer already — see its own note on jumpTo in
+         datafeed.js for what goes wrong if that lookup runs anyway. */
+      ctl.replay.jumpTo(seenRef.current[idx], ctl.widget, true);
       applySeenBar(idx);
     }
     if (idx === lastIdx && coveredMs < stepMs) ctl.replay.stepFor(stepMs - coveredMs);
@@ -524,7 +542,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     if (!ctl || seenIdxRef.current <= 0) return;
     const idx = walkSeen(-1);
     seenIdxRef.current = idx;
-    ctl.replay.jumpTo(seenRef.current[idx], ctl.widget);
+    ctl.replay.jumpTo(seenRef.current[idx], ctl.widget, true);
     applySeenBar(idx);
   }, [stepMs]);
   const backToStart = useCallback(() => {

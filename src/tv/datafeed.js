@@ -299,8 +299,17 @@ export function createDatafeed(opts = {}) {
        and let the chart re-request everything — which also means any
        still-forming candle being built up by step() above is gone; the
        chart will show the last *complete* bar at or before the target
-       instead until stepping forward rebuilds one from there again. */
-    jumpTo(ms, widget, symbol, resolution) {
+       instead until stepping forward rebuilds one from there again.
+
+       `skipBarLookup` is for a caller that's about to hand Simulator an
+       exact bar of its own right after this returns (stepBack/stepping
+       back within the seen-bar buffer, see Simulator.jsx) — the async
+       best-effort lookup below fetches at the CHART's resolution, so
+       jumping to a moment that isn't itself a bar boundary at that
+       resolution (stepping back a sub-bar within a coarser chart, say)
+       resolves to the coarser bar *containing* it, arriving after and
+       silently overwriting the precise one the caller already set. */
+    jumpTo(ms, widget, symbol, resolution, skipBarLookup) {
       state.cursorMs = ms;
       state.agg = null;
       state.onCursor(ms, null);
@@ -368,7 +377,7 @@ export function createDatafeed(opts = {}) {
          effect in Simulator.jsx. Guarded on cursorMs still matching:
          a newer jump/step landing before this resolves should win, not
          get clobbered by a stale lookup. */
-      if (symbol && resolution) {
+      if (symbol && resolution && !skipBarLookup) {
         (async () => {
           const covered = await feed.ensureAround(symbol, resolution, ms);
           if (!covered || state.cursorMs !== ms) return;

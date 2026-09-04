@@ -118,7 +118,7 @@ export function createReplayController({ control, onBar, onState }) {
       emitState();
       return state.covered !== false;
     },
-    jumpTo(ms, widget) { stop(); state.atEnd = false; control.jumpTo(ms, widget, state.symbol, state.resolution); emitState(); },
+    jumpTo(ms, widget, skipBarLookup) { stop(); state.atEnd = false; control.jumpTo(ms, widget, state.symbol, state.resolution, skipBarLookup); emitState(); },
     /* Room viewer path (see Simulator.jsx's room WebSocket wiring): a
        bar someone else's step() already revealed and broadcast, fed
        in here the same way stepOnce() feeds a locally-revealed one —
