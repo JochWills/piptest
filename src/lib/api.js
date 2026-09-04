@@ -152,6 +152,23 @@ export const api = {
      multiplayer's several-writers-at-once made into a real, frequent
      "last push silently reverts everyone else's field" bug. */
   kvPatch: (k, patches) => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "PATCH", body: { patches } }),
+  /* Best-effort only, for a tab closing/navigating away — a normal
+     fetch (what kvPatch above uses) can get cancelled mid-flight the
+     instant the page starts unloading, which is exactly when this
+     needs to fire. `keepalive: true` is what actually survives that;
+     sendBeacon would too, but can't carry an Authorization header,
+     and this route requires one. No response is awaited — there's no
+     page left to receive it by the time one might arrive. */
+  kvPatchBeacon: (k, patches) => {
+    if (!BASE) return;
+    try {
+      fetch(BASE + `/api/kv/${encodeURIComponent(k)}`, {
+        method: "PATCH", keepalive: true, credentials: "include",
+        headers: { "Content-Type": "application/json", ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+        body: JSON.stringify({ patches }),
+      }).catch(() => {});
+    } catch (e) {}
+  },
 
   /* admin */
   adminOverview: ()   => raw("/api/admin/overview"),

@@ -1088,6 +1088,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
        host's drawings on top of themselves. */
     if (drawings) lastAppliedDrawingsRef.current = JSON.stringify(drawings);
     setRoom(doc); setRoomMsg(`Room ${code} is open — share the code.`);
+    store.set(K.roomLink(meta.id), code); // survives a refresh — see the rehydrate effect below
   };
   const joinRoom = async (codeArg) => {
     setRoomMsg("");
@@ -1110,7 +1111,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
        real state (see roomSyncedRef's own comment). */
     roomSyncedRef.current = false;
     setRoom(doc);
-    setRoomMsg(`Joined ${code} — watching the host.`);
+    /* role, not "did I just click Join" — this same function is also
+       how a host's own tab resumes hosting after a refresh (see the
+       room-resume effect below), and "watching the host" is a strange
+       thing to tell someone about themselves. */
+    setRoomMsg(role === "host" ? `Room ${code} is open — share the code.` : `Joined ${code} — watching the host.`);
+    store.set(K.roomLink(meta.id), code);
   };
 
   /* the Dashboard's "Join room" button creates a throwaway session just to
@@ -1126,11 +1132,62 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     onAutoJoinDone?.();
   }, []); // eslint-disable-line
 
+  /* ================= room resume (survives a refresh) =================
+     `room` is plain React state — gone the instant this component
+     remounts, which used to mean an ordinary page refresh looked
+     exactly like "never was in a room": a host's own share panel
+     reverted to "Share this chart" even though the room was still
+     alive server-side (which is also how it could go on quietly
+     accepting new joins while the host's own UI insisted nothing was
+     shared — the room never actually closed, only the host's local
+     memory of it did), and a viewer got bounced to the dashboard
+     entirely (see the matching breadcrumb check in App.jsx, which is
+     what gets this component mounted again at all for a transient,
+     never-persisted joined-room session). joinRoom already does
+     everything a resume needs — it re-derives whatever role this
+     account already holds in the room, so a host stays host and a
+     viewer stays viewer — this just supplies the code that would
+     otherwise have to be typed in by hand. Skipped when autoJoinCode
+     is set: that's this exact scenario already, one effect above. */
+  useEffect(() => {
+    if (autoJoinCode) return;
+    (async () => {
+      const code = await store.get(K.roomLink(meta.id));
+      if (!code) return;
+      const existing = await data.roomGet(code);
+      if (!existing) { store.del(K.roomLink(meta.id)); return; } // really did end — stop pretending otherwise
+      joinRoom(code);
+    })();
+  }, []); // eslint-disable-line
+
+  /* A non-host's tab actually closing (not just refreshing — the
+     resume effect above re-adds them fresh the instant a refresh's
+     next load runs) is otherwise invisible to the room: nothing here
+     ever calls leaveRoom for them, so their name sat in the host's
+     participant list forever with no way to tell "gone for now" from
+     "gone for good". A real `fetch` can get cancelled mid-flight the
+     moment the page starts unloading — see roomLeaveBeacon — which is
+     exactly when this needs to fire.
+     Never for the host: their own participants entry is also where
+     their role lives (see isHost/canTrade above), so removing it
+     would silently demote a host who just closed a tab to "viewer"
+     the next time they opened the room back up. Ending a room for
+     everyone stays a deliberate act — the Close button — never a side
+     effect of a tab closing. */
+  useEffect(() => {
+    if (!room || isHost) return;
+    const code = room.code, handle = account.handle;
+    const onUnload = () => data.roomLeaveBeacon(code, handle);
+    window.addEventListener("pagehide", onUnload);
+    return () => window.removeEventListener("pagehide", onUnload);
+  }, [room?.code, isHost, account.handle]);
+
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
       await data.roomPatch(room.code, [{ path: ["participants", account.handle], remove: true }]);
     }
     setRoom(null); setRoomMsg(""); setChatOpen(false);
+    store.del(K.roomLink(meta.id));
   };
   /* host-only: ends the room for everyone and wipes the kv row — chat
      messages live inside that same doc, so they're gone with it */
@@ -1138,6 +1195,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     if (!room || !isHost) return;
     await data.roomDelete(room.code);
     setRoom(null); setRoomMsg("Room closed."); setChatOpen(false);
+    store.del(K.roomLink(meta.id));
   };
   const setRole = async (who, r) => {
     if (!isHost) return;

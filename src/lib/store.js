@@ -60,6 +60,13 @@ export const K = {
   trades: "trades",               // every closed trade, across sessions
   prefs: "prefs",
   room: (code) => `room:${code}`,
+  /* Which room a given session was last in — purely local, never
+     synced. A room's own kv doc (the shared, authoritative state) is
+     fetched fresh on rehydrate; this is only the breadcrumb that says
+     "check room X for session Y" before the network round trip that
+     confirms it's still real. See Simulator's room-rehydrate effect
+     and joinRoomFromDashboard in App.jsx. */
+  roomLink: (sessionId) => `roomLink:${sessionId}`,
 };
 
 export async function loadAccount() { return store.get(K.account); }

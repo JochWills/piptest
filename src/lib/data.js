@@ -88,6 +88,12 @@ export async function roomDelete(code) {
   /* wipes the whole room doc — including chat — from the kv table */
   try { await api.kvDel(`room:${code}`); return true; } catch (e) { return false; }
 }
+/* Fire-and-forget participant removal for a tab closing/navigating
+   away — see api.kvPatchBeacon for why this can't just be roomPatch. */
+export function roomLeaveBeacon(code, handle) {
+  if (!remote) return;
+  api.kvPatchBeacon(`room:${code}`, [{ path: ["participants", handle], remove: true }]);
+}
 
 /* ---------- migration ----------
    When someone signs in for the first time on a browser that has

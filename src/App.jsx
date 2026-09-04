@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, Suspense, lazy } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from "react";
 import { THEMES, cssVars } from "./theme.js";
 import { GLOBAL_CSS, Modal, CornerLoader } from "./components/ui.jsx";
 import Shell from "./components/Shell.jsx";
@@ -63,6 +63,10 @@ export default function App() {
   const [trades, setTrades] = useState([]);
   const [importOffer, setImportOffer] = useState(null);
   const [pendingJoin, setPendingJoin] = useState(null); // { id, code } — see joinRoomFromDashboard
+  /* ids already checked against a stored room-link breadcrumb, so a
+     re-render (sessions/pendingJoin changing) doesn't redo it — see
+     the effect below */
+  const roomLinkCheckedRef = useRef(new Set());
 
   const T = THEMES[theme];
   const vars = useMemo(() => cssVars(T), [T]);
@@ -88,32 +92,96 @@ export default function App() {
 
   /* ---------- boot ---------- */
   useEffect(() => {
+    /* StrictMode double-invokes effects in dev — mount, clean up,
+       mount again — which without this guard runs this whole async
+       sequence twice, and whichever copy's `setSessions(s)` happens
+       to resolve second wins, silently discarding anything applied
+       in between (a room-link reconstruction from the effect below,
+       for one — that's what turned into a permanent loading spinner
+       when this was first found: the real fetch's own empty list,
+       landing late, wiped out the just-rebuilt transient session out
+       from under it). Never observed outside StrictMode — a single,
+       real invocation has nothing concurrent to race against — but
+       cheap enough to guard unconditionally rather than relying on
+       that staying true. */
+    let active = true;
     (async () => {
       const prefs = await store.get(K.prefs);
-      if (prefs?.theme) setTheme(prefs.theme);
+      if (active && prefs?.theme) setTheme(prefs.theme);
 
       if (API_ENABLED) {
         /* the refresh cookie survives a reload — try to resume silently */
         const user = await refresh();
+        if (!active) return;
         if (user && typeof user === "object") {
           setAccount(user);
           data.useRemote(true);
-          await loadData();
+          const [s, t] = await Promise.all([data.listSessions(), data.listTrades()]);
+          if (!active) return;
+          setSessions(s); setTrades(t);
         } else {
           data.useRemote(false);
-          setSessions((await store.get(K.sessions)) || []);
-          setTrades((await store.get(K.trades)) || []);
+          const [s, t] = await Promise.all([store.get(K.sessions), store.get(K.trades)]);
+          if (!active) return;
+          setSessions(s || []); setTrades(t || []);
         }
       } else {
         const local = await store.get(K.account);
+        if (!active) return;
         if (local) setAccount(local);
         data.useRemote(false);
-        setSessions((await store.get(K.sessions)) || []);
-        setTrades((await store.get(K.trades)) || []);
+        const [s, t] = await Promise.all([store.get(K.sessions), store.get(K.trades)]);
+        if (!active) return;
+        setSessions(s || []); setTrades(t || []);
       }
       setBooted(true);
     })();
+    return () => { active = false; };
   }, [loadData]);
+
+  /* A joined-room session is `transient` (see joinRoomFromDashboard) —
+     never saved anywhere, so a refresh loses it from `sessions`
+     exactly like it lost everything else in memory, and the #/sim
+     render branch below used to bounce straight to the dashboard the
+     instant it couldn't find a matching session. Before it does now,
+     check whether this URL's id has a room-link breadcrumb
+     (Simulator writes one — see its own room-resume effect); if so,
+     rebuild the same placeholder joinRoomFromDashboard would have
+     made and let Simulator's matching resume effect take it from
+     there, instead of losing the room over what was only ever a
+     page reload.
+
+     The redirect itself has to live here, not in the render body: an
+     effect only runs after the render that triggered it has already
+     committed, so a render-body redirect (the previous shape of this
+     code) fires on the very first "no meta yet" render — the one
+     before this effect has had any chance to even set
+     it, let alone resolve it. That's not a maybe-missed
+     edge case, it's every single time: a genuine dead id got bounced
+     correctly, by accident, for the wrong reason, while a real
+     breadcrumb was being raced and lost. Only a *resolved* negative
+     (this async check actually came back empty) is grounds to leave;
+     the render body below just waits, however long that check takes.
+     Checked once per id (the ref), not on every render while
+     sessions/pendingJoin themselves keep changing underneath. */
+  useEffect(() => {
+    if (!booted || route.page !== "sim") return;
+    const id = route.arg;
+    if (sessions.some((s) => s.id === id) || roomLinkCheckedRef.current.has(id)) return;
+    roomLinkCheckedRef.current.add(id);
+    (async () => {
+      const code = await store.get(K.roomLink(id));
+      if (code) {
+        const meta = { id, name: `Room ${code}`, symbol: "BTCUSDT", interval: "30m",
+          startMs: Date.now() - 30 * 86400000, blind: false, challenge: null, createdAt: Date.now(),
+          stats: { count: 0, curve: [] }, transient: true };
+        setSessions((prev) => [meta, ...prev]);
+        setPendingJoin({ id, code });
+      } else {
+        go("dashboard");
+      }
+    })();
+  }, [booted, route.page, route.arg]); // eslint-disable-line
 
   /* server said our session is gone — drop back to signed out */
   useEffect(() => onAuthLost(() => {
@@ -218,6 +286,8 @@ export default function App() {
     };
     setSessions((prev) => [meta, ...prev]);
     setPendingJoin({ id, code });
+    roomLinkCheckedRef.current.add(id); // already known — the effect above would only redo this same work
+    store.set(K.roomLink(id), code); // covers a refresh in the moment before Simulator's own joinRoom confirms it
     go("sim", id);
   };
 
@@ -379,15 +449,16 @@ export default function App() {
   if (route.page === "sim") {
     const meta = sessions.find((s) => s.id === route.arg);
     if (!meta) {
-      /* sessions haven't come back from boot yet — this session may well
-         exist once they do, so don't bounce to the dashboard on a false
-         negative. Once booted, if it's still missing it really is gone. */
-      if (!booted) return wrap(
+      /* Never redirect from here — see the room-link effect above for
+         why: it's the only place with an actually-resolved answer,
+         sessions not having come back from boot yet included. This
+         just waits, whether that's boot still loading or the
+         room-link check still in flight for this exact id. */
+      return wrap(
         <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--dim)" }}>
           <span className="spinner" />
         </div>
       );
-      go("dashboard"); return null;
     }
     return wrap(
       <Suspense fallback={<PageLoading full />}>
