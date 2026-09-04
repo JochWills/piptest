@@ -3,7 +3,7 @@ import { PageHead } from "../components/Shell.jsx";
 import { Card, Stat, Empty, Svg, Ic } from "../components/ui.jsx";
 import { SYMBOLS } from "../theme.js";
 import {
-  computeStats, groupBy, byTag, rHistogram, sessionOf, dayOf,
+  computeStats, groupBy, rHistogram, sessionOf, dayOf,
   fmtSigned, fmtR, fmtMoney, START_BALANCE,
 } from "../lib/trading.js";
 
@@ -29,7 +29,6 @@ export default function Analytics({ trades }) {
     const g = groupBy(scoped, (t) => dayOf(t.openedTs || t.closedTs));
     return order.map((d) => g.find((x) => x.key === d) || { key: d, n: 0, net: 0, winRate: 0, avgR: 0, totalR: 0 });
   }, [scoped]);
-  const tagRows = useMemo(() => byTag(scoped), [scoped]);
   const bySymbol = useMemo(() => groupBy(scoped, (t) => t.symbol).sort((a, b) => b.totalR - a.totalR), [scoped]);
   const byDir = useMemo(() => groupBy(scoped, (t) => t.dir), [scoped]);
 
@@ -38,7 +37,7 @@ export default function Analytics({ trades }) {
       <div>
         <PageHead eyebrow="Performance" title="Analytics" />
         <Card><Empty title="Nothing to analyse yet"
-          body="Once you've closed a few trades, this page breaks them down by session, day, market and setup tag — so you can see which edge is real and which one you just like." /></Card>
+          body="Once you've closed a few trades, this page breaks them down by session, day and market — so you can see which edge is real and which one you just like." /></Card>
       </div>
     );
   }
@@ -87,13 +86,6 @@ export default function Analytics({ trades }) {
             A healthy book has losses clustered near −1R and a right tail past +2R. Losses beyond −1R
             mean stops aren't holding.
           </div>
-        </Card>
-
-        <Card style={{ padding: 18 }}>
-          <div className="cap" style={{ marginBottom: 14 }}>By setup tag</div>
-          {tagRows.length === 0
-            ? <div className="sm mut" style={{ padding: "16px 0" }}>No tags yet. Tag trades in the Journal to see which setups carry your account.</div>
-            : <Breakdown rows={tagRows} />}
         </Card>
 
         <Card style={{ padding: 18 }}>

@@ -5,14 +5,13 @@ import { SYMBOLS } from "../theme.js";
 import { computeStats, fmtPrice, fmtSigned, fmtR, fmtClock, fmtShort, sessionOf } from "../lib/trading.js";
 
 /* ============================================================
-   Journal — the whole book, filterable, with notes and tags
+   Journal — the whole book, filterable, with notes
    ============================================================ */
 
-export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
+export default function Journal({ trades, onUpdateTrade, onExport }) {
   const [q, setQ] = useState("");
   const [dir, setDir] = useState("all");
   const [res, setRes] = useState("all");
-  const [tag, setTag] = useState("all");
   const [sym, setSym] = useState("all");
   const [editing, setEditing] = useState(null);
 
@@ -23,14 +22,13 @@ export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
       if (res === "win" && !(t.pnl > 0)) return false;
       if (res === "loss" && !(t.pnl < 0)) return false;
       if (res === "flat" && t.pnl !== 0) return false;
-      if (tag !== "all" && !(t.tags || []).includes(tag)) return false;
       if (q) {
-        const hay = `${t.symbol} ${t.note} ${(t.tags || []).join(" ")} ${t.reason}`.toLowerCase();
+        const hay = `${t.symbol} ${t.note} ${t.reason}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
       return true;
     }).sort((a, b) => (b.closedTs || b.closedAt || 0) - (a.closedTs || a.closedAt || 0));
-  }, [trades, q, dir, res, tag, sym]);
+  }, [trades, q, dir, res, sym]);
 
   const st = useMemo(() => computeStats(filtered), [filtered]);
   const symbolsUsed = useMemo(() => [...new Set(trades.map((t) => t.symbol))], [trades]);
@@ -54,7 +52,7 @@ export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div style={{ flex: "1 1 200px", position: "relative" }}>
                 <span style={{ position: "absolute", left: 10, top: 10, color: "var(--dim)" }}><Svg s={15}>{Ic.search}</Svg></span>
-                <input className="in" style={{ paddingLeft: 32 }} placeholder="Search notes, tags, markets…"
+                <input className="in" style={{ paddingLeft: 32 }} placeholder="Search notes, markets…"
                   value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
               <select className="in" style={{ width: "auto" }} value={sym} onChange={(e) => setSym(e.target.value)}>
@@ -67,12 +65,8 @@ export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
               <select className="in" style={{ width: "auto" }} value={res} onChange={(e) => setRes(e.target.value)}>
                 <option value="all">All results</option><option value="win">Winners</option><option value="loss">Losers</option><option value="flat">Breakeven</option>
               </select>
-              <select className="in" style={{ width: "auto" }} value={tag} onChange={(e) => setTag(e.target.value)}>
-                <option value="all">All tags</option>
-                {tags.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              {(q || dir !== "all" || res !== "all" || tag !== "all" || sym !== "all") && (
-                <button className="btn ghost" onClick={() => { setQ(""); setDir("all"); setRes("all"); setTag("all"); setSym("all"); }}>Clear</button>
+              {(q || dir !== "all" || res !== "all" || sym !== "all") && (
+                <button className="btn ghost" onClick={() => { setQ(""); setDir("all"); setRes("all"); setSym("all"); }}>Clear</button>
               )}
             </div>
           </Card>
@@ -91,7 +85,7 @@ export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
               <table className="tbl">
                 <thead>
                   <tr>
-                    {["Closed", "Market", "Side", "Entry", "Exit", "Stop", "R", "P&L", "Exit", "Session", "Tags", ""].map((h) => <th key={h}>{h}</th>)}
+                    {["Closed", "Market", "Side", "Entry", "Exit", "Stop", "R", "P&L", "Exit", "Session", ""].map((h) => <th key={h}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -112,12 +106,6 @@ export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
                       <td className="mut" style={{ fontSize: 12 }}>{t.reason}</td>
                       <td className="mut" style={{ fontSize: 12 }}>{sessionOf(t.openedTs || t.closedTs)}</td>
                       <td>
-                        <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {(t.tags || []).slice(0, 2).map((g) => <span key={g} className="pill n" style={{ fontSize: 10.5 }}>{g}</span>)}
-                          {(t.tags || []).length > 2 && <span className="pill n" style={{ fontSize: 10.5 }}>+{t.tags.length - 2}</span>}
-                        </span>
-                      </td>
-                      <td>
                         <button className="btn ghost" style={{ padding: "3px 8px", fontSize: 12 }} onClick={() => setEditing(t)}>
                           {t.note ? "Note" : "Add"}
                         </button>
@@ -132,21 +120,18 @@ export default function Journal({ trades, tags, onUpdateTrade, onExport }) {
         </>
       )}
 
-      <TradeModal trade={editing} tags={tags} onClose={() => setEditing(null)}
+      <TradeModal trade={editing} onClose={() => setEditing(null)}
         onSave={(patch) => { onUpdateTrade(editing.id, patch); setEditing(null); }} />
     </div>
   );
 }
 
-function TradeModal({ trade, tags, onClose, onSave }) {
+function TradeModal({ trade, onClose, onSave }) {
   const [note, setNote] = useState("");
-  const [picked, setPicked] = useState([]);
   React.useEffect(() => {
-    if (trade) { setNote(trade.note || ""); setPicked(trade.tags || []); }
+    if (trade) setNote(trade.note || "");
   }, [trade]);
   if (!trade) return null;
-
-  const toggle = (t) => setPicked((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]));
 
   return (
     <Modal open={!!trade} onClose={onClose} title="Trade review" width={560}>
@@ -171,16 +156,6 @@ function TradeModal({ trade, tags, onClose, onSave }) {
         Opened {fmtClock(trade.openedTs || trade.closedTs, trade.interval)} · closed {fmtClock(trade.closedTs, trade.interval)} UTC
       </div>
 
-      <Field label="Setup tags">
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {tags.map((t) => (
-            <button key={t} onClick={() => toggle(t)}
-              className={"btn " + (picked.includes(t) ? "on" : "")}
-              style={{ padding: "5px 10px", fontSize: 12.5 }}>{t}</button>
-          ))}
-        </div>
-      </Field>
-
       <div style={{ marginTop: 14 }}>
         <Field label="Notes" hint="What did you see, what did you do, what would you change?">
           <textarea className="in" rows={5} value={note} onChange={(e) => setNote(e.target.value)}
@@ -189,7 +164,7 @@ function TradeModal({ trade, tags, onClose, onSave }) {
       </div>
 
       <div style={{ display: "flex", gap: 9, marginTop: 18 }}>
-        <button className="btn pri" onClick={() => onSave({ note, tags: picked })}>Save review</button>
+        <button className="btn pri" onClick={() => onSave({ note })}>Save review</button>
         <button className="btn" onClick={onClose}>Cancel</button>
       </div>
     </Modal>

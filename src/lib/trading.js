@@ -72,7 +72,7 @@ export function validateSetup({ dir, entry, stop, target, riskPct, equity, price
   return errs;
 }
 
-export function buildSetup({ dir, entry, stop, target, riskPct, equity, symbol, interval, tags, note, atMarket, ts }) {
+export function buildSetup({ dir, entry, stop, target, riskPct, equity, symbol, interval, note, atMarket, ts }) {
   const e = +entry, s = +stop, r = +riskPct;
   const t = target === "" || target == null ? null : +target;
   const riskAmt = equity * (r / 100);
@@ -80,7 +80,7 @@ export function buildSetup({ dir, entry, stop, target, riskPct, equity, symbol, 
     id: uid(), dir, entry: e, stop: s, target: Number.isNaN(t) ? null : t,
     riskPct: r, riskAmt, qty: +(riskAmt / Math.abs(e - s)).toFixed(6),
     status: atMarket ? "open" : "watching",
-    symbol, interval, tags: tags || [], note: note || "",
+    symbol, interval, note: note || "",
     fromTs: ts, armedTs: ts, filledTs: atMarket ? ts : null,
   };
 }
@@ -136,7 +136,7 @@ export function bookTrade(t, exit, reason, ts) {
     entry: t.entry, exit, stop: t.stop, target: t.target,
     riskAmt: t.riskAmt, riskPct: t.riskPct,
     r: t.riskAmt ? pnl / t.riskAmt : 0, pnl, reason,
-    tags: t.tags || [], note: t.note || "",
+    note: t.note || "",
     openedTs: t.filledTs || t.armedTs, closedTs: ts,
     barsHeld: null, closedAt: Date.now(),
   };
@@ -211,16 +211,6 @@ export const sessionOf = (ts) => {
 };
 export const dayOf = (ts) =>
   ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"][new Date(ts).getUTCDay()];
-
-export function byTag(trades) {
-  const m = new Map();
-  for (const t of trades) for (const tag of (t.tags || [])) {
-    if (!m.has(tag)) m.set(tag, []);
-    m.get(tag).push(t);
-  }
-  return [...m.entries()].map(([k, list]) => ({ key: k, ...bucket(list) }))
-    .sort((a, b) => b.totalR - a.totalR);
-}
 
 /* R-multiple histogram for the analytics page */
 export function rHistogram(trades) {

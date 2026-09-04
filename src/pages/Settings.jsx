@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Svg, Ic, Modal } from "../components/ui.jsx";
-import { DEFAULT_TAGS } from "../theme.js";
 import { API_ENABLED } from "../lib/api.js";
 import Avatar from "../components/Avatar.jsx";
 import { AVATAR_ICONS, AVATAR_COLORS, encodeAvatar, decodeAvatar } from "../lib/avatars.js";
 
-export default function Settings({ account, onSaveAccount, onChangePassword, tags, onSaveTags, onWipe, onSignOut, sessions, trades }) {
+export default function Settings({ account, onSaveAccount, onChangePassword, onWipe, onSignOut, sessions, trades }) {
   const [name, setName] = useState(account.name || "");
   const [handle, setHandle] = useState(account.handle || "");
-  const [newTag, setNewTag] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -25,12 +23,6 @@ export default function Settings({ account, onSaveAccount, onChangePassword, tag
       await onSaveAccount({ name: name.trim() || h, handle: h });
       setSaved(true); setTimeout(() => setSaved(false), 1800);
     } catch (e) { setProfErr(e?.message || "Couldn't save your profile."); }
-  };
-
-  const addTag = () => {
-    const t = newTag.trim();
-    if (!t || tags.includes(t)) { setNewTag(""); return; }
-    onSaveTags([...tags, t]); setNewTag("");
   };
 
   return (
@@ -80,32 +72,6 @@ export default function Settings({ account, onSaveAccount, onChangePassword, tag
         {API_ENABLED && <PasswordCard onChangePassword={onChangePassword} onSignOut={onSignOut} />}
 
         <Card style={{ padding: 20 }}>
-          <h3 style={{ fontSize: 16, marginBottom: 4 }}>Setup tags</h3>
-          <p className="sm mut" style={{ marginBottom: 16 }}>
-            Tag trades as you take them, then find out in Analytics which setup is actually carrying your account.
-          </p>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-            {tags.map((t) => (
-              <span key={t} className="pill n" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px" }}>
-                {t}
-                <button onClick={() => onSaveTags(tags.filter((x) => x !== t))}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--dim)", padding: 0, fontSize: 13 }}
-                  aria-label={`Remove ${t}`}>✕</button>
-              </span>
-            ))}
-            {tags.length === 0 && <span className="sm mut">No tags. Add one below.</span>}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input className="in" style={{ maxWidth: 260 }} value={newTag} placeholder="Add a tag…"
-              onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addTag()} />
-            <button className="btn" onClick={addTag}>Add</button>
-            {tags.length !== DEFAULT_TAGS.length && (
-              <button className="btn ghost" onClick={() => onSaveTags(DEFAULT_TAGS)}>Reset to defaults</button>
-            )}
-          </div>
-        </Card>
-
-        <Card style={{ padding: 20 }}>
           <h3 style={{ fontSize: 16, marginBottom: 4 }}>Live rooms</h3>
           <p className="sm mut" style={{ marginBottom: 14, lineHeight: 1.6 }}>
             {API_ENABLED
@@ -123,7 +89,7 @@ export default function Settings({ account, onSaveAccount, onChangePassword, tag
             PipTest is completely free — everything is unlocked.
           </p>
           <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
-            {[["Sessions", sessions.length], ["Trades logged", trades.length], ["Setup tags", tags.length]].map(([l, v]) => (
+            {[["Sessions", sessions.length], ["Trades logged", trades.length]].map(([l, v]) => (
               <div key={l}>
                 <div className="cap" style={{ marginBottom: 4 }}>{l}</div>
                 <div className="num" style={{ fontSize: 20, fontWeight: 600 }}>{v}</div>

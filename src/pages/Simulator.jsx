@@ -25,7 +25,7 @@ import { connectRoomSocket } from "../lib/roomSocket.js";
    exact bar it was left on. */
 const LEGACY_CURSOR_CUTOFF = 1e12;
 
-export default function Simulator({ meta, account, theme, T, tags, onExit, onSaveSession, onTradesClosed, onToggleTheme, onNav, onSignOut, sessions = [], autoJoinCode, onAutoJoinDone }) {
+export default function Simulator({ meta, account, theme, T, onExit, onSaveSession, onTradesClosed, onToggleTheme, onNav, onSignOut, sessions = [], autoJoinCode, onAutoJoinDone }) {
   /* ---------- market ---------- */
   const [symbol, setSymbol] = useState(meta.symbol);
   const [interval, setIv] = useState(meta.interval);
@@ -78,7 +78,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
   const [trade, setTrade] = useState(null);
   const [trades, setTrades] = useState([]);
   const [form, setForm] = useState({ dir: "long", entry: "", stop: "", target: "", riskPct: "1.0" });
-  const [formTags, setFormTags] = useState([]);
   const [formErr, setFormErr] = useState("");
   const [notes, setNotes] = useState("");
   const [tab, setTab] = useState("trades");
@@ -399,7 +398,7 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     const errs = validateSetup({ dir: form.dir, entry: e, stop: form.stop, target: form.target, riskPct: form.riskPct, equity, price });
     if (errs.length) { setFormErr(errs[0]); return; }
     setFormErr("");
-    setTrade(buildSetup({ ...form, entry: e, equity, symbol, interval, tags: formTags, note: "", atMarket, ts: cur?.t }));
+    setTrade(buildSetup({ ...form, entry: e, equity, symbol, interval, note: "", atMarket, ts: cur?.t }));
   };
 
   const moveStopToBE = () => {
@@ -1535,16 +1534,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
                     {projQty ? `${projQty.toFixed(4)} (${fmtMoney(projQty * entryVal)})` : "—"}
                   </span>
                 </div>
-
-                <Field label="Tags">
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                    {tags.slice(0, 6).map((t) => (
-                      <button key={t} className={"btn " + (formTags.includes(t) ? "on" : "")}
-                        style={{ padding: "4px 9px", fontSize: 11.5 }}
-                        onClick={() => setFormTags((p) => (p.includes(t) ? p.filter((x) => x !== t) : [...p, t]))}>{t}</button>
-                    ))}
-                  </div>
-                </Field>
 
                 {(setupErrors.length > 0 || formErr) && (
                   <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", borderRadius: 8,

@@ -17,11 +17,11 @@ const FEATURES = [
   { icon: Ic.target, title: "Sized off your stop, scored in R",
     body: "Set a stop and a risk percentage; position size is derived for you. Every trade is recorded as a multiple of risk, so results compare across instruments and account sizes." },
   { icon: Ic.chart, title: "Analytics that answer real questions",
-    body: "Win rate by session, by day, by setup tag. R-distribution, expectancy, drawdown and streaks. Find out which setup is actually carrying your account." },
+    body: "Win rate by session, by day, by market. R-distribution, expectancy, drawdown and streaks. Find out which setup is actually carrying your account." },
   { icon: Ic.bolt, title: "Prop-firm challenge mode",
     body: "Run a session under daily-loss, max-drawdown and profit-target rules. Breach one and the challenge fails, exactly as it would with real capital." },
   { icon: Ic.book, title: "A journal that fills itself",
-    body: "Every fill is logged with entry, stop, target, R and reason for exit. Add tags and notes while the setup is fresh, then review the whole book later." },
+    body: "Every fill is logged with entry, stop, target, R and reason for exit. Add notes while the setup is fresh, then review the whole book later." },
 ];
 
 const STEPS = [

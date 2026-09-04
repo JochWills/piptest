@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, Suspense, lazy } from "react";
-import { THEMES, cssVars, DEFAULT_TAGS } from "./theme.js";
+import { THEMES, cssVars } from "./theme.js";
 import { GLOBAL_CSS, Modal, CornerLoader } from "./components/ui.jsx";
 import Shell from "./components/Shell.jsx";
 import Landing from "./pages/Landing.jsx";
@@ -61,7 +61,6 @@ export default function App() {
   const [authMode, setAuthMode] = useState("signup");
   const [sessions, setSessions] = useState([]);
   const [trades, setTrades] = useState([]);
-  const [tags, setTags] = useState(DEFAULT_TAGS);
   const [importOffer, setImportOffer] = useState(null);
   const [pendingJoin, setPendingJoin] = useState(null); // { id, code } — see joinRoomFromDashboard
 
@@ -92,7 +91,6 @@ export default function App() {
     (async () => {
       const prefs = await store.get(K.prefs);
       if (prefs?.theme) setTheme(prefs.theme);
-      if (Array.isArray(prefs?.tags) && prefs.tags.length) setTags(prefs.tags);
 
       if (API_ENABLED) {
         /* the refresh cookie survives a reload — try to resume silently */
@@ -282,12 +280,12 @@ export default function App() {
 
   const exportCsv = () => {
     const head = ["closed", "market", "timeframe", "side", "entry", "exit", "stop", "target",
-      "qty", "risk_pct", "risk_amt", "r", "pnl", "exit_reason", "tags", "note"];
+      "qty", "risk_pct", "risk_amt", "r", "pnl", "exit_reason", "note"];
     const rows = trades.map((t) => [
       fmtShort(t.closedTs || t.closedAt), t.symbol, t.interval, t.dir,
       t.entry, t.exit, t.stop, t.target ?? "", t.qty, t.riskPct ?? "", t.riskAmt ?? "",
       (t.r ?? 0).toFixed(4), (t.pnl ?? 0).toFixed(2), t.reason,
-      (t.tags || []).join("|"), (t.note || "").replace(/[\r\n]+/g, " "),
+      (t.note || "").replace(/[\r\n]+/g, " "),
     ]);
     const csv = [head, ...rows]
       .map((r) => r.map((c) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(","))
@@ -394,7 +392,7 @@ export default function App() {
     return wrap(
       <Suspense fallback={<PageLoading full />}>
         <Simulator
-          key={meta.id} meta={meta} account={account} theme={theme} T={T} tags={tags}
+          key={meta.id} meta={meta} account={account} theme={theme} T={T}
           onExit={() => go("dashboard")} onSaveSession={patchSession}
           onTradesClosed={onTradesClosed} onToggleTheme={toggleTheme}
           onNav={go} onSignOut={signOut} sessions={sessions}
@@ -421,7 +419,7 @@ export default function App() {
             onJoinRoom={joinRoomFromDashboard} />
         )}
         {page === "journal" && (
-          <Journal trades={trades} tags={tags} onUpdateTrade={updateTrade} onExport={exportCsv} />
+          <Journal trades={trades} onUpdateTrade={updateTrade} onExport={exportCsv} />
         )}
         {page === "analytics" && <Analytics trades={trades} />}
         {/* Settings reads straight off `account` from its very first render
@@ -431,7 +429,7 @@ export default function App() {
             hold it back until account actually exists. */}
         {page === "settings" && !account && <PageLoading />}
         {page === "settings" && account && (
-          <Settings account={account} sessions={sessions} trades={trades} tags={tags}
+          <Settings account={account} sessions={sessions} trades={trades}
             onSaveAccount={async (patch) => {
               if (API_ENABLED) {
                 const { user } = await api.updateMe(patch);
@@ -442,7 +440,6 @@ export default function App() {
               }
             }}
             onChangePassword={(b) => api.changePassword(b)}
-            onSaveTags={(t) => { setTags(t); savePrefs({ tags: t }); }}
             onWipe={wipe} onSignOut={signOut} />
         )}
       </Suspense>

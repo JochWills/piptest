@@ -86,7 +86,7 @@ function PrivacyBody() {
         not an uploaded photo — there's nothing to collect there beyond the code itself.
         <br /><br />
         <b style={{ color: "var(--ink)" }}>Sessions, trades and journal entries</b> you create —
-        the market/timeframe/date you replay, the setups you arm, and any notes or tags you
+        the market/timeframe/date you replay, the setups you arm, and any notes you
         write. This is all simulated activity against historical market data, not a connection
         to any real brokerage or bank account.
         <br /><br />
@@ -213,8 +213,8 @@ function TermsBody() {
       </Section>
 
       <Section title="Ownership">
-        PipTest's software, design and branding belong to NOX Media Group. The sessions,
-        notes and tags you create are yours — deleting your account deletes them with it,
+        PipTest's software, design and branding belong to NOX Media Group. The sessions
+        and notes you create are yours — deleting your account deletes them with it,
         rather than us keeping a copy.
       </Section>
 

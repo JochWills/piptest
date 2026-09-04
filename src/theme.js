@@ -107,12 +107,6 @@ export const barMsOf = (id) => INTERVALS.find((i) => i.id === id)?.ms || 60000;
    Simulator just passes the raw duration in ms; the replay/datafeed layer
    works out what that means in bars. */
 
-/* setup tags for journalling — user-extendable in Settings */
-export const DEFAULT_TAGS = [
-  "Break of structure", "Liquidity sweep", "Order block", "FVG",
-  "Trend continuation", "Reversal", "Range fade", "News",
-];
-
 export const SESSIONS = [
   { id: "asia", label: "Asia", from: 0, to: 8 },
   { id: "london", label: "London", from: 7, to: 16 },
