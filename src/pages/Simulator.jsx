@@ -4,7 +4,7 @@ import Logo from "../components/Logo.jsx";
 import Avatar from "../components/Avatar.jsx";
 import FloatingBar, { defaultBarPos } from "../components/FloatingBar.jsx";
 import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
-import { IV_TO_TV_RES } from "../tv/marketFeed.js";
+import { IV_TO_TV_RES, TV_RES_TO_IV } from "../tv/marketFeed.js";
 import { SYMBOLS, INTERVALS, barMsOf } from "../theme.js";
 import {
   validateSetup, buildSetup, runEngine, bookTrade, openPnl, computeStats, rrOf,
@@ -398,11 +398,17 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      fire any more; keeping the dead branch around would just be a second
      place for "can this session's market actually change?" to have an
      answer, and a wrong one. */
+  /* The confirm/cancel gate used to live in here too, back when this was
+     only ever reached by clicking one of PipTest's own timeframe buttons.
+     Now it's reached from handleIntervalChanged below, which has already
+     asked and gotten a yes by the time this runs — this is purely the
+     "make the switch happen" half. Twelve Data's missing 1s resolution
+     no longer needs handling here either: the chart's own dropdown is
+     built from supported_resolutions, which never lists 1S for a Twelve
+     Data symbol in the first place (see resolveSymbol in datafeed.js),
+     so this can't be reached with a resolution that was never offered. */
   const switchInterval = (nextIv) => {
     if (!nextIv || nextIv === interval) return;
-    if (trade && !confirm(trade.status === "open"
-      ? "You have an open position. Switching will close it at the current price. Continue?"
-      : "You have a working order. Switching will cancel it. Continue?")) return;
     if (trade?.status === "open" && price) closeNow();
     else if (trade) setTrade(null);
     setForm((f) => ({ ...f, entry: "", stop: "", target: "" }));
@@ -415,16 +421,41 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
     chartStartRef.current = at;
     seenRef.current = [at]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
     setIv(nextIv);
-    /* Twelve Data has no 1-second candles — landing on 1s on one of its
-       symbols would just show an empty chart */
-    const finalIv = curSource === "TwelveData" && nextIv === "1s" ? "1m" : nextIv;
-    if (curSource === "TwelveData" && nextIv === "1s") setIv("1m");
     /* tell a viewer's chart to remount at the new timeframe right away,
        rather than waiting on the next ~1.5s poll (still the fallback
        — see the room WebSocket effect further down). */
     if (room && canControl) {
-      roomSocketRef.current?.send({ type: "market", symbol, interval: finalIv, cursor: at });
+      roomSocketRef.current?.send({ type: "market", symbol, interval: nextIv, cursor: at });
     }
+  };
+
+  /* Fired by the chart's own native resolution control (see
+     TVAdvancedChart's onIntervalChanged subscription) — PipTest's own
+     timeframe buttons are gone now, so this is the only door left. The
+     widget has *already* switched resolution by the time this runs
+     (that's how the library's own dropdown works — it doesn't wait to
+     be told it's OK), which is exactly why the cancel branch has to
+     explicitly set it back rather than just declining to act: there's
+     no "don't apply it yet" to fall back on here, unlike the old
+     button, which asked before touching anything. Declining re-fires
+     this same handler with the old resolution, which the interval-
+     unchanged guard below turns into a no-op rather than a loop. */
+  const handleIntervalChanged = (tvRes) => {
+    const nextIv = TV_RES_TO_IV[tvRes];
+    if (!nextIv || nextIv === interval || !canControl) return;
+    if (trade && !confirm(trade.status === "open"
+      ? "You have an open position. Switching will close it at the current price. Continue?"
+      : "You have a working order. Switching will cancel it. Continue?")) {
+      /* setResolution called synchronously, right here, is a silent
+         no-op — confirmed directly, not assumed: the library is still
+         mid-dispatch of the *first* onIntervalChanged when this runs,
+         and won't accept a second resolution change until that finishes.
+         Deferring one tick lets it finish first. */
+      const revertRes = IV_TO_TV_RES[interval];
+      setTimeout(() => chartCtlRef.current?.chart?.setResolution(revertRes), 0);
+      return;
+    }
+    switchInterval(nextIv);
   };
 
   /* ================= transport =================
@@ -1064,11 +1095,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
      moment you leave them, so they don't belong in a "switch to" list */
   const switchableSessions = sessions.filter((s) => !s.transient);
 
-  const curSource = SYMBOLS.find((s) => s.id === symbol)?.source || "Binance";
-  /* Twelve Data has no 1-second candles — hide the option rather than
-     let it silently show an empty chart for these symbols */
-  const availIntervals = curSource === "TwelveData" ? INTERVALS.filter((i) => i.id !== "1s") : INTERVALS;
-
   return (
     <div className="sim-page" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* ================= top bar ================= */}
@@ -1194,6 +1220,12 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
             </span>
           )}
           {room && <span className="pill b live">● {room.code}</span>}
+          {/* used to anchor the right edge of the now-removed timeframe
+              strip below the chart; the chart's own header carries
+              timeframe switching now (see handleIntervalChanged), so
+              this rides along up here instead. */}
+          <button className="btn ghost" style={{ padding: "6px 9px", fontSize: 12.5 }}
+            onClick={() => setHelpOpen(true)} title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
           <button className="btn ghost" onClick={onToggleTheme} style={{ padding: "6px 9px" }} aria-label="Toggle theme">
             <Svg s={15}>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
           </button>
@@ -1233,20 +1265,6 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
           </span>
         </div>
       </header>
-
-      {/* ================= timeframe strip =================
-          Indicators, undo/redo, log/linear and zoom presets used to live
-          here too — all native to the widget's own toolbar/legend now. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 3, padding: "6px 14px",
-        borderBottom: "1px solid var(--border)", background: "var(--surface)", flexWrap: "wrap", flexShrink: 0 }}>
-        {availIntervals.map((i) => (
-          <button key={i.id} className={"btn ghost " + (interval === i.id ? "on" : "")}
-            style={{ padding: "5px 11px", fontSize: 12.5 }} disabled={!canControl}
-            onClick={() => switchInterval(i.id)}>{i.label}</button>
-        ))}
-        <button className="btn ghost" style={{ padding: "5px 10px", fontSize: 12.5, marginLeft: "auto" }}
-          onClick={() => setHelpOpen(true)} title="Keyboard shortcuts">?</button>
-      </div>
 
       {/* challenge banner */}
       {challenge && (
@@ -1307,9 +1325,10 @@ export default function Simulator({ meta, account, theme, T, tags, onExit, onSav
               ) : (
                 <TVAdvancedChart
                   symbol={symbol} interval={IV_TO_TV_RES[interval] || "30"} theme={theme}
-                  startMs={chartStartRef.current} canDraw={canControl}
+                  startMs={chartStartRef.current} canDraw={canControl} sessionName={meta.name}
                   onReady={handleReady} onBar={handleBar} onCursor={handleCursor}
                   onState={handleReplayState} onDrawingsChanged={handleDrawingsChanged}
+                  onIntervalChanged={handleIntervalChanged}
                   height="100%"
                 />
               )}

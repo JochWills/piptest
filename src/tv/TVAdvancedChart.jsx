@@ -138,8 +138,15 @@ export default function TVAdvancedChart({
   onDrawingsChanged,// () => void     — for room sync
   onState,          // (state) => void — { playing, atEnd, stepMs, covered, earliest }; fires when the
                      // replay controller's own state changes, including reaching the end of data on its own
+  onIntervalChanged,// (tvResolution) => void — the chart's own native resolution control changed the
+                     // timeframe directly (PipTest has no button row of its own for this any more);
+                     // a raw TV resolution string ("60", not "1h") since the caller already knows how
+                     // to map that back, same as the interval/startMs props coming in the other way
   canDraw = true,   // false for a room viewer — hides the drawing toolbar entirely rather than
                      // just disabling PipTest's own UI around it, since drawing is now the library's
+  sessionName,      // shown as a plain label in the chart's own header — see the headerReady block
+                     // below. Read once at mount; PipTest has no way to rename a session mid-play,
+                     // so there's nothing to keep this in sync with after that.
   height = 520,
 }) {
   const boxRef = useRef(null);
@@ -148,8 +155,8 @@ export default function TVAdvancedChart({
   const status = useLibrary();
   const [err, setErr] = useState("");
 
-  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady, onState });
-  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady, onState };
+  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged });
+  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged };
 
   useEffect(() => {
     if (status !== "ready" || !boxRef.current) return;
@@ -213,7 +220,12 @@ export default function TVAdvancedChart({
            session that already accumulated several before this line
            existed.) */
         "create_volume_indicator_by_default",
-        ...(canDraw ? [] : ["left_toolbar"]),
+        /* header_resolutions travels with left_toolbar here rather than
+           living its own life: a room viewer isn't meant to be able to
+           steer the shared chart at all, and letting them switch their
+           own local resolution here would be exactly that, just through
+           a different control than the one already locked down. */
+        ...(canDraw ? [] : ["left_toolbar", "header_resolutions"]),
       ],
       enabled_features: [
         "seconds_resolution",
@@ -221,7 +233,7 @@ export default function TVAdvancedChart({
         "chart_property_page_trading",
       ],
       overrides: {
-        "paneProperties.background": theme === "dark" ? "#171A21" : "#FFFFFF",
+        "paneProperties.background": theme === "dark" ? "#161A21" : "#FFFFFF",
         "paneProperties.backgroundType": "solid",
         "mainSeriesProperties.candleStyle.upColor": theme === "dark" ? "#22C55E" : "#16A34A",
         "mainSeriesProperties.candleStyle.downColor": theme === "dark" ? "#EF4444" : "#DC2626",
@@ -234,6 +246,60 @@ export default function TVAdvancedChart({
 
     widgetRef.current = widget;
 
+    /* PipTest's own header used to carry the session name; now that
+       timeframe switching lives in the library's own toolbar (see
+       Simulator's handleIntervalChanged), the name rides along there
+       too rather than being the one thing left behind in a bar that
+       otherwise only ever showed market info. createButton's a plain
+       HTMLElement handle, not a React node — styled by hand here to
+       read as a label, not one of the library's own icon buttons, and
+       inert (no click handler) since it's not standing in for the
+       session-switcher shortcut the old spot doubled as. Cleanup is
+       just "the whole widget goes away" (below) — nothing extra to
+       remove on its own. */
+    if (sessionName) {
+      widget.headerReady().then(() => {
+        if (dead) return;
+        const btn = widget.createButton({ align: "right" });
+        btn.textContent = sessionName;
+        btn.title = sessionName;
+        btn.style.cursor = "default";
+        btn.style.opacity = "1";
+        btn.style.fontWeight = "600";
+        btn.style.maxWidth = "180px";
+        btn.style.overflow = "hidden";
+        btn.style.textOverflow = "ellipsis";
+        btn.style.whiteSpace = "nowrap";
+        /* align: "right" drops it in at the *end* of the right-hand
+           row — after settings/fullscreen/screenshot, right at the
+           bar's outer edge — and the library exposes nothing finer
+           than that. The toolbar row is a flex container of
+           [separator, group] pairs either side of one flexible
+           spacer (class starting "fill-") that's what actually
+           divides "left-aligned" from "right-aligned"; everything
+           after it is the icon cluster, ending with ours. Moving our
+           own [separator, group] pair to right after that spacer
+           — instead of trying to reorder around library-internal
+           siblings some other way — puts it before the icon cluster
+           while leaving their own separator with them, so there's
+           still a clean divider on each side of it. Every class name
+           here is the library's own generated one and could change
+           with a version bump; if the lookup ever comes up empty this
+           just leaves the label at the end of the bar rather than
+           throwing. */
+        try {
+          const group = btn.parentElement.parentElement;
+          const row = group.parentElement;
+          const fill = row.querySelector('[class*="fill-"]');
+          const ourSeparator = group.previousElementSibling;
+          if (fill && ourSeparator) {
+            row.insertBefore(ourSeparator, fill.nextSibling);
+            row.insertBefore(group, ourSeparator.nextSibling);
+          }
+        } catch (e) {}
+      });
+    }
+
     widget.onChartReady(() => {
       if (dead) return;
       const chart = widget.activeChart();
@@ -245,6 +311,13 @@ export default function TVAdvancedChart({
       const bareSymbol = () => chart.symbol().split(":").pop();
       chart.onIntervalChanged().subscribe(null, (res) => {
         replay.setMarket(bareSymbol(), res);
+        /* fires for every resolution change, including the one Simulator
+           itself triggers via chart.setResolution — either to commit a
+           switch that started here, or to snap back after the caller
+           declined one. Simulator's own handler no-ops on the second
+           case (its interval-unchanged guard), so this doesn't loop or
+           re-prompt. */
+        if (!dead) cbs.current.onIntervalChanged && cbs.current.onIntervalChanged(res);
       });
       chart.onSymbolChanged().subscribe(null, () => {
         replay.setMarket(bareSymbol(), chart.resolution());

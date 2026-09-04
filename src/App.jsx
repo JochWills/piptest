@@ -5,6 +5,7 @@ import Shell from "./components/Shell.jsx";
 import Landing from "./pages/Landing.jsx";
 import Auth from "./pages/Auth.jsx";
 import Reset from "./pages/Reset.jsx";
+import Legal from "./pages/Legal.jsx";
 /* Lazy: everything behind the auth gate, so a first-time visitor on
    Landing (the default route, and the one conversion actually depends
    on) never downloads the trading engine, room sync, journal/analytics
@@ -30,7 +31,7 @@ import { fmtShort, uid } from "./lib/trading.js";
    development and the current deploy keep working.
    ============================================================ */
 
-const ROUTES = ["home", "auth", "reset", "sim", "dashboard", "journal", "analytics", "settings"];
+const ROUTES = ["home", "auth", "reset", "privacy", "terms", "sim", "dashboard", "journal", "analytics", "settings"];
 
 const parseHash = () => {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
@@ -351,6 +352,14 @@ export default function App() {
         onDone={() => { setAuthMode("signin"); go("auth"); }}
         onBack={() => { setAuthMode("signin"); go("auth"); }} />
     );
+  }
+
+  /* Same reasoning as reset: readable whether or not anyone's signed
+     in, so this has to come before the auth gate too — otherwise a
+     logged-out visitor hitting #/privacy would get bounced to the
+     sign-in screen instead of the policy they came to read. */
+  if (route.page === "privacy" || route.page === "terms") {
+    return wrap(<Legal kind={route.page} onBack={() => go("")} onNav={go} />);
   }
 
   /* `!account` alone would also mean "still finding out" during the

@@ -179,7 +179,12 @@ export default function Auth({ mode = "signup", onSignedIn, onBack, onSwitch, do
         {isSignup && (
           <p className="sm mut" style={{ textAlign: "center", marginTop: 18, lineHeight: 1.6, maxWidth: 380, margin: "18px auto 0" }}>
             By creating an account you accept that PipTest is a practice tool — simulated results
-            are not a prediction of live performance.
+            are not a prediction of live performance — and agree to our{" "}
+            {/* new tab, not onNav: this swaps the whole page and would
+                otherwise throw away whatever's already typed into the
+                form above */}
+            <a href="#/terms" target="_blank" rel="noopener noreferrer" className="link">Terms</a>{" "}
+            and <a href="#/privacy" target="_blank" rel="noopener noreferrer" className="link">Privacy Policy</a>.
           </p>
         )}
       </div>

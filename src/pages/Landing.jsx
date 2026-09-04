@@ -291,6 +291,8 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
           <div style={{ marginLeft: "auto", display: "flex", gap: 18 }} className="sm mut">
             <NavLink to="features">Features</NavLink>
             <NavLink to="faq">FAQ</NavLink>
+            <a onClick={() => onNav("privacy")} className="sm mut" style={{ cursor: "pointer" }}>Privacy</a>
+            <a onClick={() => onNav("terms")} className="sm mut" style={{ cursor: "pointer" }}>Terms</a>
           </div>
         </div>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 20px 30px" }}>
