@@ -80,6 +80,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   /* ---------- trading ---------- */
   const [trade, setTrade] = useState(null);
   const [trades, setTrades] = useState([]);
+  /* A room guest's mirror of the HOST's current trade — see
+     canTrade below and the "trade mirror" section further down for
+     why this can't just be `trade` itself. Reset whenever the room
+     changes so a stale trade from a previous room can't linger. */
+  const [hostTrade, setHostTrade] = useState(null);
   const [form, setForm] = useState({ dir: "long", entry: "", stop: "", target: "", riskPct: "1.0" });
   const [formErr, setFormErr] = useState("");
   const [notes, setNotes] = useState("");
@@ -166,9 +171,14 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const isHost = room && room.participants?.[account.handle]?.role === "host";
   /* Sharing a session is view-only: guests (viewer or promoted editor)
      watch and, if promoted, can draw/drive playback too, but trading
-     stays with the host — no order ticket, no trade actions, nothing
-     to keep individually in sync. Solo (no room) always trades. */
+     stays with the host — no order ticket, no trade actions of their
+     own. Solo (no room) always trades. A guest's chart/ticket/blotter
+     still needs to reflect the host's trade though (see hostTrade and
+     the "trade mirror" section below) — displayTrade is "whichever
+     trade is actually mine to look at": my own when I can trade,
+     otherwise the host's mirrored copy. */
   const canTrade = !room || isHost;
+  const displayTrade = canTrade ? trade : hostTrade;
 
   /* the widget only reads canDraw at mount, so a role change (promoted
      or demoted mid-session) has to remount it — same tradeoff as an
@@ -198,7 +208,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const startBalance = meta.startBalance || START_BALANCE;
   const stats = useMemo(() => computeStats(trades, startBalance), [trades, startBalance]);
   const equity = stats.equity;
-  const unreal = openPnl(trade, price);
+  const unreal = openPnl(displayTrade, price);
   const chg = cur && prevCloseRef.current != null ? cur.c - prevCloseRef.current : 0;
   const chgPct = cur && prevCloseRef.current ? (chg / prevCloseRef.current) * 100 : 0;
   const challenge = useMemo(() => evaluateChallenge(trades, meta.challenge, startBalance), [trades, meta.challenge, startBalance]);
@@ -349,7 +359,13 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
         setTrades((list) => [...tagged.slice().reverse(), ...list]);
         onTradesClosed && onTradesClosed(tagged);
       }
-      if (t1 !== t0) setTrade(t1);
+      if (t1 !== t0) {
+        setTrade(t1);
+        /* a stop/target hit during play is the one trade transition
+           with no button click behind it anywhere else in this file
+           to hang a broadcast off — this is the only place it happens. */
+        broadcastTradeRef.current?.(t1, closed.length ? closed : undefined);
+      }
     }
   }, [onTradesClosed, meta.id]);
 
@@ -388,11 +404,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const closeNow = () => {
     const t = tradeRef.current;
     if (!t || !price) return;
-    if (t.status === "watching") { setTrade(null); return; }
+    if (t.status === "watching") { setTrade(null); broadcastTrade(null); return; }
     const rec = { ...bookTrade(t, price, "manual", cur?.t), sessionId: meta.id };
     setTrades((l) => [rec, ...l]);
     onTradesClosed && onTradesClosed([rec]);
     setTrade(null);
+    broadcastTrade(null, [rec]);
   };
 
   const arm = (atMarket) => {
@@ -401,12 +418,24 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     const errs = validateSetup({ dir: form.dir, entry: e, stop: form.stop, target: form.target, riskPct: form.riskPct, equity, price });
     if (errs.length) { setFormErr(errs[0]); return; }
     setFormErr("");
-    setTrade(buildSetup({ ...form, entry: e, equity, symbol, interval, note: "", atMarket, ts: cur?.t }));
+    const t = buildSetup({ ...form, entry: e, equity, symbol, interval, note: "", atMarket, ts: cur?.t });
+    setTrade(t);
+    broadcastTrade(t);
   };
 
   const moveStopToBE = () => {
-    setTrade((t) => (t && t.status === "open" ? { ...t, stop: t.entry } : t));
+    setTrade((t) => {
+      const next = t && t.status === "open" ? { ...t, stop: t.entry } : t;
+      if (next !== t) broadcastTrade(next);
+      return next;
+    });
   };
+
+  /* Cancelling a resting order or discarding an open position without
+     booking it — distinct from closeNow, which always books a record
+     for an open position. Either way the room mirror needs to hear
+     about it, same as every other trade transition here. */
+  const cancelTrade = () => { setTrade(null); broadcastTrade(null); };
 
   /* Timeframe only — the market itself is chosen once, when the session
      is created (see Dashboard's "Market" field), and fixed for its whole
@@ -592,19 +621,21 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
 
   /* ================= trade zones =================
      Entry/stop/target as three shapes via the library's own shape API,
-     replacing the hand-drawn canvas rectangles ReplayChart used to paint. */
+     replacing the hand-drawn canvas rectangles ReplayChart used to paint.
+     Keyed off displayTrade, not trade directly, so a room guest's chart
+     draws the HOST's zones too — see displayTrade's own comment above. */
   const zoneShapesRef = useRef([]);
   useEffect(() => {
     const ctl = chartCtlRef.current;
     if (!ctl) return;
     for (const id of zoneShapesRef.current) ctl.removeShape(id);
     zoneShapesRef.current = [];
-    if (!trade) return;
-    zoneShapesRef.current.push(ctl.drawZone({ price: trade.entry, color: T.brand,
-      text: `${trade.status === "open" ? "Entry" : "Limit"} ${fmtPrice(trade.entry)}` }));
-    if (trade.stop != null) zoneShapesRef.current.push(ctl.drawZone({ price: trade.stop, color: T.down, text: `Stop ${fmtPrice(trade.stop)}` }));
-    if (trade.target != null) zoneShapesRef.current.push(ctl.drawZone({ price: trade.target, color: T.up, text: `Target ${fmtPrice(trade.target)}` }));
-  }, [trade, chartReady]); // eslint-disable-line
+    if (!displayTrade) return;
+    zoneShapesRef.current.push(ctl.drawZone({ price: displayTrade.entry, color: T.brand,
+      text: `${displayTrade.status === "open" ? "Entry" : "Limit"} ${fmtPrice(displayTrade.entry)}` }));
+    if (displayTrade.stop != null) zoneShapesRef.current.push(ctl.drawZone({ price: displayTrade.stop, color: T.down, text: `Stop ${fmtPrice(displayTrade.stop)}` }));
+    if (displayTrade.target != null) zoneShapesRef.current.push(ctl.drawZone({ price: displayTrade.target, color: T.up, text: `Target ${fmtPrice(displayTrade.target)}` }));
+  }, [displayTrade, chartReady]); // eslint-disable-line
 
   /* ================= autosave =================
      `layout` is the widget's own save() snapshot — drawings, indicators
@@ -689,6 +720,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     ];
     if (extra.layout !== undefined) patches.push({ path: ["layout"], value: extra.layout });
     if (extra.drawings !== undefined) patches.push({ path: ["drawings"], value: extra.drawings });
+    if (extra.trade !== undefined) patches.push({ path: ["trade"], value: extra.trade });
+    if (extra.closed?.length) patches.push({ path: ["closedTrades"], append: extra.closed });
     const merged = await data.roomPatch(room.code, patches);
     if (merged) setRoom(merged);
   }, [room, canControl, symbol, interval, cursor, playing, stepId, account.handle]);
@@ -738,6 +771,30 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      actually hosting/co-editing a room. */
   const pushRoomRef = useRef(pushRoom);
   useEffect(() => { pushRoomRef.current = pushRoom; }, [pushRoom]);
+
+  /* ================= trade mirror (rooms) =================
+     Only the host ever trades (see canTrade above), which used to
+     mean a guest's `trade` stayed null forever — no entry/stop/target
+     lines, no live position, and a closed trade never reached their
+     blotter at all, even though it closed right in front of them.
+     Called at every point the host's own `trade` actually changes
+     (armed, stop moved, cancelled, closed), same "durable poll, fast
+     WS" split as everything else in a room: the socket send is what a
+     connected guest sees instantly, pushRoom's forced patch is what a
+     late joiner or a reconnect catches up from afterwards. `closed`
+     is a separate, explicit argument rather than something inferred
+     from the trade transition — going to null covers both "cancelled"
+     and "closed", and only the caller booking the trade actually has
+     the closed record to hand. */
+  const broadcastTrade = useCallback((nextTrade, closed) => {
+    if (!room || !isHost) return;
+    const msg = { type: "trade", trade: nextTrade };
+    if (closed?.length) msg.closed = closed;
+    roomSocketRef.current?.send(msg);
+    pushRoom({ trade: nextTrade, closed, force: true });
+  }, [room, isHost, pushRoom]);
+  const broadcastTradeRef = useRef(broadcastTrade);
+  useEffect(() => { broadcastTradeRef.current = broadcastTrade; }, [broadcastTrade]);
 
   useEffect(() => {
     if (!room?.code || !canControl || !chartReady || !API_ENABLED) return;
@@ -826,6 +883,23 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
            sync, nothing to do" below confirms against immediately. */
         lastKnownDocCursorRef.current = doc.cursor;
 
+        /* trade/closedTrades are the durable half of the trade mirror
+           (see broadcastTrade) — this is what a guest who just joined,
+           or was disconnected when the WS message went out, catches up
+           from. doc.closedTrades is the FULL history every time, not a
+           delta, so dedupe against what's already here rather than
+           reapplying it wholesale on every ~1.5s tick. */
+        if (!canTrade) {
+          if ("trade" in doc) setHostTrade(doc.trade ?? null);
+          if (Array.isArray(doc.closedTrades) && doc.closedTrades.length) {
+            setTrades((list) => {
+              const known = new Set(list.map((t) => t.id));
+              const fresh = doc.closedTrades.filter((t) => !known.has(t.id));
+              return fresh.length ? [...fresh.slice().reverse(), ...list] : list;
+            });
+          }
+        }
+
         if (marketChanged || !chartCtlRef.current) {
           /* Either a real remount is about to happen anyway (symbol/
              interval just changed — TVAdvancedChart remounts on those
@@ -903,13 +977,29 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      Applies host/editor-originated bar/market/play/pause/step
      messages — only for a pure viewer (canControl true means this
      side IS a source of truth, not a follower; see handleBar's own
-     broadcast guard for the other half of that split). Defined fresh
-     every render, not memoized, and stashed in a ref the connect
-     effect below reads from — so it always sees the latest
+     broadcast guard for the other half of that split) — plus the
+     host's trade mirror, which every non-trading participant needs
+     regardless of that split (see the trade case below). Defined
+     fresh every render, not memoized, and stashed in a ref the
+     connect effect below reads from — so it always sees the latest
      symbol/interval/chartCtlRef without the effect itself needing to
      tear down and reconnect the socket whenever any of those change. */
   const handleRoomSocketMessage = (msg) => {
-    if (canControl || !chartCtlRef.current) return;
+    if (!chartCtlRef.current) return;
+    /* trade is gated on canTrade, not canControl — an editor can't
+       trade any more than a plain viewer can (see canTrade above),
+       so both need the host's mirror, even though an editor IS a
+       control source for everything else here. */
+    if (msg.type === "trade") {
+      if (canTrade) return; // the host never applies an echo of their own trade
+      if ("trade" in msg) setHostTrade(msg.trade);
+      if (msg.closed?.length) {
+        const ids = new Set(msg.closed.map((c) => c.id));
+        setTrades((list) => [...msg.closed.slice().reverse(), ...list.filter((t) => !ids.has(t.id))]);
+      }
+      return;
+    }
+    if (canControl) return;
     switch (msg.type) {
       case "bar":
         chartCtlRef.current.replay.applyRemoteBar(
@@ -942,6 +1032,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   };
   const roomMsgHandlerRef = useRef(handleRoomSocketMessage);
   roomMsgHandlerRef.current = handleRoomSocketMessage;
+
+  /* a stale mirror from whatever room this client was in before
+     (or from before joining any room at all) has no business
+     surviving into a new one */
+  useEffect(() => { setHostTrade(null); }, [room?.code]);
 
   useEffect(() => {
     if (!room?.code || !API_ENABLED) { setWsLive(false); return; }
@@ -1391,12 +1486,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   </table>
                 ))}
 
-              {tab === "orders" && (trade?.status === "watching"
-                ? <SingleRow trade={trade} symbol={symbol} kind="order" onCancel={() => setTrade(null)} />
-                : <Empty title="No working orders" body="Arm a setup to place a resting order at your entry price." />)}
+              {tab === "orders" && (displayTrade?.status === "watching"
+                ? <SingleRow trade={displayTrade} symbol={symbol} kind="order" onCancel={cancelTrade} readOnly={!canTrade} />
+                : <Empty title="No working orders" body={canTrade ? "Arm a setup to place a resting order at your entry price." : "Nothing working right now."} />)}
 
-              {tab === "positions" && (trade?.status === "open"
-                ? <SingleRow trade={trade} symbol={symbol} kind="position" unreal={unreal} onClose={closeNow} onBE={moveStopToBE} />
+              {tab === "positions" && (displayTrade?.status === "open"
+                ? <SingleRow trade={displayTrade} symbol={symbol} kind="position" unreal={unreal} onClose={closeNow} onBE={moveStopToBE} readOnly={!canTrade} />
                 : <Empty title="No open position" />)}
 
               {tab === "notes" && (
@@ -1468,12 +1563,17 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             <div className="cap" style={{ marginBottom: 12 }}>Setup</div>
 
             {!canTrade ? (
-              <div className="sm mut" style={{ lineHeight: 1.6, padding: "6px 2px" }}>
-                You're viewing this session — only the host trades here.
-              </div>
+              displayTrade ? (
+                <OpenTicket trade={displayTrade} price={price} unreal={unreal} readOnly />
+              ) : (
+                <div className="sm mut" style={{ lineHeight: 1.6, padding: "6px 2px" }}>
+                  You're viewing this session — only the host trades here. Their setup will show up
+                  here live once they arm one.
+                </div>
+              )
             ) : trade ? (
               <OpenTicket trade={trade} price={price} unreal={unreal} onClose={closeNow} onBE={moveStopToBE}
-                onCancel={() => setTrade(null)} />
+                onCancel={cancelTrade} />
             ) : (
               <>
                 <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
@@ -1601,7 +1701,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
 }
 
 /* ---------- pieces ---------- */
-function OpenTicket({ trade, price, unreal, onClose, onBE, onCancel }) {
+function OpenTicket({ trade, price, unreal, onClose, onBE, onCancel, readOnly }) {
   const rr = trade.target != null ? Math.abs(trade.target - trade.entry) / Math.abs(trade.entry - trade.stop) : null;
   const rNow = trade.riskAmt ? unreal / trade.riskAmt : 0;
   return (
@@ -1629,22 +1729,29 @@ function OpenTicket({ trade, price, unreal, onClose, onBE, onCancel }) {
           </span>
         </div>
       )}
-      <div style={{ display: "grid", gap: 7, marginTop: 12 }}>
-        {trade.status === "open" && (
-          <>
-            <button className="btn pri" onClick={onClose}>Close at market</button>
-            <button className="btn" onClick={onBE} disabled={trade.stop === trade.entry}>
-              {trade.stop === trade.entry ? "Stop at breakeven" : "Move stop to breakeven"}
-            </button>
-          </>
-        )}
-        <button className="btn" onClick={onCancel}>{trade.status === "open" ? "Discard position" : "Cancel order"}</button>
-      </div>
+      {!readOnly && (
+        <div style={{ display: "grid", gap: 7, marginTop: 12 }}>
+          {trade.status === "open" && (
+            <>
+              <button className="btn pri" onClick={onClose}>Close at market</button>
+              <button className="btn" onClick={onBE} disabled={trade.stop === trade.entry}>
+                {trade.stop === trade.entry ? "Stop at breakeven" : "Move stop to breakeven"}
+              </button>
+            </>
+          )}
+          <button className="btn" onClick={onCancel}>{trade.status === "open" ? "Discard position" : "Cancel order"}</button>
+        </div>
+      )}
+      {readOnly && (
+        <div className="sm mut" style={{ marginTop: 12, lineHeight: 1.5 }}>
+          The host's setup — you're watching, not trading.
+        </div>
+      )}
     </>
   );
 }
 
-function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel }) {
+function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel, readOnly }) {
   const s = SYMBOLS.find((x) => x.id === symbol);
   return (
     <table className="tbl">
@@ -1671,7 +1778,7 @@ function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel }) {
                 {fmtSigned(unreal)} · {fmtR(trade.riskAmt ? unreal / trade.riskAmt : 0)}
               </td></>}
           <td>
-            {kind === "order"
+            {readOnly ? null : kind === "order"
               ? <button className="btn ghost" style={{ padding: "3px 9px", fontSize: 12 }} onClick={onCancel}>Cancel</button>
               : <span style={{ display: "flex", gap: 5 }}>
                   <button className="btn ghost" style={{ padding: "3px 9px", fontSize: 12 }} onClick={onBE}>BE</button>

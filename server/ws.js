@@ -33,7 +33,12 @@ function originAllowed(origin) {
   return origins.includes(origin);
 }
 
-const CONTROL_TYPES = new Set(["bar", "market", "play", "pause", "step"]);
+/* "trade" rides the same relay: only ever sent by a host/editor
+   (client-side gate — see broadcastTrade in Simulator.jsx), carrying
+   their current trade and/or a just-closed record, so a viewer's
+   ticket, chart zones and blotter can mirror it live instead of only
+   catching up once it lands in the room doc on the next poll. */
+const CONTROL_TYPES = new Set(["bar", "market", "play", "pause", "step", "trade"]);
 const AUTH_TIMEOUT_MS = 5000;
 const ROLE_REFRESH_MS = 5000;
 const MSG_RATE_LIMIT = 40;      // per socket, per second — generous above the ~4Hz replay tick
