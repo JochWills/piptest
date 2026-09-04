@@ -615,6 +615,25 @@ router.delete("/admin/users/:id", requireAuth, requireAdmin, async (req, res) =>
   res.json({ ok: true });
 });
 
+/* Trades left behind by a session deleted before session_id was tracked
+   (see the backfill in db.js's migrate()) — anything still unmatched
+   after that backfill has no surviving session to belong to. Read-only:
+   just a count to show before anyone commits to deleting them. */
+router.get("/admin/orphaned-trades", requireAuth, requireAdmin, async (_req, res) => {
+  const { rows } = await q(
+    `SELECT count(*)::int AS n, coalesce(sum(pnl),0)::float AS pnl
+       FROM trades WHERE session_id IS NULL`);
+  res.json({ count: rows[0].n, pnl: rows[0].pnl });
+});
+
+/* No undo — same reasoning as the account-delete route above, hence the
+   console asking for a typed confirmation before calling this too. */
+router.post("/admin/orphaned-trades/purge", requireAuth, requireAdmin, async (req, res) => {
+  const r = await q(`DELETE FROM trades WHERE session_id IS NULL`);
+  await logEvent(req.user.id, "admin_purge_orphaned_trades", { count: r.rowCount }, reqIp(req));
+  res.json({ deleted: r.rowCount });
+});
+
 router.get("/admin/mail", requireAuth, requireAdmin, async (_req, res) => {
   const { rows } = await q(
     `SELECT pr.created_at, pr.expires_at, pr.used_at, u.handle, u.email

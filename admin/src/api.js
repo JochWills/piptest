@@ -68,5 +68,7 @@ export const api = {
   patchUser:  (id, b) => raw(`/api/admin/users/${id}`, { method: "PATCH", body: b }),
   deleteUser: (id)    => raw(`/api/admin/users/${id}`, { method: "DELETE" }),
   events:     (n = 80)=> raw(`/api/admin/events?limit=${n}`),
+  orphanedTrades:      () => raw("/api/admin/orphaned-trades"),
+  purgeOrphanedTrades: () => raw("/api/admin/orphaned-trades/purge", { method: "POST" }),
   health:     ()      => fetch(BASE + "/healthz").then((r) => r.json()).catch(() => ({ ok: false })),
 };

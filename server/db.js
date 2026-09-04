@@ -142,6 +142,26 @@ export async function migrate() {
   /* added after the first release, so bring existing tables forward */
   await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar text");
   await q("ALTER TABLE bt_sessions ADD COLUMN IF NOT EXISTS start_balance integer NOT NULL DEFAULT 10000");
+
+  /* Backfill trades.session_id for rows created before the client ever
+     sent one (every trade before this existed). session_id has no FK —
+     a trade can't be matched back to its session by id alone, but each
+     session's own autosaved `state.trades` is a copy of every trade
+     closed inside it, so a trade whose id shows up there really did
+     happen in that session. Anything that still has no match after this
+     — because no *surviving* session claims it — belongs to a session
+     that's since been deleted; see the /admin/orphaned-trades routes for
+     what cleans those up. Scoped to session_id IS NULL and safe to run
+     on every boot: once a trade is tagged this never touches it again. */
+  await q(`
+    UPDATE trades t
+    SET session_id = s.id
+    FROM bt_sessions s, jsonb_array_elements(coalesce(s.state->'trades', '[]'::jsonb)) elem
+    WHERE t.session_id IS NULL
+      AND s.user_id = t.user_id
+      AND elem->>'id' = t.id
+  `);
+
   console.log("schema ready");
 }
 

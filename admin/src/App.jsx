@@ -286,6 +286,76 @@ function Overview() {
           Storage is an estimate from row counts — check Supabase → Settings → Usage for the real figure.
         </p>
       </div>
+
+      <OrphanedTrades />
+    </div>
+  );
+}
+
+/* ---------------- orphaned trades ----------------
+   Sessions deleted before trades.session_id was tracked left their
+   trades behind — invisible in the app itself (nothing points to a
+   session that no longer exists), but still counted in Dashboard,
+   Journal and Analytics totals for whoever owns them. The server
+   backfills session_id for anything it can still match to a session
+   that's still around (see migrate() in db.js); what's left here is
+   only the genuinely orphaned remainder, with no surviving session to
+   belong to. Purge is a real DELETE with no undo, so it's typed-confirm
+   like the account-delete panel below, not a single click. */
+function OrphanedTrades() {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+
+  const load = useCallback(async () => {
+    try { setD(await api.orphanedTrades()); } catch (e) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const purge = async () => {
+    setBusy(true);
+    try {
+      const r = await api.purgeOrphanedTrades();
+      setDone(r.deleted);
+      setConfirmText("");
+      await load();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
+  if (err) return <div className="card" style={{ padding: 20, color: "var(--down)" }}>{err}</div>;
+  if (!d) return null;
+
+  if (d.count === 0) {
+    return (
+      <div className="card" style={{ padding: 20 }}>
+        <div className="cap" style={{ marginBottom: 6 }}>Orphaned trades</div>
+        <p className="sm mut">
+          None found{done != null ? ` — ${done} cleaned up just now.` : ". Every trade belongs to a session that still exists."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ padding: 20, borderColor: "color-mix(in srgb,var(--down) 40%,var(--border))" }}>
+      <div className="cap" style={{ marginBottom: 8, color: "var(--down)" }}>Orphaned trades</div>
+      <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 12 }}>
+        <b style={{ color: "var(--ink)" }}>{d.count}</b> trade{d.count === 1 ? "" : "s"}
+        {" "}({d.pnl >= 0 ? "+" : ""}{d.pnl.toFixed(2)} combined P/L) left over from sessions that have
+        since been deleted — they still count toward the owning account's Dashboard, Journal and
+        Analytics totals since there's no session left to exclude them by. There's no undo. Type{" "}
+        <b style={{ color: "var(--ink)" }}>DELETE</b> to remove them.
+      </p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input className="in" style={{ maxWidth: 200 }} value={confirmText}
+          placeholder="DELETE" onChange={(e) => setConfirmText(e.target.value)} />
+        <button className="btn danger" disabled={busy || confirmText !== "DELETE"} onClick={purge}>
+          Delete {d.count} trade{d.count === 1 ? "" : "s"}
+        </button>
+      </div>
     </div>
   );
 }
