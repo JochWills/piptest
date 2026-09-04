@@ -853,9 +853,16 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       if (!alive) return;
       if (!doc) {
         /* a failed fetch also comes back empty, so don't treat one miss as
-           "closed" — only act once it's been gone for a few polls straight */
+           "closed" — only act once it's been gone for a few polls straight.
+           Never reached for the host: closeRoom clears their own `room`
+           synchronously, which stops this poll before it could ever see
+           its own room go missing (see closeRoom/kickParticipant below) —
+           so this is always a guest finding out the host ended it, and
+           there's nothing left here worth sticking around for. */
         if (++missRef.current >= 3) {
-          setRoom(null); setChatOpen(false); setRoomMsg("The host closed this room.");
+          setRoom(null); setChatOpen(false);
+          store.del(K.roomLink(meta.id));
+          onExit();
         }
         return;
       }
@@ -877,9 +884,9 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
            instead (the separate !doc branch above), and nothing else
            ever touches the host's own entry. */
         if (!doc.participants?.[account.handle]) {
-          setRoom(null); setRoomMsg("The host removed you from this room.");
-          setChatOpen(false);
+          setRoom(null); setChatOpen(false);
           store.del(K.roomLink(meta.id));
+          onExit();
           return;
         }
         setRoom(doc);
@@ -1202,6 +1209,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     }
     setRoom(null); setRoomMsg(""); setChatOpen(false);
     store.del(K.roomLink(meta.id));
+    onExit(); // guest-only button (see RoomPanel) — nothing here left to watch, back to the dashboard
   };
   /* host-only: ends the room for everyone and wipes the kv row — chat
      messages live inside that same doc, so they're gone with it */
