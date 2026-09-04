@@ -1,8 +1,126 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic } from "../components/ui.jsx";
 import { SYMBOLS, INTERVALS } from "../theme.js";
 import { computeStats, fmtSigned, fmtMoney, fmtShort, fmtR, uid, START_BALANCE, CHALLENGE_PRESETS } from "../lib/trading.js";
+import { store, K } from "../lib/store.js";
+
+/* ---------- asset picker ----------
+   A searchable, category-filtered combobox for the "Market" field —
+   a plain <select> stops being browsable once there's more than a
+   handful of options across several asset classes, so this trades it
+   for a search box + class pills + grouped results, the same shape as
+   the asset pickers on other platforms. */
+const RECENT_SYMBOLS_MAX = 5;
+
+function AssetRow({ s, active, onPick }) {
+  return (
+    <button type="button" onClick={() => onPick(s.id)}
+      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+        padding: "8px 9px", border: "none", borderRadius: 7, cursor: "pointer", textAlign: "left",
+        font: "inherit", color: "var(--ink)", background: active ? "var(--brandSoft)" : "transparent" }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "var(--surface2)"; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}>
+      <span style={{ fontWeight: 600 }}>{s.label}</span>
+      <span className="sm mut">{s.source}</span>
+    </button>
+  );
+}
+
+function AssetPicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [cls, setCls] = useState("All");
+  const [recent, setRecent] = useState([]);
+  const rootRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { store.get(K.recentSymbols).then((r) => setRecent(r || [])); }, []);
+
+  // Outside click / Escape closes it — mousedown (not blur) so clicking a
+  // pill or a row inside the panel never races the panel's own onClick.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const classes = useMemo(() => ["All", ...new Set(SYMBOLS.map((s) => s.cls))], []);
+  const selected = SYMBOLS.find((s) => s.id === value);
+
+  const text = q.trim().toLowerCase();
+  const filtered = SYMBOLS.filter((s) =>
+    (cls === "All" || s.cls === cls) &&
+    (!text || s.id.toLowerCase().includes(text) || s.label.toLowerCase().includes(text)));
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const s of filtered) { if (!m.has(s.cls)) m.set(s.cls, []); m.get(s.cls).push(s); }
+    return [...m.entries()];
+  }, [filtered]);
+
+  // Only worth showing when it's not competing with an active search/filter.
+  const recentSymbols = !text && cls === "All"
+    ? recent.map((id) => SYMBOLS.find((s) => s.id === id)).filter(Boolean)
+    : [];
+
+  const pick = (id) => {
+    onChange(id);
+    setOpen(false); setQ("");
+    const next = [id, ...recent.filter((r) => r !== id)].slice(0, RECENT_SYMBOLS_MAX);
+    setRecent(next);
+    store.set(K.recentSymbols, next);
+  };
+  const openPicker = () => { setOpen(true); setQ(""); };
+
+  return (
+    <div ref={rootRef} style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <input ref={inputRef} className="in" style={{ paddingRight: 30 }}
+          value={open ? q : (selected?.label || "")}
+          placeholder="Type to search for assets"
+          onFocus={openPicker}
+          onChange={(e) => setQ(e.target.value)} />
+        <span aria-hidden onClick={() => (open ? setOpen(false) : (openPicker(), inputRef.current?.focus()))}
+          style={{ position: "absolute", right: 10, top: "50%", cursor: "pointer", color: "var(--muted)",
+            display: "flex", transform: `translateY(-50%) ${open ? "rotate(180deg)" : ""}` }}>
+          <Svg s={13}>{Ic.chev}</Svg>
+        </span>
+      </div>
+
+      {open && (
+        <div className="card scroll" style={{ position: "absolute", zIndex: 20, top: "calc(100% + 6px)", left: 0, right: 0,
+          maxHeight: 320, overflowY: "auto", padding: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            {classes.map((c) => (
+              <button key={c} type="button" className={"btn" + (cls === c ? " on" : "")}
+                style={{ padding: "4px 11px", fontSize: 12, borderRadius: 999 }}
+                onClick={() => setCls(c)}>{c}</button>
+            ))}
+          </div>
+
+          {recentSymbols.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div className="cap" style={{ marginBottom: 4 }}>Recently used</div>
+              {recentSymbols.map((s) => <AssetRow key={s.id} s={s} active={s.id === value} onPick={pick} />)}
+            </div>
+          )}
+
+          {groups.length === 0
+            ? <div className="sm mut" style={{ padding: "8px 4px" }}>No matching assets.</div>
+            : groups.map(([g, list]) => (
+              <div key={g} style={{ marginBottom: 10 }}>
+                <div className="cap" style={{ marginBottom: 4 }}>{g}</div>
+                {list.map((s) => <AssetRow key={s.id} s={s} active={s.id === value} onPick={pick} />)}
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Spark({ curve, h = 40, w = 240 }) {
   if (!curve || curve.length < 2) {
@@ -241,9 +359,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
              decision with no lasting effect, so this just starts every session
              on form.interval's default and leaves the real choice to the chart. */}
           <Field label="Market">
-            <select className="in" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })}>
-              {SYMBOLS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
+            <AssetPicker value={form.symbol} onChange={(id) => setForm({ ...form, symbol: id })} />
           </Field>
 
           <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
