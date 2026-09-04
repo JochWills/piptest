@@ -1095,10 +1095,17 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
        until the host happened to touch the chart again. */
     const shared = chartCtlRef.current ? await chartCtlRef.current.saveShared() : { layout: null, drawings: [] };
     const { layout, drawings } = shared;
+    /* Same reasoning as layout/drawings above, for trades: a viewer who
+       joins mid-session should see the account's whole picture — any
+       order already armed or position already open, and the full closed
+       history — not just what happens to change after the room opens.
+       Without this a guest who joined an hour into a session saw a blank
+       blotter and no ticket until the host's very next trade. */
     const doc = { code, host: account.handle, sessionId: meta.id,
       symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
-      layout, drawings, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now() };
+      layout, drawings, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now(),
+      trade, closedTrades: trades };
     if (!(await data.roomPut(code, doc))) { setRoomMsg("Couldn't open the room. Try again."); return; }
     chatSeenRef.current = 0; setChatUnread(0);
     roomSyncedRef.current = true; // the doc IS the host's own already-correct local state
