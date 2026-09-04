@@ -1,42 +1,19 @@
 /* ============================================================
-   profanity.js — light client-side chat filter
+   profanity.js — server-side profanity filter
 
-   This is a courtesy filter, not a security boundary: it runs in
-   the sender's browser, so a modified client (or a raw API call)
-   used to be able to push an unfiltered message into the room doc
-   regardless of what this caught. The actual enforcement now lives
-   server-side too — see server/profanity.js (a deliberate word-for-
-   word duplicate, not an import — see its own header comment) —
-   applied to chat text in the room PATCH route and to handle/display
-   name at registration and in account settings. This client copy
-   still matters for the instant feedback (censoring as you type,
-   before a round trip), just not as the only line of defense.
-   It catches the normal case — someone typing a slur or a swear word
-   into the box — without pretending to be moderation.
+   Mirrors src/lib/profanity.js word-for-word. Not imported from there:
+   server/ is a separately deployed service (its own package.json, its
+   own Render service) with no build step that would bundle anything
+   from src/, so a cross-boundary import would only work by accident in
+   dev and break the moment the two are deployed independently — the
+   same reasoning ws.js already uses for duplicating index.js's origin
+   allow-list rather than importing it. If the word list changes,
+   change it in both places.
 
-   Matching is whole-word and leetspeak-tolerant enough to catch
-   spaced-out or number-substituted spellings (f u c k, f4ck)
-   without flagging innocent substrings — every entry is checked
-   at a word boundary, so "classic", "scunthorpe" and "assassin"
-   are untouched.
-
-   Common inflections and misspellings (fucking, fucken, fuk, shitty,
-   retarded, …) are listed out explicitly rather than bolted on with
-   a generic suffix or fuzzy match, because a generic "+er/+ing" rule
-   turns short nouns into real words — "dick" + er = "dicker", "cock"
-   + er = "cocker" (spaniel) — and a generic edit-distance match does
-   the same to short common words at a distance of one typo.
-
-   The slur section blocks actual slur *terms*, not the neutral
-   demographic words (a religion, ethnicity, orientation) they get
-   aimed at — "jew", "black", "gay" etc. are never on this list, on
-   purpose: those are how people identify themselves, and blocking
-   the word itself censors legitimate use far more often than it
-   catches an insult built from it, without even reliably catching
-   the insult (it's the surrounding language that's hateful, not the
-   demographic word). A word that has no other use but the slur is
-   fair game; a word that doubles as someone's own name for
-   themselves is not.
+   This is the actual enforcement boundary, unlike the client copy: it
+   runs on every request regardless of what sent it (browser, modified
+   client, raw API call), so a message or a handle can't carry
+   profanity into the database no matter what wrote it.
    ============================================================ */
 
 const WORDS = [
@@ -60,8 +37,6 @@ const WORDS = [
   "retard", "retarded", "spastic", "mongoloid",
 ];
 
-/* letter -> the characters people swap in for it, so "f4ck" and
-   "f u c k" still match "fuck" */
 const LEET = { a: "a4@", e: "e3", i: "i1!", o: "o0", u: "uv" };
 
 const wordPattern = (w) =>

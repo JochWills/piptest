@@ -16,6 +16,7 @@ import {
   REFRESH_COOKIE, requireAuth, requireAdmin, reqIp, adminEmails, publicUser,
 } from "./auth.js";
 import { TWELVE_DATA_SYMBOLS, loadTwelveDataCandles } from "./twelvedata.js";
+import { hasProfaneSubstring, censor } from "./profanity.js";
 
 export const router = express.Router();
 
@@ -32,6 +33,14 @@ function checkCredentials({ email, password, name, handle }) {
     errs.push("Handle must be 3–18 characters: letters, numbers or underscores.");
   if (name !== undefined && (!name || name.trim().length < 1 || name.length > 60))
     errs.push("Enter a display name.");
+  /* A handle or display name is the one piece of free text every other
+     participant in a room is guaranteed to see, unlike a chat message
+     nobody's forced to read — rejected outright rather than censored,
+     since "j***n" as someone's own name would just look broken.
+     hasProfaneSubstring, not hasProfanity: a handle has no spaces for
+     word-boundary matching to find (see that function's own comment). */
+  if (handle && hasProfaneSubstring(handle)) errs.push("Choose a different handle.");
+  if (name && hasProfaneSubstring(name)) errs.push("Choose a different display name.");
   return errs;
 }
 
@@ -234,6 +243,12 @@ router.patch("/me", requireAuth, async (req, res) => {
   if (handle !== undefined && !HANDLE_RE.test(handle || "")) {
     return res.status(400).json({ error: "invalid", message: "Handle must be 3–18 characters: letters, numbers or underscores." });
   }
+  if (handle && hasProfaneSubstring(handle)) {
+    return res.status(400).json({ error: "invalid", message: "Choose a different handle." });
+  }
+  if (name && hasProfaneSubstring(name)) {
+    return res.status(400).json({ error: "invalid", message: "Choose a different display name." });
+  }
   if (handle) {
     const dupe = await q("SELECT 1 FROM users WHERE lower(handle)=lower($1) AND id<>$2", [handle, req.user.id]);
     if (dupe.rowCount) return res.status(409).json({ error: "taken", message: "That handle is already taken." });
@@ -435,7 +450,18 @@ router.patch("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
     if (op.remove) {
       expr = `(${expr} #- ${pathParam})`;
     } else if (op.append !== undefined) {
-      params.push(JSON.stringify(op.append));
+      /* This route otherwise has no idea it's a chat message — the merge
+         is deliberately generic, done inside Postgres from a raw path/
+         value pair (see the comment above). Chat is the one shape worth
+         recognising here: the client's own censor() (src/lib/profanity.js)
+         is a courtesy that a modified client or a raw call can skip
+         entirely, so this is the actual boundary for anything landing in
+         `messages` — see server/profanity.js. */
+      const append = op.path.length === 1 && op.path[0] === "messages" && Array.isArray(op.append)
+        ? op.append.map((m) => (m && typeof m === "object" && typeof m.text === "string")
+            ? { ...m, text: censor(m.text.slice(0, 500)) } : m)
+        : op.append;
+      params.push(JSON.stringify(append));
       expr = `jsonb_set(${expr}, ${pathParam}, COALESCE(${expr} #> ${pathParam}, '[]'::jsonb) || $${params.length}::jsonb, true)`;
     } else {
       params.push(JSON.stringify(op.value ?? null));
