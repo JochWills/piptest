@@ -223,18 +223,16 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
               onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field label="Market">
-              <select className="in" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })}>
-                {SYMBOLS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
-            </Field>
-            <Field label="Timeframe">
-              <select className="in" value={form.interval} onChange={(e) => setForm({ ...form, interval: e.target.value })}>
-                {INTERVALS.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
-              </select>
-            </Field>
-          </div>
+          {/* Timeframe used to be picked here too, but the chart itself already
+             has a full interval switcher once the session opens (see Simulator's
+             switchInterval) — asking for it again up front was a redundant
+             decision with no lasting effect, so this just starts every session
+             on form.interval's default and leaves the real choice to the chart. */}
+          <Field label="Market">
+            <select className="in" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })}>
+              {SYMBOLS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </Field>
 
           <label style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
             padding: 12, border: "1px solid var(--border)", borderRadius: 9, background: "var(--surface2)" }}>
