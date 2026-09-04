@@ -62,7 +62,7 @@ export default function Shell({ page, onNav, onHome, account, theme, onToggleThe
             <span className="shell-userinfo">
               <span className="shell-username">{account?.name || "Guest"}</span>
               <span className="shell-userplan">
-                {account?.role === "admin" ? "Admin" : account?.plan === "free" ? "Free plan" : account?.plan}
+                {account?.role === "admin" ? "Admin" : account?.plan === "free" ? "User" : account?.plan}
               </span>
             </span>
           </div>
