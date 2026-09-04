@@ -402,15 +402,49 @@ function MockScreen({ T }) {
     barElRefs.current[i][key] = el;
   };
 
-  /* Bottom-left, not top-left — the price series trends upward over
-     the reveal, so candle highs climb toward the top of the chart as
-     the loop plays; a bar sitting up there ends up with rising wicks
-     passing right behind it later in the cycle. Bottom stays clear:
-     the chart reserves real breathing room below the lowest low
-     (`lo` above), and unlike the top there's no upward trend eating
-     into it over time. */
-  const [barPos, setBarPos] = useState({ x: 26, y: H - 92 });
+  /* Top-left everywhere the card has room to spare — bottom-left only
+     once it doesn't. The price series trends upward over the reveal,
+     so candle highs climb toward the top of the chart as the loop
+     plays; on a roomy desktop-width card that's fine, there's enough
+     height that the bar and the rising candles never actually meet.
+     It's only once the card is phone-width — short in real pixels,
+     since the SVG scales down with it — that top-left runs out of
+     clearance and the bar ends up sitting over the candles. So this
+     tracks the card's own rendered width (not the viewport's — same
+     reasoning as FloatingBar's own clampToView) and switches between
+     the two only when it actually crosses that line. */
+  const MOBILE_BAR_BREAKPOINT = 640;
+  const barPosFor = (narrow) => ({ x: 26, y: narrow ? H - 92 : 24 });
+  const [barPos, setBarPos] = useState(barPosFor(false));
   const [barCollapsed, setBarCollapsed] = useState(false);
+  /* NOT derived from barPos.y — FloatingBar's own clampToView reflow
+     (see that file) rewrites pos.y to fit whatever the container's
+     ACTUAL rendered height turns out to be, which on a short mobile
+     card is nowhere near the H-92 this component asked for; comparing
+     that already-rewritten value back against a fixed threshold like
+     H/2 would read as "top" again the moment the clamp fires. Tracked
+     separately, from the same width check that chose the position in
+     the first place, so it stays right regardless of what the clamp
+     does to the pixels afterward. */
+  const [barAtBottom, setBarAtBottom] = useState(false);
+
+  useEffect(() => {
+    const el = chartWrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let narrowNow = null; // forces the first check to actually set a position
+    const check = () => {
+      const narrow = (el.clientWidth || window.innerWidth) < MOBILE_BAR_BREAKPOINT;
+      if (narrow === narrowNow) return;
+      narrowNow = narrow;
+      setBarPos(barPosFor(narrow));
+      setBarAtBottom(narrow);
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setPlayingVisual = (playing) => {
     if (playIconRef.current) playIconRef.current.style.opacity = playing ? "0" : "1";
@@ -672,11 +706,12 @@ function MockScreen({ T }) {
               fake cursor arrives. Positioned off barPos directly (same
               place the bar itself starts each cycle) rather than measured
               off the live DOM, since it only ever needs to be right for
-              that first moment. Above the bar, not below — the bar now
-              sits at the bottom of the chart, and there's no room under
-              it for anything to sit below. */}
+              that first moment. Below the bar when it's at the top
+              (room to spare underneath), above it when it's at the
+              bottom (no room below it there) — whichever side the bar
+              itself isn't crowding. */}
           <div ref={dragHintRef} className="mock-hint-bob" style={{
-            position: "absolute", left: barPos.x + 2, top: barPos.y - 38, zIndex: 96,
+            position: "absolute", left: barPos.x + 2, top: barAtBottom ? barPos.y - 38 : barPos.y + 46, zIndex: 96,
             display: "flex", alignItems: "center", gap: 6, opacity: 0, pointerEvents: "none",
             background: "var(--surface)", border: "1px solid var(--borderStrong)", borderRadius: 7,
             padding: "5px 10px 5px 8px", fontSize: 11.5, fontWeight: 500, color: "var(--muted)",
