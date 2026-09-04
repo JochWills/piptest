@@ -15,7 +15,6 @@ import Avatar from "./Avatar.jsx";
 
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: Ic.grid },
-  { id: "simulator", label: "Simulator", icon: Ic.play },
   { id: "journal",   label: "Journal",   icon: Ic.book },
   { id: "analytics", label: "Analytics", icon: Ic.chart },
   { id: "settings",  label: "Settings",  icon: Ic.gear },

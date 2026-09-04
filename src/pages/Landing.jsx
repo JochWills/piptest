@@ -96,7 +96,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
                     menu right next to it, so it's the one to drop for
                     space on mobile rather than shrinking the wordmark or
                     wrapping the row */}
-                <button className="btn pri hide-sm" onClick={() => onNav("dashboard")}>Open PipTest</button>
+                <button className="btn pri hide-sm" onClick={() => onNav("dashboard")}>Dashboard</button>
                 <span data-menu style={{ position: "relative" }}>
                   <button onClick={() => setMenu((m) => !m)} aria-label="Account menu"
                     style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",

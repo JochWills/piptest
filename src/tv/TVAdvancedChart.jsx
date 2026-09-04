@@ -232,6 +232,10 @@ export default function TVAdvancedChart({
         "use_localstorage_for_settings",
         "chart_property_page_trading",
       ],
+      loading_screen: {
+        backgroundColor: theme === "dark" ? "#161A21" : "#FFFFFF",
+        foregroundColor: theme === "dark" ? "#161A21" : "#FFFFFF",
+      },
       overrides: {
         "paneProperties.background": theme === "dark" ? "#161A21" : "#FFFFFF",
         "paneProperties.backgroundType": "solid",
@@ -620,7 +624,7 @@ export default function TVAdvancedChart({
       </Frame>
     );
   }
-  return <div ref={boxRef} style={{ width: "100%", height }} />;
+  return <div ref={boxRef} style={{ width: "100%", height, background: theme === "dark" ? "#161A21" : "#FFFFFF" }} />;
 }
 
 const Frame = ({ children, height }) => (
