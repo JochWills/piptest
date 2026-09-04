@@ -132,14 +132,14 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      directly at the moment it matters instead of re-rendering on it. */
   const [wsLive, setWsLive] = useState(false);
   const pushRef = useRef(0), appliedRef = useRef(0), missRef = useRef(0);
-  /* Only host/editor can ever push chart state, and a freshly-JOINED
-     editor's own local symbol/interval/cursor/stepId/playing is still
+  /* Only the host can ever push chart state, and a freshly-joined
+     guest's own local symbol/interval/cursor/stepId/playing is still
      whatever placeholder joinRoomFromDashboard made up, not the room's
      real state, until the first poll below actually syncs it. Without
      this guard, pushRoom could fire on that very first render and
      clobber the host's real cursor with the guest's placeholder
      garbage. True for the host right away (their own local state IS the
-     room's state, by construction). For a joining editor this can't
+     room's state, by construction). For a joining guest this can't
      just be set the moment the poll *attempts* a correction
      (chartStartRef reassignment or jumpTo) — both are asynchronous (a
      remount's onReady, a jumpTo's bar lookup), and the widget can
@@ -167,24 +167,25 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const [helpOpen, setHelpOpen] = useState(false);
 
   const role = room ? room.participants?.[account.handle]?.role || "viewer" : "host";
-  const canControl = !room || role === "host" || role === "editor";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
-  /* Sharing a session is view-only: guests (viewer or promoted editor)
-     watch and, if promoted, can draw/drive playback too, but trading
-     stays with the host — no order ticket, no trade actions of their
-     own. Solo (no room) always trades. A guest's chart/ticket/blotter
-     still needs to reflect the host's trade though (see hostTrade and
-     the "trade mirror" section below) — displayTrade is "whichever
-     trade is actually mine to look at": my own when I can trade,
-     otherwise the host's mirrored copy. */
+  /* Sharing a session is view-only, full stop: a guest watches, the
+     host trades and drives playback, and there's no role in between —
+     no promoting a guest to co-pilot the chart, no order ticket or
+     trade actions of their own. Solo (no room) always both. A guest's
+     chart/ticket/blotter still needs to reflect the host's trade
+     though (see hostTrade and the "trade mirror" section below) —
+     displayTrade is "whichever trade is actually mine to look at": my
+     own when I can trade, otherwise the host's mirrored copy. */
+  const canControl = !room || role === "host";
   const canTrade = !room || isHost;
   const displayTrade = canTrade ? trade : hostTrade;
 
-  /* the widget only reads canDraw at mount, so a role change (promoted
-     or demoted mid-session) has to remount it — same tradeoff as an
-     actual timeframe switch. Freeze the position first, exactly like
-     switchInterval does, so the remount lands back where the replay
-     actually is rather than snapping to wherever the widget last mounted. */
+  /* the widget only reads canDraw at mount, so gaining or losing
+     control — joining a room as a guest, leaving one, being kicked —
+     has to remount it, same tradeoff as an actual timeframe switch.
+     Freeze the position first, exactly like switchInterval does, so
+     the remount lands back where the replay actually is rather than
+     snapping to wherever the widget last mounted. */
   const canControlRef = useRef(canControl);
   useEffect(() => {
     if (canControlRef.current === canControl) return;
@@ -336,8 +337,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     /* broadcast every bar WE reveal locally to the room's real-time
        relay, so a viewer's chart can extend forward the instant it
        happens instead of waiting on the next poll — see roomSocket.js
-       and control.pushRemoteBar in datafeed.js. Only a host/editor's
-       own local stepping ever reaches here with canControl true; a
+       and control.pushRemoteBar in datafeed.js. Only the host's own
+       local stepping ever reaches here with canControl true; a
        pure viewer's bars arrive via applyRemoteBar instead (below),
        which re-fires this same callback — canControlRef being false
        there is what stops it echoing straight back out. */
@@ -870,6 +871,17 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
         setRoom((r) => ({ ...r, participants: doc.participants, messages: doc.messages }));
       } else {
         appliedRef.current = doc.updatedAt || 0;
+        /* Removed from participants by someone else's patch — the
+           host kicked me (see kickParticipant). Never true for the
+           host's own poll: closing a room deletes the whole doc
+           instead (the separate !doc branch above), and nothing else
+           ever touches the host's own entry. */
+        if (!doc.participants?.[account.handle]) {
+          setRoom(null); setRoomMsg("The host removed you from this room.");
+          setChatOpen(false);
+          store.del(K.roomLink(meta.id));
+          return;
+        }
         setRoom(doc);
         const marketChanged = doc.symbol !== symbol || doc.interval !== interval;
         if (doc.symbol !== symbol) setSymbol(doc.symbol);
@@ -974,22 +986,24 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   }, [room?.code, account.handle]); // eslint-disable-line
 
   /* ---- room WebSocket: real-time relay for a viewer's chart ----
-     Applies host/editor-originated bar/market/play/pause/step
-     messages — only for a pure viewer (canControl true means this
-     side IS a source of truth, not a follower; see handleBar's own
+     Applies the host's own bar/market/play/pause/step messages —
+     only for a guest (canControl true means this side IS the host,
+     the source of truth, not a follower; see handleBar's own
      broadcast guard for the other half of that split) — plus the
-     host's trade mirror, which every non-trading participant needs
-     regardless of that split (see the trade case below). Defined
-     fresh every render, not memoized, and stashed in a ref the
-     connect effect below reads from — so it always sees the latest
-     symbol/interval/chartCtlRef without the effect itself needing to
-     tear down and reconnect the socket whenever any of those change. */
+     host's trade mirror, which every guest needs regardless of that
+     split (see the trade case below). Defined fresh every render, not
+     memoized, and stashed in a ref the connect effect below reads
+     from — so it always sees the latest symbol/interval/chartCtlRef
+     without the effect itself needing to tear down and reconnect the
+     socket whenever any of those change. */
   const handleRoomSocketMessage = (msg) => {
     if (!chartCtlRef.current) return;
-    /* trade is gated on canTrade, not canControl — an editor can't
-       trade any more than a plain viewer can (see canTrade above),
-       so both need the host's mirror, even though an editor IS a
-       control source for everything else here. */
+    /* Named separately from canControl even though the two now
+       coincide for a room (sharing is view-only — see canControl's
+       own comment above) — this is gated on "can I trade", the
+       question that actually matters here, not "can I drive the
+       chart", which only reads the same today because there's no
+       role left that answers them differently. */
     if (msg.type === "trade") {
       if (canTrade) return; // the host never applies an echo of their own trade
       if ("trade" in msg) setHostTrade(msg.trade);
@@ -1197,10 +1211,16 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     setRoom(null); setRoomMsg("Room closed."); setChatOpen(false);
     store.del(K.roomLink(meta.id));
   };
-  const setRole = async (who, r) => {
-    if (!isHost) return;
+  /* host-only: removes a guest from the room outright. Sharing is
+     view-only (see canControl above) — there's no lesser action like
+     a demotion to offer, only "still here" or "not". The kicked
+     guest's own client notices on its next poll (see the room poll
+     effect's own-participant check) and leaves on its own; nothing
+     server-side needs to force their socket closed for that. */
+  const kickParticipant = async (who) => {
+    if (!isHost || who === account.handle) return;
     const merged = await data.roomPatch(room.code, [
-      { path: ["participants", who, "role"], value: r },
+      { path: ["participants", who], remove: true },
       { path: ["updatedBy"], value: account.handle }, { path: ["updatedAt"], value: Date.now() },
     ]);
     if (merged) setRoom(merged);
@@ -1355,7 +1375,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
               title="Live room" aria-label="Live room" style={{ padding: "6px 9px" }}>
               <Svg s={15}>{Ic.users}</Svg>
             </button>
-            {roomOpen && <RoomPanel {...{ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose: () => setRoomOpen(false) }} />}
+            {roomOpen && <RoomPanel {...{ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, kickParticipant, onClose: () => setRoomOpen(false) }} />}
           </span>
           {room && (
             <span data-pop style={{ position: "relative" }}>
@@ -1849,10 +1869,10 @@ function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel, readO
   );
 }
 
-function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, setRole, onClose }) {
+function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, kickParticipant, onClose }) {
   return (
-    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 15, width: 272 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 16, width: 300 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <span className="cap">Live room</span>
         <button className="btn ghost" style={{ padding: "2px 7px" }} onClick={onClose} aria-label="Close">✕</button>
       </div>
@@ -1870,48 +1890,63 @@ function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLi
         </>
       ) : (
         <>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div>
-              <div className="num" style={{ fontSize: 21, fontWeight: 700, letterSpacing: ".08em" }}>{room.code}</div>
-              <div className="sm mut" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                host {room.host}
-                <span title={wsLive ? "Real-time sync connected" : "Falling back to periodic sync"}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5,
-                    color: wsLive ? "var(--up)" : "var(--dim)" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 4, background: "currentColor" }} />
-                  {wsLive ? "live" : "syncing…"}
-                </span>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              {isHost && <button className="btn" onClick={closeRoom}>Close</button>}
-              <button className="btn" onClick={leaveRoom}>Leave</button>
+          {/* code + live-sync status get their own block, full width —
+              this used to sit beside the Close/Leave buttons in one
+              row and collide with them the moment the panel wasn't
+              comfortably wider than both put together. */}
+          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10,
+            padding: "11px 14px", marginBottom: 12 }}>
+            <div className="num" style={{ fontSize: 23, fontWeight: 700, letterSpacing: ".09em" }}>{room.code}</div>
+            <div className="sm mut" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+              hosted by {room.host}
+              <span title={wsLive ? "Real-time sync connected" : "Falling back to periodic sync"}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5,
+                  color: wsLive ? "var(--up)" : "var(--dim)" }}>
+                <span style={{ width: 6, height: 6, borderRadius: 4, background: "currentColor" }} />
+                {wsLive ? "live" : "syncing…"}
+              </span>
             </div>
           </div>
-          <div style={{ display: "grid", gap: 6 }}>
+
+          {/* one action, not two — a host closing ends it for everyone
+              on purpose (the Close button); a host "leaving" their own
+              room isn't a real option here (see canTrade/isHost above:
+              it's their participant entry that makes them the host at
+              all), so only a guest ever sees Leave. */}
+          {isHost
+            ? <button className="btn" style={{ width: "100%", marginBottom: 14, color: "var(--down)", borderColor: "color-mix(in srgb, var(--down) 40%, var(--border))" }}
+                onClick={closeRoom}>Close room</button>
+            : <button className="btn" style={{ width: "100%", marginBottom: 14 }} onClick={leaveRoom}>Leave room</button>}
+
+          <div className="cap" style={{ marginBottom: 8 }}>
+            Participants · {Object.keys(room.participants || {}).length}
+          </div>
+          <div style={{ display: "grid", gap: 2, marginBottom: 14 }}>
             {Object.entries(room.participants || {}).map(([who, info]) => (
-              <div key={who} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Avatar value={info.avatar} handle={who} size={22} />
-                <span className="sm" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div key={who} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+                <Avatar value={info.avatar} handle={who} size={24} />
+                <span className="sm" style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {who}{who === account.handle ? " (you)" : ""}
                 </span>
-                <span className={"pill " + (info.role === "viewer" ? "n" : "b")}>{info.role}</span>
-                {isHost && info.role !== "host" && (
-                  <button className="btn ghost" style={{ padding: "2px 7px", fontSize: 11 }}
-                    onClick={() => setRole(who, info.role === "editor" ? "viewer" : "editor")}>
-                    {info.role === "editor" ? "Revoke" : "Edit"}
-                  </button>
+                {info.role === "host" ? (
+                  <span className="pill b">host</span>
+                ) : isHost ? (
+                  <button className="btn ghost" style={{ padding: "3px 9px", fontSize: 11.5, color: "var(--down)" }}
+                    onClick={() => kickParticipant(who)}>Kick</button>
+                ) : (
+                  <span className="pill n">viewer</span>
                 )}
               </div>
             ))}
           </div>
-          <div className="sm mut" style={{ marginTop: 10, lineHeight: 1.55 }}>
-            Guests watch live. Promote someone to Editor to let them draw and drive playback too — trading stays with you.
+
+          <div className="sm mut" style={{ lineHeight: 1.55 }}>
+            Sharing is view-only — guests watch live, but only you can trade or drive playback.
             {isHost ? " Closing the room ends it for everyone and clears the chat." : ""}
           </div>
         </>
       )}
-      {roomMsg && <div className="sm" style={{ color: "var(--brand)", marginTop: 11, lineHeight: 1.5 }}>{roomMsg}</div>}
+      {roomMsg && <div className="sm" style={{ color: "var(--brand)", marginTop: 12, lineHeight: 1.5 }}>{roomMsg}</div>}
     </div>
   );
 }

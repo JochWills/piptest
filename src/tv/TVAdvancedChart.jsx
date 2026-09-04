@@ -451,10 +451,11 @@ export default function TVAdvancedChart({
           try { all = chart.getAllShapes() || []; } catch (e) { return []; }
           const out = [];
           /* Copies of someone else's drawings are not ours to
-             re-publish. Two editors in one room both mirror and both
-             push, so without this each would keep re-broadcasting the
-             other's shapes back as if newly drawn — every round trip
-             adding another copy. */
+             re-publish — only the host can ever draw in a room today
+             (sharing is view-only), but this still guards against
+             re-broadcasting a mirrored shape back as if newly drawn,
+             which would otherwise add another copy on every round
+             trip. */
           const mirrorIds = new Set(mirrored.values());
           for (const { id, name } of all) {
             if (ownShapes.has(id) || mirrorIds.has(id)) continue;

@@ -9,7 +9,7 @@
    reach every guest's chart the instant it happens, not on the
    next ~1.5s poll. So this module does no persistence of its own
    — it's a pure in-memory fan-out, scoped per room code, relaying
-   host/editor-authored messages to everyone else in that room.
+   the host's own messages to everyone else in that room.
 
    Single Render instance (see render.yaml — no autoscaling), so an
    in-memory Map is enough; nothing here would survive multiple
@@ -33,7 +33,7 @@ function originAllowed(origin) {
   return origins.includes(origin);
 }
 
-/* "trade" rides the same relay: only ever sent by a host/editor
+/* "trade" rides the same relay: only ever sent by the host
    (client-side gate — see broadcastTrade in Simulator.jsx), carrying
    their current trade and/or a just-closed record, so a viewer's
    ticket, chart zones and blotter can mirror it live instead of only
@@ -81,11 +81,13 @@ function relay(sender, msg) {
 }
 
 /* Keeps every connected socket's cached role current without a
-   reconnect — a host demoting an editor mid-session (still a plain
+   reconnect — a host kicking a guest mid-session (still a plain
    PATCH /kv/:key today, nothing wired to notify this module
-   directly) takes effect for broadcast permission within one of
-   these ticks instead of only on the socket's next join. Only rooms
-   with someone actually connected are worth the query. */
+   directly) is reflected here within one of these ticks instead of
+   only on the socket's next join, though the guest's own client
+   dropping the room the moment its poll notices the same removal
+   (see Simulator.jsx) gets there first in practice. Only rooms with
+   someone actually connected are worth the query. */
 function startRoleRefresh() {
   setInterval(async () => {
     for (const [code, set] of rooms) {
@@ -174,7 +176,7 @@ export function attachRoomSocket(httpServer) {
 
       if (!ws._code) return; // must join before anything else is meaningful
       if (CONTROL_TYPES.has(msg.type)) {
-        if (ws._role !== "host" && ws._role !== "editor") return; // server-side enforcement — the client's own canControl gate isn't trusted alone
+        if (ws._role !== "host") return; // server-side enforcement — the client's own canControl gate isn't trusted alone
         relay(ws, msg);
       }
     });

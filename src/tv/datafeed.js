@@ -231,7 +231,7 @@ export function createDatafeed(opts = {}) {
     /* Move the cursor forward one bar and push the revealed bar to the
        chart. Returns { bar, stepRes } — bar is the raw bar (always at
        whatever resolution was actually stepped — see below), stepRes
-       is that resolution itself, which a host/editor's room-sync
+       is that resolution itself, which the host's room-sync
        broadcast (see Simulator.jsx) needs to hand a viewer's
        pushRemoteBar (below) so it aggregates the exact same way — or
        null at the end of data.
@@ -269,7 +269,7 @@ export function createDatafeed(opts = {}) {
       return { bar, stepRes };
     },
 
-    /* Room viewer path: a host/editor's step() (above) already ran
+    /* Room viewer path: the host's step() (above) already ran
        this exact bar through the same aggregation and broadcast it
        over the room WebSocket. Feeding it in here — via the same
        onTick a live tick would use — is what lets a viewer's chart
@@ -321,8 +321,8 @@ export function createDatafeed(opts = {}) {
          to a default view around the new cursor. That's exactly what a
          room viewer sees as "the chart keeps refreshing and jumping
          back to the same point": a viewer never plays its own replay
-         locally (see the play/pause effect in Simulator.jsx — only a
-         host/editor does), so every room-sync poll finds its cursor
+         locally (see the play/pause effect in Simulator.jsx — only the
+         host does), so every room-sync poll finds its cursor
          behind the host's and corrects via this same jumpTo, on a
          ~1.5s cadence, for as long as the host keeps playing.
 
