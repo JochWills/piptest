@@ -178,7 +178,15 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      `fullscreen` state, not a read of document.fullscreenElement at
      render time: it also has to track exits the button never caused
      (Escape, the browser's own "Exit full screen" bar), which only the
-     fullscreenchange event reports. */
+     fullscreenchange event reports.
+     No button lives in PipTest's own header for this — `fullscreen` and
+     `toggleFullscreen` are instead handed down to TVAdvancedChart, which
+     puts a real button back where the library's own used to be (next to
+     the screenshot icon, in its header). See its own comment for why
+     that's a live DOM graft rather than the documented createButton API,
+     and for the fallback if that graft ever comes up empty. Either way
+     the plain "f" shortcut below still works even if no button is
+     visible anywhere. */
   const pageRef = useRef(null);
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
@@ -1450,15 +1458,6 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
               this rides along up here instead. */}
           <button className="btn ghost" style={{ padding: "6px 9px", fontSize: 12.5 }}
             onClick={() => setHelpOpen(true)} title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
-          {/* The chart's own fullscreen button is hidden (see
-              TVAdvancedChart's disabled_features) because it only
-              fullscreens its own iframe — the replay bar and ticket live
-              outside that and would disappear behind it. This one
-              fullscreens the whole page instead, so everything stays. */}
-          <button className="btn ghost" onClick={toggleFullscreen} style={{ padding: "6px 9px" }}
-            title={fullscreen ? "Exit fullscreen (f)" : "Fullscreen (f)"} aria-label="Toggle fullscreen">
-            <Svg s={15}>{fullscreen ? Ic.collapse : Ic.expand}</Svg>
-          </button>
           <button className="btn ghost" onClick={onToggleTheme} style={{ padding: "6px 9px" }} aria-label="Toggle theme">
             <Svg s={15}>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
           </button>
@@ -1571,6 +1570,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   onReady={handleReady} onBar={handleBar} onCursor={handleCursor}
                   onState={handleReplayState} onDrawingsChanged={handleDrawingsChanged}
                   onIntervalChanged={handleIntervalChanged}
+                  fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen}
                   height="100%"
                 />
               )}
@@ -2071,7 +2071,7 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
 function ShortcutHelp({ open, onClose }) {
   const rows = [
     ["Space", "Play / pause replay"], ["→", "Step one bar forward"],
-    ["?", "This panel"],
+    ["F", "Toggle fullscreen"], ["?", "This panel"],
   ];
   return (
     <Modal open={open} onClose={onClose} title="Keyboard shortcuts" width={440}>

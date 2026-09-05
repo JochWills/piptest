@@ -15,6 +15,17 @@ import { feed } from "./marketFeed.js";
 const LIBRARY_PATH = "/charting_library/";
 const SCRIPT = `${LIBRARY_PATH}charting_library.standalone.js`;
 
+/* Same four-corner-bracket glyphs as Ic.expand/Ic.collapse in
+   components/ui.jsx, hand-copied rather than shared — this is raw DOM
+   markup grafted into the chart's own iframe (see the fullscreen button
+   graft below), not a React tree, so there's no import boundary that
+   would let the two stay in sync automatically. Keep them matching if
+   either ever changes. */
+const FULLSCREEN_ICON_SVG = {
+  expand: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M6 2H2v4M10 2h4v4M14 10v4h-4M2 10v4h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  collapse: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><path d="M2 6h4V2M14 6h-4V2M14 10h-4v4M2 10h4v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+
 function useLibrary() {
   const [status, setStatus] = useState(() => (window.TradingView?.widget ? "ready" : "loading"));
   useEffect(() => {
@@ -147,16 +158,20 @@ export default function TVAdvancedChart({
   sessionName,      // shown as a plain label in the chart's own header — see the headerReady block
                      // below. Read once at mount; PipTest has no way to rename a session mid-play,
                      // so there's nothing to keep this in sync with after that.
+  fullscreen,        // current fullscreen state, owned by Simulator.jsx — see the fullscreen
+                     // button graft in the headerReady block below for why this lives here
+  onToggleFullscreen,// () => void — same story
   height = 520,
 }) {
   const boxRef = useRef(null);
   const widgetRef = useRef(null);
   const apiRef = useRef(null);
+  const fullscreenBtnRef = useRef(null); // the grafted button, if the graft below found a home for it
   const status = useLibrary();
   const [err, setErr] = useState("");
 
-  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged });
-  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged };
+  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged, onToggleFullscreen });
+  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged, onToggleFullscreen };
 
   useEffect(() => {
     if (status !== "ready" || !boxRef.current) return;
@@ -324,6 +339,71 @@ export default function TVAdvancedChart({
             row.insertBefore(group, ourSeparator.nextSibling);
           }
         } catch (e) {}
+      });
+    }
+
+    /* Puts PipTest's own fullscreen toggle right after the screenshot
+       icon, at the end of the library's own icon cluster, rather than
+       in createButton's fixed "end of the bar" slot the
+       sessionName label above uses. That spot isn't reachable through
+       createButton at all: "Settings"/"Quick search"/"Take a snapshot"
+       live together in one library-owned group with no seam
+       createButton can insert into, so this reaches in and grafts a
+       plain <button> as a sibling instead — one step more fragile than
+       the sessionName label's own reordering-only trick above, since a
+       library update could rename or reshape this group outright, not
+       just its class hash. Kept as safe as that risk allows: classes
+       are copied live off the real "Settings" button rather than
+       hardcoded (so a class-hash bump alone doesn't break this), the
+       lookup filters out the library's own hidden width-measurement
+       clones of this same row (real ones included when the header's
+       narrow enough to responsively collapse it — see isVisible), and
+       any shape mismatch falls back to createButton's own
+       TradingView-styled button instead of leaving no control at all.
+       Either way, the plain "f" key in Simulator.jsx's hotkey effect
+       always works regardless of whether either button exists. */
+    if (cbs.current.onToggleFullscreen) {
+      widget.headerReady().then(() => {
+        if (dead) return;
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height) return false;
+          for (let p = el; p; p = p.parentElement) {
+            if (getComputedStyle(p).visibility === "hidden") return false;
+          }
+          return true;
+        };
+        try {
+          const doc = boxRef.current.querySelector("iframe")?.contentDocument;
+          if (!doc) throw new Error("no chart iframe document");
+          const settingsBtn = [...doc.querySelectorAll('[aria-label="Settings"]')].find(isVisible);
+          const snapshotBtn = [...doc.querySelectorAll('[aria-label="Take a snapshot"]')].find(isVisible);
+          const group = settingsBtn?.parentElement;
+          if (!group || !snapshotBtn || snapshotBtn.parentElement !== group) throw new Error("unexpected header shape");
+
+          const btn = doc.createElement("button");
+          btn.type = "button";
+          btn.className = settingsBtn.className; // live-cloned, not hardcoded — see comment above
+          btn.setAttribute("aria-label", "Toggle fullscreen");
+          const iconSpan = doc.createElement("span");
+          iconSpan.setAttribute("role", "img");
+          iconSpan.className = settingsBtn.querySelector("[role=img]")?.className || "";
+          iconSpan.setAttribute("aria-hidden", "true");
+          iconSpan.innerHTML = FULLSCREEN_ICON_SVG[fullscreen ? "collapse" : "expand"];
+          btn.title = fullscreen ? "Exit fullscreen (f)" : "Fullscreen (f)";
+          btn.appendChild(iconSpan);
+          btn.addEventListener("click", () => cbs.current.onToggleFullscreen?.());
+          group.insertBefore(btn, snapshotBtn.nextSibling);
+          fullscreenBtnRef.current = { btn, iconSpan, kind: "grafted" };
+        } catch (e) {
+          try {
+            const id = widget.createButton({
+              align: "right", useTradingViewStyle: true, text: "⛶", title: "Fullscreen",
+              onClick: () => cbs.current.onToggleFullscreen?.(),
+            });
+            fullscreenBtnRef.current = { id, kind: "fallback" };
+          } catch (e2) {}
+        }
       });
     }
 
@@ -666,6 +746,18 @@ export default function TVAdvancedChart({
   }, [status, symbol, interval, startMs, canDraw]); // eslint-disable-line
 
   useEffect(() => { apiRef.current && apiRef.current.setTheme(theme); }, [theme]);
+
+  /* Keeps the grafted button (above) in sync with fullscreen state
+     changed some other way — the plain "f" shortcut, Escape, the
+     browser's own "Exit full screen" bar. Only touches it if the graft
+     actually succeeded; the createButton fallback has no live handle
+     worth updating, so it just keeps its static label. */
+  useEffect(() => {
+    const ref = fullscreenBtnRef.current;
+    if (!ref || ref.kind !== "grafted") return;
+    ref.iconSpan.innerHTML = FULLSCREEN_ICON_SVG[fullscreen ? "collapse" : "expand"];
+    ref.btn.title = fullscreen ? "Exit fullscreen (f)" : "Fullscreen (f)";
+  }, [fullscreen]);
 
   if (status === "loading") {
     return <Frame height={height}>Loading chart library…</Frame>;

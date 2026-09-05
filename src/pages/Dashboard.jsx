@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic } from "../components/ui.jsx";
-import { SYMBOLS, INTERVALS } from "../theme.js";
+import { SYMBOLS } from "../theme.js";
 import { computeStats, fmtSigned, fmtMoney, fmtShort, fmtR, uid, START_BALANCE, CHALLENGE_PRESETS } from "../lib/trading.js";
 
 /* ---------- asset picker ----------
@@ -307,8 +307,11 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
                       {s.name}
                     </div>
                     <div className="sm mut" style={{ marginTop: 3 }}>
-                      {sym?.label || s.symbol} · {INTERVALS.find((i) => i.id === s.interval)?.label} ·{" "}
-                      {s.blind ? "blind start" : fmtShort(s.startMs)}
+                      {/* Timeframe dropped from this line — it's no longer picked at
+                          creation (see the New Session modal) and can be changed freely
+                          from inside the chart itself, so it doesn't say anything fixed
+                          or identifying about the session any more. */}
+                      {sym?.label || s.symbol} · {s.blind ? "blind start" : fmtShort(s.startMs)}
                     </div>
                   </div>
                   <button className="btn ghost" style={{ padding: "3px 8px", fontSize: 12 }}
