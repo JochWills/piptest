@@ -87,6 +87,29 @@ const int4 = (v, fallback) => {
   return Math.trunc(Math.min(Math.max(n, -INT4_MAX), INT4_MAX));
 };
 
+/* Length caps on free text. The only thing that stopped a session
+   name, a trade note, or session notes from being megabytes of text
+   used to be the blanket 2MB express.json() limit on the *whole*
+   request — nothing per field. That's not just storage bloat: these
+   values get rendered — a session name is the chart's own toolbar
+   label a room-mate sees, a dashboard card title, an entry in the
+   session switcher — none of which expect an unbounded string. Chat
+   already had this right (see the messages branch in
+   authorizeRoomPatch below, which truncates a room chat message to
+   500 regardless of what a modified client sends); this brings the
+   other free-text fields in line with the same "clip it, don't error
+   the whole request over it" approach — a value that's too long isn't
+   attacker input worth a 400 for, just a paste that got away from
+   someone. */
+const MAX_DISPLAY_NAME = 60;
+const MAX_SESSION_NAME = 120;
+const MAX_TRADE_NOTE = 4000;
+const MAX_SESSION_NOTES = 20000;
+const MAX_TAG = 40;
+const MAX_TAGS = 20;
+const trunc = (v, max) => str(v).slice(0, max);
+const clipTags = (v) => (Array.isArray(v) ? v.slice(0, MAX_TAGS).map((t) => trunc(t, MAX_TAG)) : null);
+
 function checkCredentials(input) {
   /* Normalize before testing anything: a JSON body can put an object or
      an array in any of these, and `name.trim()` / hasProfaneSubstring()
@@ -102,7 +125,7 @@ function checkCredentials(input) {
   if (password && password.length > 200) errs.push("That password is too long.");
   if (handle !== undefined && !HANDLE_RE.test(handle || ""))
     errs.push("Handle must be 3–18 characters: letters, numbers or underscores.");
-  if (name !== undefined && (!name || name.trim().length < 1 || name.length > 60))
+  if (name !== undefined && (!name || name.trim().length < 1 || name.length > MAX_DISPLAY_NAME))
     errs.push("Enter a display name.");
   /* A handle or display name is the one piece of free text every other
      participant in a room is guaranteed to see, unlike a chat message
@@ -342,6 +365,14 @@ router.patch("/me", requireAuth, async (req, res) => {
   if (handle !== undefined && !HANDLE_RE.test(handle || "")) {
     return res.status(400).json({ error: "invalid", message: "Handle must be 3–18 characters: letters, numbers or underscores." });
   }
+  /* checkCredentials enforces this same cap at signup — nothing carried
+     it over to editing your name afterward, so a paste that got away
+     from someone here sailed through at any size (tested: 1MB, stored
+     in full) and would then render wherever a display name shows up:
+     the room panel, chat, the profile menu. */
+  if (name !== undefined && name.length > MAX_DISPLAY_NAME) {
+    return res.status(400).json({ error: "invalid", message: `Display name must be ${MAX_DISPLAY_NAME} characters or fewer.` });
+  }
   if (handle && hasProfaneSubstring(handle)) {
     return res.status(400).json({ error: "invalid", message: "Choose a different handle." });
   }
@@ -416,7 +447,7 @@ router.put("/sessions/:id", requireAuth, writeLimiter, async (req, res) => {
     /* start_ms is bigint and start_balance int4 — a string, a float or a
        1e15 in either of those is an error from Postgres, not a coercion,
        so both are normalized here rather than passed through. */
-    [req.params.id, req.user.id, str(s.name) || "Session", str(s.symbol) || "BTCUSDT",
+    [req.params.id, req.user.id, trunc(s.name, MAX_SESSION_NAME) || "Session", str(s.symbol) || "BTCUSDT",
      str(s.interval) || "30m", bigint(s.startMs) ?? Date.now(),
      Math.max(100, int4(s.startBalance, 10000) || 10000), !!s.blind,
      s.challenge ? JSON.stringify(s.challenge) : null, JSON.stringify(s.stats || {})]
@@ -443,9 +474,17 @@ router.get("/sessions/:id/state", requireAuth, async (req, res) => {
 });
 
 router.put("/sessions/:id/state", requireAuth, writeLimiter, async (req, res) => {
+  /* This blob is otherwise opaque here on purpose — cursor, trades,
+     trade, layout, symbol, interval all just ride along as whatever
+     Simulator.jsx last saved. `notes` is the one key in it that's raw
+     free text with nothing else bounding its size (tested: 1MB saved
+     without complaint), so it gets the same clip everything else here
+     does, without touching the rest of the shape. */
+  const state = req.body?.state && typeof req.body.state === "object" ? { ...req.body.state } : {};
+  if (state.notes !== undefined) state.notes = trunc(state.notes, MAX_SESSION_NOTES);
   const r = await q(
     "UPDATE bt_sessions SET state=$1, updated_at=now() WHERE id=$2 AND user_id=$3",
-    [JSON.stringify(req.body?.state || {}), req.params.id, req.user.id]);
+    [JSON.stringify(state), req.params.id, req.user.id]);
   if (!r.rowCount) return res.status(404).json({ error: "not_found" });
   res.json({ ok: true });
 });
@@ -490,7 +529,7 @@ router.post("/trades", requireAuth, writeLimiter, async (req, res) => {
       [id, req.user.id, str(t.sessionId) || null, str(t.symbol), str(t.interval), str(t.dir),
        num(t.qty), num(t.entry), num(t.exit), num(t.stop), num(t.target),
        num(t.riskAmt), num(t.riskPct), num(t.r), num(t.pnl),
-       str(t.reason), Array.isArray(t.tags) ? t.tags.map(str) : [], str(t.note),
+       str(t.reason), clipTags(t.tags) || [], trunc(t.note, MAX_TRADE_NOTE),
        bigint(t.openedTs), bigint(t.closedTs)]
     );
     saved++;
@@ -503,8 +542,8 @@ router.patch("/trades/:id", requireAuth, writeLimiter, async (req, res) => {
   const r = await q(
     `UPDATE trades SET tags = COALESCE($1, tags), note = COALESCE($2, note)
       WHERE id=$3 AND user_id=$4`,
-    [Array.isArray(tags) ? tags.map(str) : null,
-     note === undefined || note === null ? null : str(note),
+    [clipTags(tags),
+     note === undefined || note === null ? null : trunc(note, MAX_TRADE_NOTE),
      req.params.id, req.user.id]);
   if (!r.rowCount) return res.status(404).json({ error: "not_found" });
   res.json({ ok: true });
@@ -541,10 +580,18 @@ router.put("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
     return res.status(403).json({ error: "forbidden", message: "That room code is already in use." });
   }
   const value = req.body?.value ?? null;
-  /* Force this rather than trust it, for the same reason — otherwise
-     a stranger creating a *fresh* code could still just claim to be
-     hosting as somebody else's handle. */
-  if (value && typeof value === "object") value.host = req.user.handle;
+  if (value && typeof value === "object") {
+    /* Force this rather than trust it, for the same reason — otherwise
+       a stranger creating a *fresh* code could still just claim to be
+       hosting as somebody else's handle. */
+    value.host = req.user.handle;
+    /* sessionName rides in from the client's own session name — see
+       hostRoom in Simulator.jsx — but arrives here as a plain field on
+       an otherwise-generic room doc, with nothing else bounding it.
+       It's shown on the chart toolbar to everyone who joins, so it
+       gets the same cap the sessions table enforces at the source. */
+    if (value.sessionName !== undefined) value.sessionName = trunc(value.sessionName, MAX_SESSION_NAME);
+  }
   await q(
     `INSERT INTO kv (key, value) VALUES ($1,$2)
      ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
@@ -613,6 +660,7 @@ function authorizeRoomPatch(op, current, me) {
   }
   if (p0 === "updatedBy") { op.value = me; return true; } // never trust a caller's claimed identity here
   if (p0 === "updatedAt") return true; // just a clock value, harmless either way
+  if (p0 === "sessionName" && op.value !== undefined) op.value = trunc(op.value, MAX_SESSION_NAME); // see the PUT handler's own note
   // everything else — symbol, interval, cursor, playing, stepId,
   // sessionName, layout, drawings, trade, closedTrades, … — drives the
   // session itself, host only (matches canControl on the client).
