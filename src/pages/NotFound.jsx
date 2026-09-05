@@ -39,15 +39,13 @@ export default function NotFound({ account, onHome, onDashboard }) {
         <Card style={{ padding: 34 }}>
           <BrokenChart />
           <div className="mono" style={{ fontSize: 13, color: "var(--brand)", fontWeight: 600, marginBottom: 10 }}>404</div>
-          <h2 style={{ fontSize: 21, marginBottom: 10 }}>Nothing charted at this address</h2>
+          <h2 style={{ fontSize: 21, marginBottom: 10 }}>Page not found</h2>
           <p className="sm mut" style={{ lineHeight: 1.65, marginBottom: 26 }}>
             The link's either old or mistyped — whatever it pointed to isn't here.
           </p>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-            <button className="btn pri" onClick={account ? onDashboard : onHome}>
-              {account ? "Back to your dashboard" : "Back to the homepage"}
-            </button>
-            {account && <button className="btn" onClick={onHome}>Homepage</button>}
+            <button className="btn pri" onClick={onHome}>Back to the homepage</button>
+            {account && <button className="btn" onClick={onDashboard}>Your dashboard</button>}
           </div>
         </Card>
       </div>

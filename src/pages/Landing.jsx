@@ -361,21 +361,42 @@ function CursorGlyph({ visible, top, left, right, hit, transitionMs = 450 }) {
 
 function HowItWorksMovie() {
   const [scene, setScene] = useState(0);
+  /* Nothing here runs — no scene timers, no MarketScene typing effect,
+     no play-scene cursor — until this has actually scrolled into view
+     once. Without this, everything below started ticking the instant
+     Landing mounted, so by the time someone actually scrolled down to
+     it they'd land mid-loop rather than at the beginning, and the
+     section would have been silently animating off-screen the whole
+     time for nothing. */
+  const [started, setStarted] = useState(false);
+  const wrapRef = useRef(null);
   const timerRef = useRef(null);
 
   const restart = () => {
     clearInterval(timerRef.current);
     timerRef.current = setInterval(() => setScene((s) => (s + 1) % MOVIE_SCENES.length), MOVIE_SCENE_MS);
   };
-  useEffect(() => { restart(); return () => clearInterval(timerRef.current); }, []); // eslint-disable-line
 
-  const goTo = (i) => { setScene(i); restart(); };
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") { setStarted(true); restart(); return; }
+    const io = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      setStarted(true);
+      restart();
+      io.disconnect(); // once is enough — it keeps looping from here on its own
+    }, { threshold: 0.3 });
+    io.observe(el);
+    return () => { io.disconnect(); clearInterval(timerRef.current); };
+  }, []); // eslint-disable-line
+
+  const goTo = (i) => { setScene(i); if (started) restart(); };
   const active = MOVIE_SCENES[scene];
 
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto 46px" }}>
+    <div ref={wrapRef} style={{ maxWidth: 720, margin: "0 auto 46px" }}>
       <div className="card" style={{ padding: 0, overflow: "hidden" }}
-        onMouseEnter={() => clearInterval(timerRef.current)} onMouseLeave={restart}>
+        onMouseEnter={() => clearInterval(timerRef.current)} onMouseLeave={() => started && restart()}>
         {/* Landscape frame, but each scene's own content is untouched —
            still the same fixed-width column and the same height it
            already needed (the pre-arm setup form is the tallest one),
@@ -392,7 +413,7 @@ function HowItWorksMovie() {
               pointerEvents: "none",
             }}>
               <div style={{ width: 340, flexShrink: 0 }}>
-                {i === scene && <SceneContent sceneKey={s.key} />}
+                {i === scene && started && <SceneContent sceneKey={s.key} />}
               </div>
             </div>
           ))}
