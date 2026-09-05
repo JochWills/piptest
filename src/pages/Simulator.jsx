@@ -2102,36 +2102,86 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
    thing it's blocking on (or the ad genuinely coming back — see the
    periodic recheck in Simulator's own effect). */
 function AdBlockGate({ onRecheck }) {
-  const steps = [
-    ["uBlock Origin", "Click its icon in the toolbar, then the power button, to turn it off for this site."],
-    ["AdBlock / AdBlock Plus", "Click its icon and choose “Don't run on this site” or “Pause on this site”."],
-    ["Brave Shields", "Click the lion icon in the address bar and turn Shields off for this site."],
-    ["Anything else", "Look for an option to allow or whitelist piptest.com, then use the button below."],
-  ];
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 500, background: "rgba(6,8,12,.92)",
       display: "grid", placeItems: "center", padding: 20, backdropFilter: "blur(3px)",
     }}>
-      <div className="card fade-in" style={{ width: "100%", maxWidth: 460, padding: 26 }}>
-        <h3 style={{ fontSize: 18, marginBottom: 8 }}>Please allow ads for PipTest</h3>
-        <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 18 }}>
-          PipTest stays free to use because of the one small ad next to the chart.
-          Your ad blocker is hiding it, so replay is paused until it's allowed for
-          this site — you'll get access back the moment it is, no reload needed.
+      <div className="card fade-in" style={{ width: "100%", maxWidth: 400, padding: 26 }}>
+        <h3 style={{ fontSize: 18, marginBottom: 8, textAlign: "center" }}>Please allow ads for PipTest</h3>
+        <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 18, textAlign: "center" }}>
+          PipTest stays free because of the one small ad next to the chart. Replay is
+          paused until it's allowed for this site — access comes back the moment it is.
         </p>
-        <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
-          {steps.map(([label, body]) => (
-            <div key={label}>
-              <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
-              <div className="sm mut" style={{ marginTop: 2, lineHeight: 1.5 }}>{body}</div>
-            </div>
-          ))}
+
+        {/* A live mockup of AdBlock's own popup, not just words describing it —
+           click its toolbar icon, then "Pause on this site", looping on repeat
+           for as long as this stays up. Only demonstrates AdBlock/AdBlock Plus
+           by name since that's the single most-installed blocker; anyone on
+           something else gets one line pointing at the equivalent rather than
+           a full second walkthrough. */}
+        <div className="abg-demo">
+          <div className="abg-toolbar"><span className="abg-icon">✋</span></div>
+          <div className="abg-popup">
+            <div className="abg-popup-title">piptest.com</div>
+            <div className="abg-popup-row"><span className="abg-hand">✋</span> Block Ads</div>
+            <div className="abg-pause"><span className="abg-pause-icon">❚❚</span> Pause on this site</div>
+          </div>
+          <div className="abg-cursor" />
         </div>
+
+        <p className="sm mut" style={{ lineHeight: 1.6, margin: "14px 0 18px", textAlign: "center" }}>
+          Using something else? Look for a similar “pause” or “allow this site” option.
+        </p>
+
         <button className="btn pri" style={{ width: "100%", padding: 11 }} onClick={onRecheck}>
           I've disabled it — recheck
         </button>
       </div>
+
+      <style>{`
+        .abg-demo { position: relative; width: 240px; height: 190px; margin: 0 auto; }
+        .abg-toolbar { position: absolute; top: 0; right: 6px; width: 30px; height: 30px;
+          border-radius: 7px; background: var(--surface3); display: flex; align-items: center;
+          justify-content: center; z-index: 2; }
+        .abg-icon { width: 20px; height: 20px; border-radius: 50%; background: #E23838;
+          color: #fff; display: flex; align-items: center; justify-content: center;
+          font-size: 11px; line-height: 1; }
+        .abg-popup { position: absolute; top: 36px; right: 0; width: 226px; background: #fff;
+          color: #1a1a1a; border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.4);
+          padding: 12px; transform-origin: top right; opacity: 0;
+          animation: abgPopup 5s ease-in-out infinite; }
+        .abg-popup-title { text-align: center; font-weight: 700; font-size: 13px; margin-bottom: 9px; }
+        .abg-popup-row { display: flex; align-items: center; gap: 7px; border: 1px solid #eee;
+          border-radius: 7px; padding: 7px 9px; margin-bottom: 7px; font-size: 12px; }
+        .abg-hand { font-size: 12px; }
+        .abg-pause { display: flex; align-items: center; justify-content: center; gap: 6px;
+          background: #f2f2f2; border-radius: 7px; padding: 8px; font-size: 12px; font-weight: 600;
+          transition: none; animation: abgPauseHit 5s ease-in-out infinite; }
+        .abg-pause-icon { font-size: 9px; letter-spacing: 1px; }
+        .abg-cursor { position: absolute; width: 14px; height: 14px; top: 12px; right: 12px;
+          border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 3px var(--surface);
+          z-index: 3; animation: abgCursor 5s ease-in-out infinite; }
+        @keyframes abgPopup {
+          0%, 8% { opacity: 0; transform: scale(.94) translateY(-4px); }
+          14%, 82% { opacity: 1; transform: scale(1) translateY(0); }
+          92%, 100% { opacity: 0; transform: scale(.94) translateY(-4px); }
+        }
+        @keyframes abgPauseHit {
+          0%, 62% { background: #f2f2f2; }
+          65%, 72% { background: var(--brandSoft); }
+          78%, 100% { background: #f2f2f2; }
+        }
+        @keyframes abgCursor {
+          0%, 6% { top: 12px; right: 12px; }
+          12%, 16% { top: 12px; right: 12px; transform: scale(.85); }
+          17% { transform: scale(1); }
+          45% { top: 140px; right: 96px; }
+          58%, 62% { top: 140px; right: 96px; transform: scale(.85); }
+          66% { transform: scale(1); }
+          90%, 100% { top: 12px; right: 12px; }
+        }
+      `}</style>
     </div>
   );
 }
