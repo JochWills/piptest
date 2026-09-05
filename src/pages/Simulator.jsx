@@ -2150,7 +2150,17 @@ function AdBlockGate({ onRecheck }) {
             <div className="abg-popup-row"><span className="abg-hand">✋</span> Block Ads</div>
             <div className="abg-pause"><span className="abg-pause-icon">❚❚</span> Pause on this site</div>
           </div>
-          <div className="abg-cursor" />
+          {/* Same arrow-pointer glyph as the landing page's own cursor
+             (see Landing.jsx's CursorGlyph) — its hotspot is the tip at
+             the shape's own top-left corner, which is what the
+             positioning below (and its measured coordinates) targets,
+             not the icon's centre. */}
+          <div className="abg-cursor" aria-hidden>
+            <svg width="18" height="18" viewBox="0 0 20 20">
+              <path d="M2.2 1.6 L2.2 16.3 L6.3 12.6 L9.1 18.2 L11.5 17.1 L8.7 11.3 L14.6 11.3 Z"
+                fill="#fff" stroke="#0b0d11" strokeWidth="1" strokeLinejoin="round" />
+            </svg>
+          </div>
         </div>
 
         <p className="sm mut" style={{ lineHeight: 1.6, margin: "14px 0 18px", textAlign: "center" }}>
@@ -2182,9 +2192,9 @@ function AdBlockGate({ onRecheck }) {
           background: #f2f2f2; border-radius: 7px; padding: 8px; font-size: 12px; font-weight: 600;
           transition: none; animation: abgPauseHit 5s ease-in-out infinite; }
         .abg-pause-icon { font-size: 9px; letter-spacing: 1px; }
-        .abg-cursor { position: absolute; width: 14px; height: 14px; top: 12px; right: 12px;
-          border-radius: 50%; background: var(--ink); box-shadow: 0 0 0 3px var(--surface);
-          z-index: 3; animation: abgCursor 5s ease-in-out infinite; }
+        .abg-cursor { position: absolute; width: 18px; height: 18px; top: 13px; left: 216px;
+          z-index: 3; filter: drop-shadow(0 1px 3px rgba(0,0,0,.55));
+          animation: abgCursor 5s ease-in-out infinite; }
         @keyframes abgPopup {
           0%, 8% { opacity: 0; transform: scale(.94) translateY(-4px); }
           14%, 82% { opacity: 1; transform: scale(1) translateY(0); }
@@ -2195,14 +2205,19 @@ function AdBlockGate({ onRecheck }) {
           65%, 72% { background: var(--brandSoft); }
           78%, 100% { background: #f2f2f2; }
         }
+        /* Coordinates measured off the actual rendered elements (their
+           centres), then nudged by the arrow glyph's own tip offset
+           (~2px right, ~1.5px down from its top-left corner) so the
+           tip itself — not the icon's bounding box — lands on the
+           toolbar icon and on "Pause on this site". */
         @keyframes abgCursor {
-          0%, 6% { top: 12px; right: 12px; }
-          12%, 16% { top: 12px; right: 12px; transform: scale(.85); }
+          0%, 6% { top: 13.5px; left: 217px; }
+          12%, 16% { top: 13.5px; left: 217px; transform: scale(.85); }
           17% { transform: scale(1); }
-          45% { top: 140px; right: 96px; }
-          58%, 62% { top: 140px; right: 96px; transform: scale(.85); }
+          45% { top: 130px; left: 125px; }
+          58%, 62% { top: 130px; left: 125px; transform: scale(.85); }
           66% { transform: scale(1); }
-          90%, 100% { top: 12px; right: 12px; }
+          90%, 100% { top: 13.5px; left: 217px; }
         }
       `}</style>
     </div>
