@@ -20,11 +20,82 @@ import { hasProfaneSubstring, censor } from "./profanity.js";
 
 export const router = express.Router();
 
+/* ---------- async handlers actually reaching the error handler ----------
+   Every handler below is `async`, and this is Express 4, which does not
+   await them. A handler whose promise *rejects* — which is what any
+   query Postgres refuses looks like from here — therefore never reaches
+   the error middleware in index.js: it surfaces as an unhandled
+   rejection, and Node exits the process on those by default. That made
+   a single malformed request (a string where a number belongs, a float
+   into a bigint column) enough to take the whole API down for everyone,
+   including on routes that need no login at all.
+
+   Patching the route-registration methods once, here, means every route
+   in this file — and every route added to it later — has its rejections
+   forwarded to next() like a synchronous throw already was. Express 5
+   does this natively; when this upgrades, this block can go.
+
+   Error middleware is identified by arity (4 args), so it's passed
+   through untouched — the wrapper takes 3 and would otherwise disguise
+   an error handler as an ordinary one. */
+const forwardRejections = (fn) => {
+  if (typeof fn !== "function" || fn.length === 4) return fn;
+  const wrapped = (req, res, next) => {
+    try { return Promise.resolve(fn(req, res, next)).catch(next); }
+    catch (e) { return next(e); }
+  };
+  Object.defineProperty(wrapped, "name", { value: fn.name });
+  return wrapped;
+};
+for (const method of ["get", "post", "put", "patch", "delete", "use", "all"]) {
+  const original = router[method].bind(router);
+  /* Wrap by argument type rather than position: every route here is
+     (path, ...handlers), but router.use(fn) has no path at all, and
+     assuming one would leave that handler unwrapped. */
+  router[method] = (...args) => original(...args.map((a) => (typeof a === "function" ? forwardRejections(a) : a)));
+}
+
 /* ---------- validation ---------- */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const HANDLE_RE = /^[a-zA-Z0-9_]{3,18}$/;
 
-function checkCredentials({ email, password, name, handle }) {
+/* Type coercion at the edge. A JSON body can hold anything — an object
+   where a string belongs, a float where a bigint column expects a whole
+   number, a 1e15 where an int4 tops out at ~2.1e9 — and Postgres
+   rejects all of those with an error rather than a null. These keep a
+   nonsense value from ever reaching a query: it becomes a sane default
+   or a null the column accepts, so the request fails validation (or
+   quietly stores nothing) instead of failing the process.
+   `str` is deliberately strict — `String(someObject)` would turn {} into
+   "[object Object]" and store that, which is worse than treating it as
+   absent. */
+const str = (v) => (typeof v === "string" ? v : "");
+const INT4_MAX = 2147483647;
+/* Postgres bigint tops out at 2^63, but nothing here is a real epoch
+   beyond a few thousand years out; clamping to int8's range is enough
+   to keep the driver from ever sending an out-of-range literal. */
+const BIGINT_MAX = 9223372036854775000;
+const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+const bigint = (v) => {
+  const n = num(v);
+  if (n === null) return null;
+  return Math.trunc(Math.min(Math.max(n, -BIGINT_MAX), BIGINT_MAX));
+};
+const int4 = (v, fallback) => {
+  const n = num(v);
+  if (n === null) return fallback;
+  return Math.trunc(Math.min(Math.max(n, -INT4_MAX), INT4_MAX));
+};
+
+function checkCredentials(input) {
+  /* Normalize before testing anything: a JSON body can put an object or
+     an array in any of these, and `name.trim()` / hasProfaneSubstring()
+     below both throw on a non-string. A wrong-typed field is simply an
+     absent one as far as validation is concerned — it fails the checks
+     and comes back as a 400. */
+  const email = str(input?.email), password = str(input?.password);
+  const name = input?.name === undefined ? undefined : str(input.name);
+  const handle = input?.handle === undefined ? undefined : str(input.handle);
   const errs = [];
   if (!email || !EMAIL_RE.test(email)) errs.push("Enter a valid email address.");
   if (!password || password.length < 8) errs.push("Password must be at least 8 characters.");
@@ -69,7 +140,8 @@ const hashToken = (t) => crypto.createHash("sha256").update(t).digest("hex");
    AUTH
    ===================================================== */
 router.post("/auth/register", authLimiter, async (req, res) => {
-  const { email = "", password = "", name = "", handle = "" } = req.body || {};
+  const email = str(req.body?.email), password = str(req.body?.password);
+  const name = str(req.body?.name), handle = str(req.body?.handle);
   const errs = checkCredentials({ email, password, name, handle });
   if (errs.length) return res.status(400).json({ error: "invalid", message: errs[0], errors: errs });
 
@@ -93,7 +165,7 @@ router.post("/auth/register", authLimiter, async (req, res) => {
 });
 
 router.post("/auth/login", authLimiter, async (req, res) => {
-  const { email = "", password = "" } = req.body || {};
+  const email = str(req.body?.email), password = str(req.body?.password);
   const { rows } = await q("SELECT * FROM users WHERE lower(email)=lower($1)", [email.trim()]);
   const user = rows[0];
 
@@ -146,7 +218,7 @@ router.post("/auth/logout", async (req, res) => {
    registered. Anything else turns this endpoint into a way to
    discover who has an account. */
 router.post("/auth/forgot", resetLimiter, async (req, res) => {
-  const email = (req.body?.email || "").trim();
+  const email = str(req.body?.email).trim();
   const generic = {
     ok: true,
     message: "If that email has an account, a reset link is on its way. Check your spam folder too.",
@@ -194,7 +266,7 @@ router.get("/auth/reset/:token", async (req, res) => {
 });
 
 router.post("/auth/reset", resetLimiter, async (req, res) => {
-  const { token = "", password = "" } = req.body || {};
+  const token = str(req.body?.token), password = str(req.body?.password);
   if (password.length < 8) {
     return res.status(400).json({ error: "invalid", message: "Password must be at least 8 characters." });
   }
@@ -236,8 +308,15 @@ router.get("/me", requireAuth, async (req, res) => {
 const AVATAR_RE = /^[a-z]{2,12}:\d{1,2}$/;
 
 router.patch("/me", requireAuth, async (req, res) => {
-  const { name, handle, avatar } = req.body || {};
-  if (avatar !== undefined && avatar !== null && !AVATAR_RE.test(avatar)) {
+  /* Same reasoning as checkCredentials: a wrong-typed field here used to
+     reach .trim()/hasProfaneSubstring() and throw. Normalizing first
+     turns "handle": 12345 into a 400 instead. Note HANDLE_RE.test()
+     would have *passed* that number by coercing it, so the guard has to
+     happen before the regex, not rely on it. */
+  const { avatar } = req.body || {};
+  const name = req.body?.name === undefined ? undefined : str(req.body.name);
+  const handle = req.body?.handle === undefined ? undefined : str(req.body.handle);
+  if (avatar !== undefined && avatar !== null && !AVATAR_RE.test(str(avatar))) {
     return res.status(400).json({ error: "invalid", message: "That avatar isn't valid." });
   }
   if (handle !== undefined && !HANDLE_RE.test(handle || "")) {
@@ -263,7 +342,7 @@ router.patch("/me", requireAuth, async (req, res) => {
 });
 
 router.post("/me/password", requireAuth, authLimiter, async (req, res) => {
-  const { current = "", next = "" } = req.body || {};
+  const current = str(req.body?.current), next = str(req.body?.next);
   if (next.length < 8) return res.status(400).json({ error: "invalid", message: "New password must be at least 8 characters." });
   const { rows } = await q("SELECT * FROM users WHERE id=$1", [req.user.id]);
   if (!rows[0] || !verifyPassword(current, rows[0].password_hash)) {
@@ -314,9 +393,12 @@ router.put("/sessions/:id", requireAuth, writeLimiter, async (req, res) => {
        challenge=EXCLUDED.challenge, stats=EXCLUDED.stats, updated_at=now()
      WHERE bt_sessions.user_id = $2
      RETURNING *`,
-    [req.params.id, req.user.id, s.name || "Session", s.symbol || "BTCUSDT",
-     s.interval || "30m", s.startMs || Date.now(),
-     Math.max(100, Math.round(Number(s.startBalance)) || 10000), !!s.blind,
+    /* start_ms is bigint and start_balance int4 — a string, a float or a
+       1e15 in either of those is an error from Postgres, not a coercion,
+       so both are normalized here rather than passed through. */
+    [req.params.id, req.user.id, str(s.name) || "Session", str(s.symbol) || "BTCUSDT",
+     str(s.interval) || "30m", bigint(s.startMs) ?? Date.now(),
+     Math.max(100, int4(s.startBalance, 10000) || 10000), !!s.blind,
      s.challenge ? JSON.stringify(s.challenge) : null, JSON.stringify(s.stats || {})]
   );
   if (!rows[0]) return res.status(403).json({ error: "forbidden" });
@@ -370,20 +452,30 @@ const rowToTrade = (r) => ({
 
 router.post("/trades", requireAuth, writeLimiter, async (req, res) => {
   const list = Array.isArray(req.body?.trades) ? req.body.trades.slice(0, 200) : [];
+  /* Every numeric column here is double precision or bigint, tags is
+     text[], and id is NOT NULL — each of which Postgres errors on rather
+     than coerces when handed the wrong shape. num()/bigint() turn an
+     unusable value into a null the column accepts; a trade with no
+     usable id is skipped outright, since there's nothing to key it on
+     and inserting it would just fail. */
+  let saved = 0;
   for (const t of list) {
+    const id = str(t?.id);
+    if (!id) continue;
     await q(
       `INSERT INTO trades (id,user_id,session_id,symbol,interval,dir,qty,entry,exit_price,stop,target,
                            risk_amt,risk_pct,r,pnl,reason,tags,note,opened_ts,closed_ts)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        ON CONFLICT (id) DO NOTHING`,
-      [t.id, req.user.id, t.sessionId || null, t.symbol, t.interval, t.dir,
-       t.qty, t.entry, t.exit, t.stop, t.target ?? null,
-       t.riskAmt ?? null, t.riskPct ?? null, t.r ?? null, t.pnl,
-       t.reason || "", t.tags || [], t.note || "",
-       t.openedTs || null, t.closedTs || null]
+      [id, req.user.id, str(t.sessionId) || null, str(t.symbol), str(t.interval), str(t.dir),
+       num(t.qty), num(t.entry), num(t.exit), num(t.stop), num(t.target),
+       num(t.riskAmt), num(t.riskPct), num(t.r), num(t.pnl),
+       str(t.reason), Array.isArray(t.tags) ? t.tags.map(str) : [], str(t.note),
+       bigint(t.openedTs), bigint(t.closedTs)]
     );
+    saved++;
   }
-  res.json({ ok: true, saved: list.length });
+  res.json({ ok: true, saved });
 });
 
 router.patch("/trades/:id", requireAuth, writeLimiter, async (req, res) => {
@@ -391,7 +483,9 @@ router.patch("/trades/:id", requireAuth, writeLimiter, async (req, res) => {
   const r = await q(
     `UPDATE trades SET tags = COALESCE($1, tags), note = COALESCE($2, note)
       WHERE id=$3 AND user_id=$4`,
-    [Array.isArray(tags) ? tags : null, note ?? null, req.params.id, req.user.id]);
+    [Array.isArray(tags) ? tags.map(str) : null,
+     note === undefined || note === null ? null : str(note),
+     req.params.id, req.user.id]);
   if (!r.rowCount) return res.status(404).json({ error: "not_found" });
   res.json({ ok: true });
 });
