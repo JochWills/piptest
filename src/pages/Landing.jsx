@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import Logo, { LogoMark } from "../components/Logo.jsx";
-import { Card, Svg, Ic } from "../components/ui.jsx";
+import { Card, Field, Svg, Ic } from "../components/ui.jsx";
 import Avatar from "../components/Avatar.jsx";
 import FloatingBar from "../components/FloatingBar.jsx";
 import { SYMBOLS, INTERVALS } from "../theme.js";
@@ -11,7 +11,7 @@ import { SYMBOLS, INTERVALS } from "../theme.js";
 
 const FEATURES = [
   { icon: Ic.play, title: "Replay any market, bar by bar",
-    body: "Load a real historical session and step through it candle by candle, or run it at up to 50×. The next bar is hidden until you commit — no hindsight, no peeking." },
+    body: "Load a real historical session and step through it candle by candle. The next bar is hidden until you commit — no hindsight, no peeking." },
   { icon: Ic.users, title: "Trade the same chart together",
     body: "Host a session and share a code. Your playback, drawings and levels stay in sync for everyone watching. Give a friend edit access, or keep them read-only." },
   { icon: Ic.target, title: "Sized off your stop, scored in R",
@@ -22,13 +22,6 @@ const FEATURES = [
     body: "Run a session under daily-loss, max-drawdown and profit-target rules. Breach one and the challenge fails, exactly as it would with real capital." },
   { icon: Ic.book, title: "A journal that fills itself",
     body: "Every fill is logged with entry, stop, target, R and reason for exit. Add notes while the setup is fresh, then review the whole book later." },
-];
-
-const STEPS = [
-  { n: "01", title: "Pick a market and a date", body: "Ten crypto pairs, timeframes from one second to one day, any start date you like. Or let it drop you somewhere random so you can't recognise the chart." },
-  { n: "02", title: "Arm your setup", body: "Direction, entry, stop, target, risk percent. Piptest checks the setup makes sense and works out the position size." },
-  { n: "03", title: "Press play", body: "Watch it fill, or not. Stops and targets are checked against every bar's high and low — including the ones that flash past at 50×." },
-  { n: "04", title: "Review the book", body: "Tag the setup, write the note while you remember it, then look at what your last hundred trades are actually telling you." },
 ];
 
 const FAQ = [
@@ -228,15 +221,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
             <span className="cap">How it works</span>
             <h2 style={{ margin: "10px 0" }}>Four steps, then repeat until it's automatic</h2>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 16 }}>
-            {STEPS.map((s) => (
-              <div key={s.n}>
-                <div className="mono" style={{ fontSize: 13, color: "var(--brand)", fontWeight: 600, marginBottom: 10 }}>{s.n}</div>
-                <h3 style={{ fontSize: 16, marginBottom: 8 }}>{s.title}</h3>
-                <p className="mut" style={{ fontSize: 14, lineHeight: 1.65 }}>{s.body}</p>
-              </div>
-            ))}
-          </div>
+          <HowItWorksMovie />
         </div>
       </section>
 
@@ -304,7 +289,366 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         </div>
       </footer>
 
-      <style>{`@media (max-width: 820px) { .hide-sm { display: none !important; } }`}</style>
+      <style>{`
+        @media (max-width: 820px) { .hide-sm { display: none !important; } }
+        .how-caret { display: inline-block; width: 1px; height: 14px; margin-left: 2px;
+          background: var(--ink); animation: howBlink 1s step-end infinite; }
+        @keyframes howBlink { 50% { opacity: 0; } }
+      `}</style>
+    </div>
+  );
+}
+
+/* ---------- how-it-works movie ----------
+   The hero mock below already carries the full-fidelity "replay in
+   action" demo (60fps candle growth, the real FloatingBar). This one
+   has a different job: walk through the four numbered steps below it
+   one at a time, plus a fifth beat the numbered list doesn't cover at
+   all — sharing a room — so "how it works" actually shows the whole
+   loop rather than just describing three of its four steps in prose
+   next to a chart that only ever demonstrates "press play".
+
+   Four self-contained scenes in one crossfading frame, each a small
+   faithful recreation of the real UI (the asset search, the order
+   ticket, the room panel) rather than a screenshot — screenshots go
+   stale the moment a page's copy or layout changes; a live recreation
+   using the app's own tokens/components doesn't. Each scene remounts
+   (via the `i === scene &&` gate below) every time it becomes active,
+   which is what lets its own local timers/typing-effect restart from
+   scratch on every loop rather than just running once. */
+const MOVIE_SCENES = [
+  { key: "market", label: "01", title: "Pick a market and a date",
+    body: "Search any of the ten pairs, then choose a start date — or let it drop you somewhere random." },
+  { key: "setup", label: "02", title: "Arm your setup",
+    body: "Direction, entry, stop, target, risk percent. Piptest works out the position size for you." },
+  { key: "play", label: "03", title: "Press play",
+    body: "Watch it fill, or not — stops and targets are checked against every bar." },
+  { key: "share", label: "＋", title: "Share it live",
+    body: "Send a 6-character room code. Whoever joins watches your chart update in real time." },
+];
+const MOVIE_SCENE_MS = 4400;
+
+function useAfter(ms, active = true) {
+  const [v, setV] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const t = setTimeout(() => setV(true), ms);
+    return () => clearTimeout(t);
+  }, [ms, active]);
+  return v;
+}
+
+/* An actual pointer-arrow glyph, not a plain dot — its hotspot (the
+   point a real cursor "clicks" from) is the tip at the shape's own
+   top-left corner, so every scene below positions this by that
+   corner, not by centering a circle the way a generic "tap here"
+   indicator would. */
+function CursorGlyph({ visible, top, left, right, hit, transitionMs = 450 }) {
+  return (
+    <div aria-hidden style={{
+      position: "absolute", top, left, right, zIndex: 5,
+      opacity: visible ? 1 : 0, transform: `scale(${hit ? 0.85 : 1})`,
+      transition: `top ${transitionMs}ms ease, left ${transitionMs}ms ease, right ${transitionMs}ms ease, opacity .25s ease, transform .15s ease`,
+      filter: "drop-shadow(0 1px 3px rgba(0,0,0,.55))",
+    }}>
+      <svg width="18" height="18" viewBox="0 0 20 20">
+        <path d="M2.2 1.6 L2.2 16.3 L6.3 12.6 L9.1 18.2 L11.5 17.1 L8.7 11.3 L14.6 11.3 Z"
+          fill="#fff" stroke="#0b0d11" strokeWidth="1" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
+function HowItWorksMovie() {
+  const [scene, setScene] = useState(0);
+  const timerRef = useRef(null);
+
+  const restart = () => {
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => setScene((s) => (s + 1) % MOVIE_SCENES.length), MOVIE_SCENE_MS);
+  };
+  useEffect(() => { restart(); return () => clearInterval(timerRef.current); }, []); // eslint-disable-line
+
+  const goTo = (i) => { setScene(i); restart(); };
+  const active = MOVIE_SCENES[scene];
+
+  return (
+    <div style={{ maxWidth: 720, margin: "0 auto 46px" }}>
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}
+        onMouseEnter={() => clearInterval(timerRef.current)} onMouseLeave={restart}>
+        {/* Landscape frame, but each scene's own content is untouched —
+           still the same fixed-width column and the same height it
+           already needed (the pre-arm setup form is the tallest one),
+           just centred in the wider box now instead of the box being
+           sized to it. */}
+        <div style={{ position: "relative", height: 460, background: "var(--surface)" }}>
+          {MOVIE_SCENES.map((s, i) => (
+            <div key={s.key} style={{
+              position: "absolute", inset: 0, padding: 22,
+              display: "flex", justifyContent: "center",
+              opacity: i === scene ? 1 : 0,
+              transform: i === scene ? "translateY(0)" : "translateY(5px)",
+              transition: "opacity .45s ease, transform .45s ease",
+              pointerEvents: "none",
+            }}>
+              <div style={{ width: 340, flexShrink: 0 }}>
+                {i === scene && <SceneContent sceneKey={s.key} />}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18, gap: 18, flexWrap: "wrap" }}>
+        <div>
+          <div className="mono" style={{ fontSize: 12.5, color: "var(--brand)", fontWeight: 600, marginBottom: 4 }}>{active.label}</div>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>{active.title}</div>
+          <div className="sm mut" style={{ marginTop: 3, maxWidth: 420 }}>{active.body}</div>
+        </div>
+        <div style={{ display: "flex", gap: 7, flexShrink: 0 }}>
+          {MOVIE_SCENES.map((s, i) => (
+            <button key={s.key} onClick={() => goTo(i)} aria-label={`Show: ${s.title}`} title={s.title}
+              style={{ width: 8, height: 8, borderRadius: 4, border: "none", cursor: "pointer", padding: 0,
+                background: i === scene ? "var(--brand)" : "var(--surface3)", transition: "background .2s" }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SceneContent({ sceneKey }) {
+  if (sceneKey === "market") return <MarketScene />;
+  if (sceneKey === "setup") return <SetupScene />;
+  if (sceneKey === "play") return <PlayScene />;
+  return <ShareScene />;
+}
+
+/* Types "BTC/USDT" into the real search-box markup from the New Session
+   modal's asset picker, then highlights it in a results list styled the
+   same way and fades a start-date row in underneath — the search step
+   has no single obvious "click" the way a button does, so a typing
+   effect stands in for "something is actively happening" here instead
+   of a travelling cursor. */
+function MarketScene() {
+  const FULL = "BTC/USDT";
+  const [typed, setTyped] = useState("");
+  useEffect(() => {
+    let i = 0;
+    const id = setInterval(() => {
+      i++; setTyped(FULL.slice(0, i));
+      if (i >= FULL.length) clearInterval(id);
+    }, 90);
+    return () => clearInterval(id);
+  }, []);
+  const picked = typed === FULL;
+  const dateShown = useAfter(1250, picked);
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div className="cap">Market</div>
+      <div className="in" style={{ display: "flex", alignItems: "center", color: typed ? "var(--ink)" : "var(--dim)" }}>
+        {typed || "Type to search for assets"}<span className="how-caret" />
+      </div>
+      <div style={{ display: "grid", gap: 5 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px",
+          borderRadius: 7, fontSize: 12.5, transition: "background .3s, border-color .3s",
+          background: picked ? "var(--brandSoft)" : "transparent",
+          border: `1px solid ${picked ? "var(--brand)" : "var(--border)"}` }}>
+          <span style={{ fontWeight: 600 }}>BTC/USDT</span><span className="sm mut">Binance</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px",
+          borderRadius: 7, fontSize: 12.5, border: "1px solid var(--border)", opacity: .5 }}>
+          <span style={{ fontWeight: 600 }}>EUR/USD</span><span className="sm mut">TwelveData</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginTop: 4,
+        opacity: dateShown ? 1 : 0, transform: dateShown ? "translateY(0)" : "translateY(4px)", transition: "opacity .35s, transform .35s" }}>
+        <Svg s={13} style={{ color: "var(--muted)" }}>{Ic.chart}</Svg>
+        <span className="mut">Starting</span><span style={{ fontWeight: 600 }}>13 Mar '25 · 10:00 UTC</span>
+      </div>
+    </div>
+  );
+}
+
+/* The real "Setup" ticket, both of its states — the pre-arm form (same
+   Field rows, same R:R/Position size line, same Arm setup button as
+   Simulator.jsx's sim-right panel) and, once the cursor clicks it, the
+   actual OpenTicket layout it swaps to (pill header, Entry/Stop/Take
+   profit/Size/Risk/R:R rows) — rather than just relabelling one button
+   the way a mockup would. */
+function SetupScene() {
+  const rowsIn = useAfter(150);
+  const cursorIn = useAfter(1900);
+  const hit = useAfter(2550);
+  const armed = useAfter(2700);
+  const cursorOut = useAfter(2950);
+
+  return (
+    <div>
+      <div className="cap" style={{ marginBottom: 12 }}>Setup</div>
+      {!armed ? (
+        <>
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <div className="btn buy" style={{ flex: 1, justifyContent: "center" }}>Long</div>
+            <div className="btn" style={{ flex: 1, justifyContent: "center" }}>Short</div>
+          </div>
+          <div style={{ display: "grid", gap: 9, opacity: rowsIn ? 1 : 0, transform: rowsIn ? "translateY(0)" : "translateY(4px)",
+            transition: "opacity .3s ease, transform .3s ease" }}>
+            <Field label="Entry"><div className="in" style={{ display: "flex", alignItems: "center" }}>83,300.00</div></Field>
+            <Field label="Stop loss"><div className="in" style={{ display: "flex", alignItems: "center" }}>82,750.00</div></Field>
+            <Field label="Take profit"><div className="in" style={{ display: "flex", alignItems: "center" }}>84,400.00</div></Field>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", marginTop: 8,
+            borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+            <span className="mut">R:R</span><span className="num" style={{ fontWeight: 600 }}>2.10</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 13,
+            borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
+            <span className="mut">Position size</span><span className="num" style={{ fontWeight: 600 }}>0.0182 ($1,516)</span>
+          </div>
+          <div style={{ position: "relative" }}>
+            <div className="btn pri" style={{ width: "100%", padding: 10, justifyContent: "center" }}>
+              <Svg s={14}>{Ic.plus}</Svg>Arm setup
+            </div>
+            <CursorGlyph visible={cursorIn && !cursorOut} hit={hit} top={cursorIn ? 15 : -30} right={cursorIn ? 44 : 10} />
+          </div>
+        </>
+      ) : (
+        <div className="fade-in">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span className="pill g">Long</span><span className="pill n">Watching</span>
+          </div>
+          {[["Entry", "83,300.00"], ["Stop loss", "82,750.00"], ["Take profit", "84,400.00"],
+            ["Size", "0.0182"], ["Risk", "1.0% · $100.00"], ["R:R", "2.10"]].map(([l, v]) => (
+            <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0",
+              borderBottom: "1px solid var(--border)", fontSize: 13 }}>
+              <span className="mut">{l}</span><span className="num" style={{ fontWeight: 500 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Real OHLC candles (wick + body, same SVG shape the hero mock and the
+   actual chart both draw) rather than flat bars, with the actual
+   FloatingBar component floating over them — same children markup as
+   the real replay transport in Simulator.jsx (status dot, Play/pause,
+   step-forward, interval, clock) — and the cursor clicks its real Play
+   button, not a stand-in circle. A couple more candles grow in once
+   it's pressed, and the clock steps forward. */
+function PlayScene() {
+  const [barPos, setBarPos] = useState({ x: 6, y: 8 });
+  const cursorIn = useAfter(700);
+  const hit = useAfter(1350);
+  const playing = useAfter(1450);
+  const cursorOut = useAfter(1750);
+  const clock2 = useAfter(2400, playing);
+  const clock3 = useAfter(3400, playing);
+
+  const bars = [
+    { o: 10, h: 14, l: 9, c: 13 }, { o: 13, h: 15, l: 11, c: 11.5 }, { o: 11.5, h: 13, l: 9, c: 12.5 },
+    { o: 12.5, h: 18, l: 12, c: 17 }, { o: 17, h: 19, l: 15, c: 15.5 }, { o: 15.5, h: 22, l: 15, c: 21 },
+    { o: 21, h: 23, l: 19, c: 20 },
+  ];
+  const extra = [{ o: 20, h: 25, l: 19.5, c: 24.5 }, { o: 24.5, h: 26, l: 22, c: 23 }];
+  const lo = 8, hi = 27, H = 150, bw = 16, gap = 7;
+  const y = (v) => H - ((v - lo) / (hi - lo)) * H;
+  const xAt = (i) => i * (bw + gap) + bw / 2;
+  const all = [...bars, ...extra];
+  const W = all.length * (bw + gap);
+  const clock = clock3 ? "11:30" : clock2 ? "11:00" : "10:30";
+
+  return (
+    <div style={{ position: "relative", height: "100%" }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line key={f} x1="0" y1={H * f} x2={W} y2={H * f} stroke="var(--border)" strokeWidth="1" opacity=".6" />
+        ))}
+        {bars.map((b, i) => {
+          const col = b.c >= b.o ? "var(--up)" : "var(--down)", x = xAt(i);
+          return (
+            <g key={i}>
+              <line x1={x} y1={y(b.h)} x2={x} y2={y(b.l)} stroke={col} strokeWidth="1.6" />
+              <rect x={x - bw * 0.32} y={Math.min(y(b.o), y(b.c))} width={bw * 0.64} height={Math.max(1.5, Math.abs(y(b.c) - y(b.o)))} fill={col} />
+            </g>
+          );
+        })}
+        {extra.map((b, i) => {
+          const col = b.c >= b.o ? "var(--up)" : "var(--down)", x = xAt(bars.length + i);
+          return (
+            <g key={"e" + i} style={{ opacity: playing ? 1 : 0, transition: `opacity .4s ease ${i * 0.35 + 0.1}s` }}>
+              <line x1={x} y1={y(b.h)} x2={x} y2={y(b.l)} stroke={col} strokeWidth="1.6" />
+              <rect x={x - bw * 0.32} y={Math.min(y(b.o), y(b.c))} width={bw * 0.64} height={Math.max(1.5, Math.abs(y(b.c) - y(b.o)))} fill={col} />
+            </g>
+          );
+        })}
+      </svg>
+
+      <FloatingBar pos={barPos} onPos={setBarPos} collapsed={false} onToggleCollapse={() => {}}
+        minWidth={230} fitContent label="Replay">
+        <div style={{ padding: "6px 9px", display: "flex", alignItems: "center", gap: 7 }}>
+          <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
+            style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0, background: playing ? "var(--up)" : "var(--dim)" }} />
+          <div style={{ position: "relative", display: "flex", gap: 1, flexShrink: 0 }}>
+            <button className="btn pri" tabIndex={-1} style={{ padding: "4px 11px" }}>
+              <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
+            </button>
+            <CursorGlyph visible={cursorIn && !cursorOut} hit={hit} top={cursorIn ? 7 : -20} left={cursorIn ? 9 : -8} />
+            <button className="btn ghost" tabIndex={-1} style={{ padding: "4px 7px" }}><Svg s={13}>{Ic.fwd}</Svg></button>
+          </div>
+          <select className="in" disabled defaultValue="1m" style={{ width: 54, padding: "4px 6px", fontSize: 12.5, flexShrink: 0 }}>
+            <option value="1m">1m</option>
+          </select>
+          <span className="num" style={{ fontSize: 11.5, color: "var(--muted)", whiteSpace: "nowrap", flexShrink: 0 }}>{clock}</span>
+        </div>
+      </FloatingBar>
+    </div>
+  );
+}
+
+/* The real RoomPanel, field for field — the code block ("hosted by",
+   live dot), the host's Close room button, the Participants list with
+   real Avatar discs and the same host/viewer pills, down to the
+   closing view-only line. A second participant (jason) fades into the
+   list a beat later, demonstrating the one thing the other three
+   scenes don't touch at all: that a session isn't necessarily solo. */
+function ShareScene() {
+  const joined = useAfter(2000);
+  return (
+    <div>
+      <div className="cap" style={{ marginBottom: 14 }}>Live room</div>
+      <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10,
+        padding: "11px 14px", marginBottom: 12 }}>
+        <div className="num" style={{ fontSize: 23, fontWeight: 700, letterSpacing: ".09em" }}>JAC9M3</div>
+        <div className="sm mut" style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+          hosted by josh
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: "var(--up)" }}>
+            <span style={{ width: 6, height: 6, borderRadius: 4, background: "currentColor" }} />live
+          </span>
+        </div>
+      </div>
+      <div className="btn" style={{ width: "100%", marginBottom: 14, justifyContent: "center",
+        color: "var(--down)", borderColor: "color-mix(in srgb, var(--down) 40%, var(--border))" }}>Close room</div>
+      <div className="cap" style={{ marginBottom: 8 }}>Participants · {joined ? 2 : 1}</div>
+      <div style={{ display: "grid", gap: 2, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}>
+          <Avatar handle="josh" size={24} />
+          <span className="sm" style={{ flex: 1 }}>josh (you)</span>
+          <span className="pill b">host</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0",
+          opacity: joined ? 1 : 0, transform: joined ? "translateY(0)" : "translateY(-4px)", transition: "opacity .4s, transform .4s" }}>
+          <Avatar handle="jason" size={24} />
+          <span className="sm" style={{ flex: 1 }}>jason</span>
+          <span className="pill n">viewer</span>
+        </div>
+      </div>
+      <div className="sm mut" style={{ lineHeight: 1.55 }}>
+        Sharing is view-only — guests watch live, but only you can trade or drive playback.
+      </div>
     </div>
   );
 }
