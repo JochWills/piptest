@@ -399,6 +399,13 @@ router.patch("/trades/:id", requireAuth, writeLimiter, async (req, res) => {
 /* =====================================================
    LIVE ROOMS  (the old /kv, now authenticated + durable)
    ===================================================== */
+/* Reading a room by code stays open to any authenticated user, on
+   purpose — "join a room" only works at all because a client can look
+   a code up (data.roomGet) before it's a participant of anything, the
+   same way clicking a shared link works before you've been added to
+   whatever it points to. The code itself is the access control here.
+   Writing is a different story — see the PATCH/PUT/DELETE handlers
+   below, which is where this used to have none at all. */
 router.get("/kv/:key", requireAuth, async (req, res) => {
   const { rows } = await q("SELECT value FROM kv WHERE key=$1", [req.params.key]);
   res.json({ value: rows[0]?.value ?? null });
@@ -408,14 +415,38 @@ router.put("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
   if (!/^room:[A-Z0-9]{6}$/.test(req.params.key)) {
     return res.status(400).json({ error: "bad_key", message: "Only room keys can be written." });
   }
+  const { rows } = await q("SELECT value FROM kv WHERE key=$1", [req.params.key]);
+  const existing = rows[0]?.value;
+  /* makeCode's own comment covers how unlikely a real collision is —
+     this check isn't really about that. Without it, anyone who knows
+     (or guesses — 6 alphanumeric chars isn't as private as a link)
+     someone else's room code could PUT a brand-new document over it
+     and flatten their entire live session. Only the room's own host
+     may ever overwrite an existing key. */
+  if (existing && existing.host !== req.user.handle) {
+    return res.status(403).json({ error: "forbidden", message: "That room code is already in use." });
+  }
+  const value = req.body?.value ?? null;
+  /* Force this rather than trust it, for the same reason — otherwise
+     a stranger creating a *fresh* code could still just claim to be
+     hosting as somebody else's handle. */
+  if (value && typeof value === "object") value.host = req.user.handle;
   await q(
     `INSERT INTO kv (key, value) VALUES ($1,$2)
      ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`,
-    [req.params.key, JSON.stringify(req.body?.value ?? null)]);
+    [req.params.key, JSON.stringify(value)]);
   res.json({ ok: true });
 });
 
 router.delete("/kv/:key", requireAuth, async (req, res) => {
+  if (/^room:[A-Z0-9]{6}$/.test(req.params.key)) {
+    const { rows } = await q("SELECT value FROM kv WHERE key=$1", [req.params.key]);
+    const existing = rows[0]?.value;
+    // ending a room is the host's call alone — see closeRoom in Simulator.jsx
+    if (existing && existing.host !== req.user.handle) {
+      return res.status(403).json({ error: "forbidden", message: "Only the host can end this room." });
+    }
+  }
   await q("DELETE FROM kv WHERE key=$1", [req.params.key]);
   res.json({ ok: true });
 });
@@ -436,27 +467,73 @@ router.delete("/kv/:key", requireAuth, async (req, res) => {
    same array, for "append") always both survive, because each one is
    computed from whatever the row actually holds at the moment it runs,
    never from a client's read that's already a network round-trip old. */
+/* Per-op authorization. This route otherwise has no idea it's looking
+   at a room, on purpose — the merge is generic jsonb_set over a raw
+   path/value pair (see the big comment above) — but that generality
+   used to mean `requireAuth` (logged in, full stop) was the *entire*
+   access check. Any authenticated account that knew or guessed a
+   room's 6-character code could patch someone else's live room:
+   inject chat as if from the host, self-promote its own participant
+   entry's role to "host" (which the WS relay in server/ws.js trusts
+   for control-message authority — see loadRole there), or overwrite
+   the whole session's chart state. This enumerates every patch shape
+   the real client ever sends and who's actually allowed to send it,
+   using the room doc already fetched below — never the client's own
+   claims about itself. Anything that doesn't match a known, permitted
+   shape is silently dropped rather than erroring the whole batch: a
+   legitimate multi-op request (see pushRoom/kickParticipant) never
+   mixes an allowed op with a disallowed one, so this only ever changes
+   behavior for an adversarial one. */
+function authorizeRoomPatch(op, current, me) {
+  const [p0, p1] = op.path;
+  if (p0 === "participants" && op.path.length === 2) {
+    const target = p1;
+    if (op.remove) return target === me || current.host === me; // leaving (self) or a kick (host only)
+    if (target !== me) return false; // never allowed to write someone else's entry directly
+    // joining/resuming: role is never taken from the client's own say-so
+    if (op.value && typeof op.value === "object") op.value.role = (target === current.host) ? "host" : "viewer";
+    return true;
+  }
+  if (p0 === "messages" && op.path.length === 1 && op.append !== undefined) {
+    return current.host === me || !!current.participants?.[me]; // any current participant may chat
+  }
+  if (p0 === "updatedBy") { op.value = me; return true; } // never trust a caller's claimed identity here
+  if (p0 === "updatedAt") return true; // just a clock value, harmless either way
+  // everything else — symbol, interval, cursor, playing, stepId,
+  // sessionName, layout, drawings, trade, closedTrades, … — drives the
+  // session itself, host only (matches canControl on the client).
+  return current.host === me;
+}
+
 router.patch("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
   if (!/^room:[A-Z0-9]{6}$/.test(req.params.key)) {
     return res.status(400).json({ error: "bad_key", message: "Only room keys can be patched." });
   }
-  const ops = Array.isArray(req.body?.patches) ? req.body.patches.slice(0, 20) : [];
+  const { rows: currentRows } = await q("SELECT value FROM kv WHERE key=$1", [req.params.key]);
+  const current = currentRows[0]?.value;
+  if (!current) return res.status(404).json({ error: "not_found" });
+
+  const rawOps = Array.isArray(req.body?.patches) ? req.body.patches.slice(0, 20) : [];
+  let sawRejection = false;
+  const ops = rawOps.filter((op) => {
+    if (!Array.isArray(op.path) || !op.path.length || !op.path.every((s) => typeof s === "string")) return false;
+    const ok = authorizeRoomPatch(op, current, req.user.handle);
+    if (!ok) sawRejection = true;
+    return ok;
+  });
+
   let expr = "value";
   const params = [req.params.key];
   for (const op of ops) {
-    if (!Array.isArray(op.path) || !op.path.length || !op.path.every((s) => typeof s === "string")) continue;
     params.push(op.path);
     const pathParam = `$${params.length}`;
     if (op.remove) {
       expr = `(${expr} #- ${pathParam})`;
     } else if (op.append !== undefined) {
-      /* This route otherwise has no idea it's a chat message — the merge
-         is deliberately generic, done inside Postgres from a raw path/
-         value pair (see the comment above). Chat is the one shape worth
-         recognising here: the client's own censor() (src/lib/profanity.js)
-         is a courtesy that a modified client or a raw call can skip
-         entirely, so this is the actual boundary for anything landing in
-         `messages` — see server/profanity.js. */
+      /* The client's own censor() (src/lib/profanity.js) is a courtesy
+         that a modified client or a raw call can skip entirely, so this
+         is the actual boundary for anything landing in `messages` —
+         see server/profanity.js. */
       const append = op.path.length === 1 && op.path[0] === "messages" && Array.isArray(op.append)
         ? op.append.map((m) => (m && typeof m === "object" && typeof m.text === "string")
             ? { ...m, text: censor(m.text.slice(0, 500)) } : m)
@@ -468,7 +545,9 @@ router.patch("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
       expr = `jsonb_set(${expr}, ${pathParam}, $${params.length}::jsonb, true)`;
     }
   }
-  if (expr === "value") return res.status(400).json({ error: "no_valid_patches" });
+  if (expr === "value") {
+    return res.status(sawRejection ? 403 : 400).json({ error: sawRejection ? "forbidden" : "no_valid_patches" });
+  }
   const r = await q(`UPDATE kv SET value = ${expr}, updated_at = now() WHERE key = $1 RETURNING value`, params);
   if (!r.rowCount) return res.status(404).json({ error: "not_found" });
   res.json({ value: r.rows[0].value });
