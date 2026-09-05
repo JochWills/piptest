@@ -16,6 +16,7 @@ import * as data from "../lib/data.js";
 import { censor } from "../lib/profanity.js";
 import { API_ENABLED } from "../lib/api.js";
 import { connectRoomSocket } from "../lib/roomSocket.js";
+import { detectAdBlock } from "../lib/adblock.js";
 
 /* Below this bar-index no saved `cursor` could plausibly be a real
    millisecond timestamp (that's a UNIX time somewhere in 1970) — it's a
@@ -199,6 +200,26 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     else pageRef.current?.requestFullscreen?.();
   }, []);
 
+  /* ---------- ad blocker gate ----------
+     Free access here trades on the ad rail (see the aside further down)
+     actually being seen — see lib/adblock.js for how "seen" is checked
+     (deliberately not tied to whether PIP Affiliates' own server happens
+     to be up). Checked on entry and every few seconds afterward, not
+     just once, so someone who disables their blocker mid-session
+     regains access without a reload — "so long as it stays off" cuts
+     both ways. `account.plan` doesn't have a paid tier yet (see App.jsx
+     — everyone registers "free"), but the check is here for when it
+     does, so a subscriber isn't walled off behind an ad they were never
+     shown to begin with. */
+  const [adBlocked, setAdBlocked] = useState(false);
+  const recheckAdBlock = useCallback(() => { detectAdBlock().then(setAdBlocked); }, []);
+  useEffect(() => {
+    if (account?.plan && account.plan !== "free") { setAdBlocked(false); return; }
+    recheckAdBlock();
+    const id = setInterval(recheckAdBlock, 5000);
+    return () => clearInterval(id);
+  }, [account?.plan, recheckAdBlock]);
+
   const role = room ? room.participants?.[account.handle]?.role || "viewer" : "host";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
   /* Sharing a session is view-only, full stop: a guest watches, the
@@ -212,6 +233,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const canControl = !room || role === "host";
   const canTrade = !room || isHost;
   const displayTrade = canTrade ? trade : hostTrade;
+
+  /* A real pause once the ad blocker gate comes up, not just a visual
+     one — otherwise replay keeps advancing (and fetching bars) behind
+     it for no one to see. Only for whoever actually drives playback —
+     a guest was never doing that regardless. */
+  useEffect(() => { if (adBlocked && canControl) setPlaying(false); }, [adBlocked, canControl]);
 
   /* the widget only reads canDraw at mount, so gaining or losing
      control — joining a room as a guest, leaving one, being kicked —
@@ -1304,8 +1331,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       if (tg === "INPUT" || tg === "SELECT" || tg === "TEXTAREA") return;
       if (e.metaKey || e.ctrlKey) return;
       const k = e.key.toLowerCase();
-      if (e.key === " ") { e.preventDefault(); if (canControl) setPlaying((p) => !p); return; }
-      if (e.key === "ArrowRight") { e.preventDefault(); if (canControl) stepForward(); return; }
+      if (e.key === " ") { e.preventDefault(); if (canControl && !adBlocked) setPlaying((p) => !p); return; }
+      if (e.key === "ArrowRight") { e.preventDefault(); if (canControl && !adBlocked) stepForward(); return; }
       if (k === "?") { setHelpOpen(true); return; }
       /* Plain "f", not the library's own Shift+F — this only reaches
          the page when focus is here rather than inside the chart's
@@ -1315,7 +1342,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canControl, stepForward, toggleFullscreen]);
+  }, [canControl, stepForward, toggleFullscreen, adBlocked]);
 
   useEffect(() => {
     const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
@@ -1808,6 +1835,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       </div>
 
       <ShortcutHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {adBlocked && <AdBlockGate onRecheck={recheckAdBlock} />}
 
       <style>{`
         .sim-right { scrollbar-width: thin; }
@@ -2064,6 +2092,46 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
           Send
         </button>
       </form>
+    </div>
+  );
+}
+
+/* Not built on the shared Modal — Modal always offers a backdrop-click
+   and a × to close, and this one deliberately has neither. The whole
+   point is that it can't be dismissed except by actually resolving the
+   thing it's blocking on (or the ad genuinely coming back — see the
+   periodic recheck in Simulator's own effect). */
+function AdBlockGate({ onRecheck }) {
+  const steps = [
+    ["uBlock Origin", "Click its icon in the toolbar, then the power button, to turn it off for this site."],
+    ["AdBlock / AdBlock Plus", "Click its icon and choose “Don't run on this site” or “Pause on this site”."],
+    ["Brave Shields", "Click the lion icon in the address bar and turn Shields off for this site."],
+    ["Anything else", "Look for an option to allow or whitelist piptest.com, then use the button below."],
+  ];
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 500, background: "rgba(6,8,12,.92)",
+      display: "grid", placeItems: "center", padding: 20, backdropFilter: "blur(3px)",
+    }}>
+      <div className="card fade-in" style={{ width: "100%", maxWidth: 460, padding: 26 }}>
+        <h3 style={{ fontSize: 18, marginBottom: 8 }}>Please allow ads for PipTest</h3>
+        <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 18 }}>
+          PipTest stays free to use because of the one small ad next to the chart.
+          Your ad blocker is hiding it, so replay is paused until it's allowed for
+          this site — you'll get access back the moment it is, no reload needed.
+        </p>
+        <div style={{ display: "grid", gap: 12, marginBottom: 20 }}>
+          {steps.map(([label, body]) => (
+            <div key={label}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
+              <div className="sm mut" style={{ marginTop: 2, lineHeight: 1.5 }}>{body}</div>
+            </div>
+          ))}
+        </div>
+        <button className="btn pri" style={{ width: "100%", padding: 11 }} onClick={onRecheck}>
+          I've disabled it — recheck
+        </button>
+      </div>
     </div>
   );
 }
