@@ -226,6 +226,17 @@ export default function TVAdvancedChart({
         "header_compare",
         "go_to_date",
         "timeframes_toolbar",
+        /* The library's own fullscreen button puts only its own iframe into
+           the browser's native fullscreen — PipTest's replay bar, trade
+           ticket and everything else living outside that iframe would just
+           disappear behind it, with no z-index able to bring them back (a
+           fullscreened element sits in the browser's top layer, above the
+           page's entire normal stacking context). Simulator.jsx has its own
+           fullscreen toggle instead, scoped to the whole workspace — see
+           its toggleFullscreen — so this one, which can't be fixed, is
+           hidden rather than left as a second control that quietly breaks
+           the UI. */
+        "header_fullscreen_button",
         /* The library adds its own Volume study on every widget mount by
            default — its own "_once" bookkeeping for not repeating that is
            scoped to the browser's localStorage, which has nothing to do

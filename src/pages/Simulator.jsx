@@ -166,6 +166,31 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const [saveState, setSaveState] = useState("saved");
   const [helpOpen, setHelpOpen] = useState(false);
 
+  /* ---------- fullscreen ----------
+     Deliberately scoped to the whole page root, not just the chart —
+     see TVAdvancedChart's own disabled_features comment for why the
+     library's built-in fullscreen button had to go: it only fullscreens
+     its own iframe, so the replay bar and trade ticket (both outside
+     it) would just vanish behind it with no CSS fix possible. Fullscreening
+     this component's own root keeps everything — header, chart, replay
+     bar, ticket — in the same fullscreened element, so nothing changes
+     about how they're laid out or drawn over each other.
+     `fullscreen` state, not a read of document.fullscreenElement at
+     render time: it also has to track exits the button never caused
+     (Escape, the browser's own "Exit full screen" bar), which only the
+     fullscreenchange event reports. */
+  const pageRef = useRef(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === pageRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else pageRef.current?.requestFullscreen?.();
+  }, []);
+
   const role = room ? room.participants?.[account.handle]?.role || "viewer" : "host";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
   /* Sharing a session is view-only, full stop: a guest watches, the
@@ -1274,10 +1299,15 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       if (e.key === " ") { e.preventDefault(); if (canControl) setPlaying((p) => !p); return; }
       if (e.key === "ArrowRight") { e.preventDefault(); if (canControl) stepForward(); return; }
       if (k === "?") { setHelpOpen(true); return; }
+      /* Plain "f", not the library's own Shift+F — this only reaches
+         the page when focus is here rather than inside the chart's
+         iframe (keydown doesn't cross that boundary), so the header
+         button below is the reliable path; this is just the bonus. */
+      if (k === "f") { toggleFullscreen(); return; }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canControl, stepForward]);
+  }, [canControl, stepForward, toggleFullscreen]);
 
   useEffect(() => {
     const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
@@ -1290,7 +1320,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const switchableSessions = sessions.filter((s) => !s.transient);
 
   return (
-    <div className="sim-page" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+    <div ref={pageRef} className="sim-page" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* ================= top bar ================= */}
       <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", minHeight: 56,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, flexWrap: "wrap" }}>
@@ -1420,6 +1450,15 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
               this rides along up here instead. */}
           <button className="btn ghost" style={{ padding: "6px 9px", fontSize: 12.5 }}
             onClick={() => setHelpOpen(true)} title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+          {/* The chart's own fullscreen button is hidden (see
+              TVAdvancedChart's disabled_features) because it only
+              fullscreens its own iframe — the replay bar and ticket live
+              outside that and would disappear behind it. This one
+              fullscreens the whole page instead, so everything stays. */}
+          <button className="btn ghost" onClick={toggleFullscreen} style={{ padding: "6px 9px" }}
+            title={fullscreen ? "Exit fullscreen (f)" : "Fullscreen (f)"} aria-label="Toggle fullscreen">
+            <Svg s={15}>{fullscreen ? Ic.collapse : Ic.expand}</Svg>
+          </button>
           <button className="btn ghost" onClick={onToggleTheme} style={{ padding: "6px 9px" }} aria-label="Toggle theme">
             <Svg s={15}>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
           </button>

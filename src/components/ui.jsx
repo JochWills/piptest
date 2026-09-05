@@ -372,6 +372,9 @@ export const Ic = {
   target: <><circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /></>,
   logout: <path d="M6 3.2H3.4v9.6H6M9.3 5.4 11.9 8l-2.6 2.6M11.9 8H6" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
   chat: <path d="M2.5 3.6h11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.4l-3.1 2.8V11H2.5a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.35" fill="none" strokeLinejoin="round" strokeLinecap="round" />,
+  /* four corner brackets pointing outward/inward — enter/exit fullscreen */
+  expand: <path d="M6 2H2v4M10 2h4v4M14 10v4h-4M2 10v4h4" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
+  collapse: <path d="M2 6h4V2M14 6h-4V2M14 10h-4v4M2 10h4v4" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
 };
 
 export const Svg = ({ children, s = 16, style }) => (
