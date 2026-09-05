@@ -45,7 +45,6 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const [cursor, setCursor] = useState(meta.startMs);
   const chartStartRef = useRef(meta.startMs);
   const [cur, setCur] = useState(null);
-  const prevCloseRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   /* how much calendar time one "next" click or one play-tick advances,
      as an INTERVALS id (e.g. "30m") — independent of the chart's own
@@ -270,8 +269,6 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const stats = useMemo(() => computeStats(trades, startBalance), [trades, startBalance]);
   const equity = stats.equity;
   const unreal = openPnl(displayTrade, price);
-  const chg = cur && prevCloseRef.current != null ? cur.c - prevCloseRef.current : 0;
-  const chgPct = cur && prevCloseRef.current ? (chg / prevCloseRef.current) * 100 : 0;
   const challenge = useMemo(() => evaluateChallenge(trades, meta.challenge, startBalance), [trades, meta.challenge, startBalance]);
 
   const entryVal = parseFloat(form.entry) || price || 0;
@@ -386,7 +383,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
 
   const handleBar = useCallback((rawBar, stepRes) => {
     const b = toNative(rawBar);
-    setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
+    setCur(b);
     const last = seenRef.current[seenRef.current.length - 1];
     if (last !== b.t) {
       seenRef.current.push(b.t); seenBarsRef.current.push(b);
@@ -433,7 +430,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const handleCursor = useCallback((ms, rawBar) => {
     setCursor(ms);
     if (rawBar) {
-      setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return toNative(rawBar); });
+      setCur(toNative(rawBar));
       /* The ring buffer's index 0 starts life as a bare anchor with no
          bar attached (see seenBarsRef's own declaration) — nothing's
          been revealed at that exact position yet at the point it's
@@ -593,7 +590,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const applySeenBar = (idx) => {
     const b = seenBarsRef.current[idx];
     if (!b) return; // the one bare anchor entry — nothing revealed there yet
-    setCur((prevBar) => { prevCloseRef.current = prevBar?.c ?? prevCloseRef.current; return b; });
+    setCur(b);
   };
   /* how far the seen buffer already reaches, forward or back, before
      `stepMs` of calendar time (measured from the current position) runs
@@ -1387,9 +1384,6 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
         </span>
 
         <span className="num" style={{ fontSize: 18, fontWeight: 600 }}>{fmtPrice(price)}</span>
-        <span className="num sm" style={{ fontWeight: 500, color: chg >= 0 ? "var(--up)" : "var(--down)" }}>
-          {chg >= 0 ? "+" : "−"}{fmtPrice(Math.abs(chg))} ({chgPct >= 0 ? "+" : "−"}{Math.abs(chgPct).toFixed(2)}%)
-        </span>
         <span className="sm mut hide-sm">{cur ? fmtClock(cur.t, interval) + " UTC" : ""}</span>
 
         <div className="sim-header-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
