@@ -6,6 +6,7 @@ import Landing from "./pages/Landing.jsx";
 import Auth from "./pages/Auth.jsx";
 import Reset from "./pages/Reset.jsx";
 import Legal from "./pages/Legal.jsx";
+import NotFound from "./pages/NotFound.jsx";
 /* Lazy: everything behind the auth gate, so a first-time visitor on
    Landing (the default route, and the one conversion actually depends
    on) never downloads the trading engine, room sync, journal/analytics
@@ -35,8 +36,9 @@ const ROUTES = ["home", "auth", "reset", "privacy", "terms", "sim", "dashboard",
 
 const parseHash = () => {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
+  if (!h) return { page: "", arg: null }; // no hash at all -> the actual homepage
   const [page, arg] = h.split("/");
-  if (!ROUTES.includes(page)) return { page: "", arg: null };
+  if (!ROUTES.includes(page)) return { page: "notfound", arg: null }; // a hash, just not one of ours
   return { page, arg: arg || null };
 };
 
@@ -428,6 +430,17 @@ export default function App() {
      sign-in screen instead of the policy they came to read. */
   if (route.page === "privacy" || route.page === "terms") {
     return wrap(<Legal kind={route.page} onBack={() => go("")} onNav={go} />);
+  }
+
+  /* Same reasoning again: a bad link is a bad link whether or not
+     whoever followed it is signed in, so this comes before the auth
+     gate too. `account` here can still mean "not resolved yet" during
+     boot (see the comment below) — that only ever changes which of
+     NotFound's two buttons shows, never whether the page itself
+     renders, so it doesn't need to wait on `booted` the way the auth
+     gate does. */
+  if (route.page === "notfound") {
+    return wrap(<NotFound account={account} onHome={() => go("")} onDashboard={() => go("dashboard")} />);
   }
 
   /* `!account` alone would also mean "still finding out" during the

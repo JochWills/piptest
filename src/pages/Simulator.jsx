@@ -1357,7 +1357,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   return (
     <div ref={pageRef} className="sim-page" style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
       {/* ================= top bar ================= */}
-      <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", minHeight: 56,
+      <header className="sim-header" style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 14px", minHeight: 56,
         borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, flexWrap: "wrap" }}>
         {/* the logo doubles as the way out — labelled, because an icon
             alone left people with no obvious route back */}
@@ -1392,7 +1392,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
         </span>
         <span className="sm mut hide-sm">{cur ? fmtClock(cur.t, interval) + " UTC" : ""}</span>
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="sim-header-actions" style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
           <span className="sm" style={{ color: saveState === "failed" ? "var(--down)" : "var(--dim)" }}>
             {meta.transient ? "Viewing a room — not saved"
               : saveState === "saving" ? "Saving…" : saveState === "failed" ? "Save failed" : "Saved"}
@@ -1415,7 +1415,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             </button>
 
             {sessionsOpen && (
-              <div className="card" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60,
+              <div className="card sim-header-pop" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60,
                 width: 268, padding: 6, maxHeight: 380, overflowY: "auto" }}>
                 <div className="cap" style={{ padding: "8px 10px 6px" }}>
                   Sessions — balance shown is this one
@@ -1504,7 +1504,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             </button>
 
             {profileOpen && (
-              <div className="card" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60, width: 232, padding: 6 }}>
+              <div className="card sim-header-pop" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60, width: 232, padding: 6 }}>
                 <div style={{ padding: "8px 10px 10px", borderBottom: "1px solid var(--border)", marginBottom: 6 }}>
                   <div style={{ fontWeight: 600, fontSize: 13.5 }}>{account?.name || account?.handle}</div>
                   <div className="sm mut" style={{ fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -1864,6 +1864,29 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
           /* .hide-sm itself is defined globally in ui.jsx now — every
              page's markup can rely on it, not just this one */
         }
+        @media (max-width: 640px) {
+          /* The header wraps onto its own second line at this width
+             (see .sim-header's flexWrap), so the room/chat/sessions/
+             account buttons that anchor these popups are no longer
+             necessarily near the header's true right edge the way
+             right:0 assumes on desktop — a 300px-wide popup anchored
+             to a button in the middle of that wrapped row can end up
+             rendered mostly past the left edge of the screen. Pinned
+             to the viewport instead, with safe margins either side,
+             so every one of them (room panel, chat, session switcher,
+             account menu) stays fully on-screen regardless of which
+             button opened it or where that button landed. */
+          .sim-header-pop {
+            position: fixed !important;
+            left: 8px !important;
+            right: 8px !important;
+            top: 100px !important;
+            width: auto !important;
+            max-width: none !important;
+            height: auto !important;
+            max-height: calc(100vh - 116px) !important;
+          }
+        }
       `}</style>
     </div>
   );
@@ -1962,7 +1985,7 @@ function SingleRow({ trade, symbol, kind, unreal, onClose, onBE, onCancel, readO
 
 function RoomPanel({ room, isHost, account, joinCode, setJoinCode, roomMsg, wsLive, hostRoom, joinRoom, leaveRoom, closeRoom, kickParticipant, onClose }) {
   return (
-    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 16, width: 300 }}>
+    <div className="card sim-header-pop" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60, padding: 16, width: 300 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <span className="cap">Live room</span>
         <button className="btn ghost" style={{ padding: "2px 7px" }} onClick={onClose} aria-label="Close">✕</button>
@@ -2050,7 +2073,7 @@ function ChatPanel({ room, account, messages, chatText, setChatText, onSend, bus
   }, [messages.length]);
 
   return (
-    <div className="card" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60,
+    <div className="card sim-header-pop" data-pop style={{ position: "absolute", right: 0, top: 36, zIndex: 60,
       width: 300, height: 380, display: "flex", flexDirection: "column", padding: 0, overflow: "hidden" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
         padding: "12px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
