@@ -94,8 +94,13 @@ export async function refresh() {
              times too (a cold start can also surface as a 502/503 from
              Render's proxy while the app finishes booting), but a
              genuine 401 (invalid/expired refresh token) won't change
-             on retry, so don't burn the whole backoff budget on it */
-          if (res.status !== 401 && attempt < REFRESH_RETRY_DELAYS_MS.length) {
+             on retry, so don't burn the whole backoff budget on it.
+             429 is in that same "don't retry" camp, for the opposite
+             reason: the server is saying *stop asking*, and the seven
+             retries below would be seven more requests against the very
+             limit that's already tripped — turning one throttled load
+             into a self-inflicted lockout. */
+          if (res.status !== 401 && res.status !== 429 && attempt < REFRESH_RETRY_DELAYS_MS.length) {
             await new Promise((r) => setTimeout(r, REFRESH_RETRY_DELAYS_MS[attempt]));
             continue;
           }

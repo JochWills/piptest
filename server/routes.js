@@ -124,6 +124,26 @@ const authLimiter = rateLimit({
 });
 const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 240, standardHeaders: true, legacyHeaders: false });
 
+/* Refreshing a session is not a credential attempt and must not share
+   authLimiter's budget with one. It fires on every page load (access
+   tokens last 15 minutes), so 30-per-15-minutes meant ~30 page loads
+   locked the caller out — and because the limiter is keyed by IP, that
+   budget is shared by everyone behind one office/school/cafe/CGNAT
+   address, where a handful of users reach it in normal use. Worse, it
+   took /auth/login down with it: someone who had merely *browsed* too
+   much then couldn't sign in with the right password.
+
+   Nothing is being guessed here to justify a tight cap. The refresh
+   token is 32 random bytes in an httpOnly cookie, stored hashed, and
+   rotated on every single use — brute force isn't the threat model. So
+   this is only a runaway-loop backstop, and can be an order of
+   magnitude looser. */
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 300,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: "too_many_attempts", message: "Too many attempts. Try again in a few minutes." },
+});
+
 /* Reset requests are cheap for us and expensive for a victim's inbox,
    so they're limited harder than ordinary auth traffic. */
 const resetLimiter = rateLimit({
@@ -196,7 +216,7 @@ router.post("/auth/login", authLimiter, async (req, res) => {
   res.json({ user: publicUser({ ...user, role }), accessToken: signAccess({ ...user, role }) });
 });
 
-router.post("/auth/refresh", authLimiter, async (req, res) => {
+router.post("/auth/refresh", refreshLimiter, async (req, res) => {
   const raw = req.cookies?.[REFRESH_COOKIE];
   if (!raw) return res.status(401).json({ error: "no_refresh" });
   const out = await rotateRefresh(raw, req);
