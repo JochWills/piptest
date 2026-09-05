@@ -1267,6 +1267,26 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     return () => window.removeEventListener("pagehide", onUnload);
   }, [room?.code, isHost, account.handle]);
 
+  /* The other half of the same problem: this component also goes away
+     without a page unload whenever a viewer picks a different one of
+     their own sessions from the switcher above (or anywhere else that
+     hits onNav) — the `key={meta.id}` on <Simulator> in App.jsx tears
+     this instance down and mounts a fresh one, no pagehide involved.
+     Left uncaught, the host's participant list kept showing them as
+     still in the room until someone else's poll happened to notice
+     they'd gone quiet. A plain unmount-only effect (refs so it always
+     sees the latest room/handle without re-subscribing on every poll
+     update) catches exactly that case; the pagehide listener above
+     still owns the real tab-closing case, where cleanup here can be
+     too late to finish a normal fetch. */
+  const roomLeaveRef = useRef(null);
+  useEffect(() => {
+    roomLeaveRef.current = (!room || isHost) ? null : { code: room.code, handle: account.handle };
+  });
+  useEffect(() => () => {
+    if (roomLeaveRef.current) data.roomLeaveBeacon(roomLeaveRef.current.code, roomLeaveRef.current.handle);
+  }, []);
+
   const leaveRoom = async () => {
     if (room && API_ENABLED) {
       await data.roomPatch(room.code, [{ path: ["participants", account.handle], remove: true }]);
@@ -1430,7 +1450,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                         </div>
                         <div className="sm" style={{ fontSize: 11, opacity: isCurrent ? 0.85 : undefined,
                           color: isCurrent ? "inherit" : "var(--muted)" }}>
-                          {sym?.label || s.symbol} · {INTERVALS.find((i) => i.id === s.interval)?.label}
+                          {sym?.label || s.symbol}
                         </div>
                       </span>
                       <span className="num sm" style={{ flexShrink: 0, fontWeight: 600,
