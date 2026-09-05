@@ -1522,7 +1522,14 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       )}
 
       {/* ================= main ================= */}
-      <div className="sim-main" style={{ display: "grid", gridTemplateColumns: "156px minmax(0,1fr) 292px", gap: 0, flex: 1, minHeight: 0 }}>
+      {/* Fullscreen drops the ad column entirely rather than just hiding
+          it — that's one less thing competing for the extra room, and
+          one fewer ad impression billed for a box nobody can see while
+          it's not rendered at all — and gives the chart that width back,
+          same as the existing narrow-window breakpoint below already
+          does for its own reason. */}
+      <div className="sim-main" style={{ display: "grid",
+        gridTemplateColumns: fullscreen ? "minmax(0,1fr) 292px" : "156px minmax(0,1fr) 292px", gap: 0, flex: 1, minHeight: 0 }}>
 
         {/* ---- left: ad slot ----
             Market watch (and its watchlist editor) was retired — no live
@@ -1532,15 +1539,17 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             skyscraper creative, fixed pixel size rather than stretched to
             the rail's ~200px usable width, same as any other ad network:
             they serve that exact box, not a responsive one. */}
-        <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
-          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
-          padding: 14, overflowY: "auto", minHeight: 0 }}>
-          <a href="https://clicks.pipaffiliates.com/c?m=131252&c=1297452" target="_blank" rel="noopener"
-            referrerPolicy="no-referrer-when-downgrade" style={{ flexShrink: 0 }}>
-            <img src="https://ads.pipaffiliates.com/i/131252?c=1297452" width={120} height={600}
-              referrerPolicy="no-referrer-when-downgrade" alt="Advertisement" style={{ display: "block", borderRadius: 8 }} />
-          </a>
-        </aside>
+        {!fullscreen && (
+          <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
+            padding: 14, overflowY: "auto", minHeight: 0 }}>
+            <a href="https://clicks.pipaffiliates.com/c?m=131252&c=1297452" target="_blank" rel="noopener"
+              referrerPolicy="no-referrer-when-downgrade" style={{ flexShrink: 0 }}>
+              <img src="https://ads.pipaffiliates.com/i/131252?c=1297452" width={120} height={600}
+                referrerPolicy="no-referrer-when-downgrade" alt="Advertisement" style={{ display: "block", borderRadius: 8 }} />
+            </a>
+          </aside>
+        )}
 
         {/* ---- centre: chart ---- */}
         <section className="sim-chart-section" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, position: "relative" }}>
