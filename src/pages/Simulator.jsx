@@ -232,6 +232,14 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const canControl = !room || role === "host";
   const canTrade = !room || isHost;
   const displayTrade = canTrade ? trade : hostTrade;
+  /* A guest is looking at the host's balance/trades (see hostTrade
+     above), so the name on the chart — and anywhere else this session
+     gets labeled — should read as the host's session too, not whatever
+     this guest's own (usually blank, just-created-to-land-here)
+     session happens to be called. Falls back to a handle-based label
+     for the brief window right after joining, before the room doc's
+     own sessionName has synced in. */
+  const displaySessionName = room && !isHost ? (room.sessionName || `${room.host}'s session`) : meta.name;
 
   /* A real pause once the ad blocker gate comes up, not just a visual
      one — otherwise replay keeps advancing (and fetching bars) behind
@@ -773,8 +781,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     const patches = [
       { path: ["symbol"], value: symbol }, { path: ["interval"], value: interval },
       { path: ["cursor"], value: cursor }, { path: ["playing"], value: playing },
-      { path: ["stepId"], value: stepId }, { path: ["updatedBy"], value: account.handle },
-      { path: ["updatedAt"], value: now },
+      { path: ["stepId"], value: stepId }, { path: ["sessionName"], value: meta.name },
+      { path: ["updatedBy"], value: account.handle }, { path: ["updatedAt"], value: now },
     ];
     if (extra.layout !== undefined) patches.push({ path: ["layout"], value: extra.layout });
     if (extra.drawings !== undefined) patches.push({ path: ["drawings"], value: extra.drawings });
@@ -782,7 +790,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     if (extra.closed?.length) patches.push({ path: ["closedTrades"], append: extra.closed });
     const merged = await data.roomPatch(room.code, patches);
     if (merged) setRoom(merged);
-  }, [room, canControl, symbol, interval, cursor, playing, stepId, account.handle]);
+  }, [room, canControl, symbol, interval, cursor, playing, stepId, meta.name, account.handle]);
 
   /* Same content-comparison reasoning as lastAppliedLayoutRef — a
      freshly-deserialized array is a new object every poll. */
@@ -1158,7 +1166,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
        history — not just what happens to change after the room opens.
        Without this a guest who joined an hour into a session saw a blank
        blotter and no ticket until the host's very next trade. */
-    const doc = { code, host: account.handle, sessionId: meta.id,
+    const doc = { code, host: account.handle, sessionId: meta.id, sessionName: meta.name,
       symbol, interval, startMs: meta.startMs,
       participants: { [account.handle]: { role: "host", ts: Date.now(), avatar: account.avatar || null } },
       layout, drawings, cursor, playing: false, stepId, messages: [], updatedBy: account.handle, updatedAt: Date.now(),
@@ -1432,7 +1440,9 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
               <div className="card sim-header-pop" data-pop style={{ position: "absolute", right: 0, top: 46, zIndex: 60,
                 width: 268, padding: 6, maxHeight: 380, overflowY: "auto" }}>
                 <div className="cap" style={{ padding: "8px 10px 6px" }}>
-                  Sessions — balance shown is this one
+                  {room && !isHost
+                    ? `Watching ${room.host} — balance shown is theirs, not yours`
+                    : "Sessions — balance shown is this one"}
                 </div>
                 {switchableSessions.length === 0 ? (
                   <div className="sm mut" style={{ padding: "6px 10px 10px" }}>No saved sessions yet.</div>
@@ -1443,7 +1453,22 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   return (
                     <button key={s.id} className={"btn ghost " + (isCurrent ? "on" : "")}
                       style={{ width: "100%", justifyContent: "space-between", padding: "8px 10px", textAlign: "left", gap: 8 }}
-                      onClick={() => { setSessionsOpen(false); if (!isCurrent) onNav?.("sim", s.id); }}>
+                      onClick={async () => {
+                        setSessionsOpen(false);
+                        if (isCurrent) return;
+                        /* Leaving this session while hosting a live room used to just
+                           navigate away, no different from any other tab switch —
+                           the room row (and the guest still parked in it) lived on
+                           server-side untouched, so the host's own UI read as
+                           "room closed" while the guest kept right on watching a
+                           chart nobody was driving anymore. Sharing is tied to
+                           *this* session; picking a different one is exactly the
+                           "I'm done here" moment the Close button is for, so do
+                           the same thing it does — awaited, so the DELETE is
+                           actually sent before this component unmounts. */
+                        if (room && isHost) await closeRoom();
+                        onNav?.("sim", s.id);
+                      }}>
                       <span style={{ minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {s.name}
@@ -1607,7 +1632,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
               ) : (
                 <TVAdvancedChart
                   symbol={symbol} interval={IV_TO_TV_RES[interval] || "30"} theme={theme}
-                  startMs={chartStartRef.current} canDraw={canControl} sessionName={meta.name}
+                  startMs={chartStartRef.current} canDraw={canControl} sessionName={displaySessionName}
                   onReady={handleReady} onBar={handleBar} onCursor={handleCursor}
                   onState={handleReplayState} onDrawingsChanged={handleDrawingsChanged}
                   onIntervalChanged={handleIntervalChanged}
