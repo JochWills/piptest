@@ -3,7 +3,7 @@ import { api, setToken, refresh, API_ENABLED } from "./api.js";
 import Avatar from "./Avatar.jsx";
 
 /* ============================================================
-   PipTest Console
+   Piptest Console
 
    Deliberately its own app on its own origin. The code that
    lists every user never ships to a visitor's browser, and the
@@ -130,7 +130,7 @@ export default function App() {
         borderBottom: "1px solid var(--border)", background: "var(--surface)", position: "sticky", top: 0, zIndex: 20 }}>
         <Mark />
         <img src="/wordmark-dark.png" srcSet="/wordmark-dark.png 1x, /wordmark-dark@3x.png 3x"
-          alt="PipTest" height={17} width={Math.round(17 * 3.9808)} draggable={false} style={{ display: "block" }} />
+          alt="Piptest" height={17} width={Math.round(17 * 3.9808)} draggable={false} style={{ display: "block" }} />
         <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         <span className="pill a">internal</span>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
@@ -188,13 +188,13 @@ function Login({ onIn }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", marginBottom: 22 }}>
           <Mark size={30} />
           <img src="/wordmark-dark.png" srcSet="/wordmark-dark.png 1x, /wordmark-dark@3x.png 3x"
-            alt="PipTest" height={21} width={Math.round(21 * 3.9808)} draggable={false} style={{ display: "block" }} />
+            alt="Piptest" height={21} width={Math.round(21 * 3.9808)} draggable={false} style={{ display: "block" }} />
           <span className="sm mut" style={{ fontWeight: 600 }}>Console</span>
         </div>
         <div className="card" style={{ padding: 26 }}>
           <h2 style={{ fontSize: 19, marginBottom: 6 }}>Admin sign-in</h2>
           <p className="sm mut" style={{ marginBottom: 20, lineHeight: 1.6 }}>
-            Use your PipTest account. Only admin accounts can get in here.
+            Use your Piptest account. Only admin accounts can get in here.
           </p>
 
           {!API_ENABLED && (

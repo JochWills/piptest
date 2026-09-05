@@ -1,4 +1,4 @@
-# PipTest Console
+# Piptest Console
 
 The admin dashboard, deployed separately from the main site.
 

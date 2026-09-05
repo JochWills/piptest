@@ -288,7 +288,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
         <Card>
           <Empty
             title="No sessions yet"
-            body="A session is one market, one timeframe and a start date. Create one and PipTest loads the real history so you can replay it."
+            body="A session is one market, one timeframe and a start date. Create one and Piptest loads the real history so you can replay it."
             action={<button className="btn pri" onClick={() => setOpen(true)}>Create your first session</button>}
           />
         </Card>

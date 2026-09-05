@@ -7,7 +7,7 @@ import { fmtMoney, fmtShort } from "../lib/trading.js";
 /* ============================================================
    Admin
 
-   Read-mostly view of who's using PipTest. Every endpoint behind
+   Read-mostly view of who's using Piptest. Every endpoint behind
    it re-checks the admin role server-side — hiding the nav item
    is presentation, not security.
    ============================================================ */
@@ -76,7 +76,7 @@ export default function Admin({ me }) {
       <PageHead
         eyebrow="Internal"
         title="Admin"
-        sub="Accounts, activity and usage across PipTest."
+        sub="Accounts, activity and usage across Piptest."
         actions={<button className="btn" onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh"}</button>}
       />
 

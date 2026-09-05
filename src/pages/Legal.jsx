@@ -66,14 +66,14 @@ function PrivacyBody() {
   return (
     <>
       <Section title="The short version">
-        PipTest keeps what it needs to run your account and sync your sessions — email, a
+        Piptest keeps what it needs to run your account and sync your sessions — email, a
         display name, a handle, and the sessions/trades you create — and nothing more. It's
         never sold, never used for ads, and there's no ad or tracking pixel on this site at all.
         If you never create an account, none of this leaves your browser in the first place.
       </Section>
 
       <Section title="Who this is">
-        PipTest is built and operated by NOX Media Group. This policy covers what happens to
+        Piptest is built and operated by NOX Media Group. This policy covers what happens to
         your data when you use piptest.com.
       </Section>
 
@@ -110,7 +110,7 @@ function PrivacyBody() {
         password — only your hashed password ever touches the database, and email delivery
         only ever sees your email address and the reset link itself.
         <br /><br />
-        If you use PipTest without signing up, your sessions and trades are stored only in
+        If you use Piptest without signing up, your sessions and trades are stored only in
         your own browser's local storage — they're never sent to us at all until you decide
         to create an account and bring them across.
       </Section>
@@ -137,21 +137,21 @@ function PrivacyBody() {
       </Section>
 
       <Section title="Who can see it">
-        Only you, unless you deliberately share it (a room code, for instance). PipTest's
+        Only you, unless you deliberately share it (a room code, for instance). Piptest's
         admin console — a separate, internal tool not shipped to regular visitors — lets
         Josh look up account and usage details for support and moderation; it isn't used to
         browse people's trading activity for any other reason.
       </Section>
 
       <Section title="Children">
-        PipTest isn't directed at children, and we don't knowingly collect information from
+        Piptest isn't directed at children, and we don't knowingly collect information from
         anyone under 16. If you believe a child has created an account, contact us and we'll
         remove it.
       </Section>
 
       <Section title="Changes to this policy">
         If this changes in a way that matters — what we collect, or who we share it with —
-        we'll update the date at the top of this page. Continuing to use PipTest after that
+        we'll update the date at the top of this page. Continuing to use Piptest after that
         means you're OK with the update.
       </Section>
     </>
@@ -162,12 +162,12 @@ function TermsBody() {
   return (
     <>
       <Section title="Agreement">
-        By creating an account or using PipTest, you're agreeing to these terms. If you don't
+        By creating an account or using Piptest, you're agreeing to these terms. If you don't
         agree, don't use the site.
       </Section>
 
-      <Section title="What PipTest is">
-        PipTest is a practice and education tool. It replays historical market data bar-by-bar
+      <Section title="What Piptest is">
+        Piptest is a practice and education tool. It replays historical market data bar-by-bar
         so you can rehearse trade setups against real price history. Every trade you place
         here is simulated — no real money moves, there's no connection to any brokerage or
         bank account, and nothing you do here is executed in a live market.
@@ -177,7 +177,7 @@ function TermsBody() {
         money. Historical price data is sourced from third parties (Binance for crypto, Twelve
         Data for forex and index ETFs) — we don't guarantee it's complete or error-free.
         <br /><br />
-        Nothing on PipTest is financial advice, and nothing here should be treated as a
+        Nothing on Piptest is financial advice, and nothing here should be treated as a
         recommendation to buy, sell, or hold anything.
       </Section>
 
@@ -188,7 +188,7 @@ function TermsBody() {
       </Section>
 
       <Section title="Acceptable use">
-        Don't try to break, scrape, overload, or reverse-engineer PipTest; don't impersonate
+        Don't try to break, scrape, overload, or reverse-engineer Piptest; don't impersonate
         anyone; don't use a shared room to harass or abuse other participants. We can suspend
         or remove access for anyone who does.
       </Section>
@@ -201,7 +201,7 @@ function TermsBody() {
       </Section>
 
       <Section title="Availability">
-        PipTest is free to use and provided as-is, without a guaranteed uptime. Features,
+        Piptest is free to use and provided as-is, without a guaranteed uptime. Features,
         pricing, and the service itself may change, and it may occasionally be unavailable —
         we'll try to keep disruption to a minimum, but we don't promise it won't happen.
       </Section>
@@ -213,13 +213,13 @@ function TermsBody() {
       </Section>
 
       <Section title="Ownership">
-        PipTest's software, design and branding belong to NOX Media Group. The sessions
+        Piptest's software, design and branding belong to NOX Media Group. The sessions
         and notes you create are yours — deleting your account deletes them with it,
         rather than us keeping a copy.
       </Section>
 
       <Section title="No warranty, limited liability">
-        PipTest is provided "as is," without warranties of any kind. We're not liable for any
+        Piptest is provided "as is," without warranties of any kind. We're not liable for any
         losses — trading losses very much included — that result from decisions made using
         this tool, whether based on simulated results, a data error, or downtime. Use your own
         judgment, and don't risk real money on a strategy you've only tested here without
@@ -228,7 +228,7 @@ function TermsBody() {
 
       <Section title="Changes to these terms">
         If these terms change materially, we'll update the date at the top of this page.
-        Continuing to use PipTest after that means you're OK with the update.
+        Continuing to use Piptest after that means you're OK with the update.
       </Section>
     </>
   );

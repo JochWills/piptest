@@ -1,5 +1,5 @@
 /* ============================================================
-   PipTest API
+   Piptest API
 
    Accounts, saved sessions, the trade book, live rooms and the
    admin surface. Postgres-backed so nothing lives only in a
@@ -64,7 +64,7 @@ if (!origins.length) console.warn("ALLOWED_ORIGIN is not set — CORS is open. S
 migrate()
   .then(() => {
     startSweeper();
-    const server = app.listen(PORT, () => console.log(`PipTest API listening on :${PORT}`));
+    const server = app.listen(PORT, () => console.log(`Piptest API listening on :${PORT}`));
     /* real-time room relay (bar-by-bar replay sync) rides the same
        HTTP server/port as the REST API — see ws.js for what this
        does and doesn't carry. */

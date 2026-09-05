@@ -31,7 +31,7 @@
 const BASE = "https://api.twelvedata.com";
 
 /* apiSymbol is what Twelve Data expects on the wire; the object key
-   is PipTest's own internal id (matches the no-punctuation convention
+   is Piptest's own internal id (matches the no-punctuation convention
    the Binance symbols already use, e.g. BTCUSDT not BTC/USDT). */
 export const TWELVE_DATA_SYMBOLS = {
   EURUSD: { apiSymbol: "EUR/USD", label: "EUR/USD", cls: "Forex" },
@@ -46,7 +46,7 @@ export const TWELVE_DATA_SYMBOLS = {
   QQQ: { apiSymbol: "QQQ", label: "US Tech (QQQ)", cls: "Index ETF" },
 };
 
-/* Twelve Data has no 1-second interval — PipTest's "1s" option simply
+/* Twelve Data has no 1-second interval — Piptest's "1s" option simply
    isn't offered for these symbols (see the client-side interval
    picker, which hides it for a non-Binance symbol). */
 const INTERVAL_MAP = {

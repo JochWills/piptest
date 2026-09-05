@@ -150,13 +150,13 @@ export default function TVAdvancedChart({
   onState,          // (state) => void — { playing, atEnd, stepMs, covered, earliest }; fires when the
                      // replay controller's own state changes, including reaching the end of data on its own
   onIntervalChanged,// (tvResolution) => void — the chart's own native resolution control changed the
-                     // timeframe directly (PipTest has no button row of its own for this any more);
+                     // timeframe directly (Piptest has no button row of its own for this any more);
                      // a raw TV resolution string ("60", not "1h") since the caller already knows how
                      // to map that back, same as the interval/startMs props coming in the other way
   canDraw = true,   // false for a room viewer — hides the drawing toolbar entirely rather than
-                     // just disabling PipTest's own UI around it, since drawing is now the library's
+                     // just disabling Piptest's own UI around it, since drawing is now the library's
   sessionName,      // shown as a plain label in the chart's own header — see the headerReady block
-                     // below. Read once at mount; PipTest has no way to rename a session mid-play,
+                     // below. Read once at mount; Piptest has no way to rename a session mid-play,
                      // so there's nothing to keep this in sync with after that.
   fullscreen,        // current fullscreen state, owned by Simulator.jsx — see the fullscreen
                      // button graft in the headerReady block below for why this lives here
@@ -235,14 +235,14 @@ export default function TVAdvancedChart({
          viewer (canDraw false) also loses the left toolbar entirely — it's
          the library's own drawing tools now (§5, TRADINGVIEW.md), so
          hiding it is the only way to actually stop a viewer drawing,
-         same as PipTest disabling its own tool rail used to. */
+         same as Piptest disabling its own tool rail used to. */
       disabled_features: [
         "header_symbol_search",
         "header_compare",
         "go_to_date",
         "timeframes_toolbar",
         /* The library's own fullscreen button puts only its own iframe into
-           the browser's native fullscreen — PipTest's replay bar, trade
+           the browser's native fullscreen — Piptest's replay bar, trade
            ticket and everything else living outside that iframe would just
            disappear behind it, with no z-index able to bring them back (a
            fullscreened element sits in the browser's top layer, above the
@@ -255,7 +255,7 @@ export default function TVAdvancedChart({
         /* The library adds its own Volume study on every widget mount by
            default — its own "_once" bookkeeping for not repeating that is
            scoped to the browser's localStorage, which has nothing to do
-           with PipTest's own saved layout coming back from the server a
+           with Piptest's own saved layout coming back from the server a
            moment later via api.load(). Every reopen mounted a fresh
            widget (one new auto-added Volume) on top of whatever the
            saved snapshot already had (which already included one from
@@ -288,7 +288,7 @@ export default function TVAdvancedChart({
 
     widgetRef.current = widget;
 
-    /* PipTest's own header used to carry the session name; now that
+    /* Piptest's own header used to carry the session name; now that
        timeframe switching lives in the library's own toolbar (see
        Simulator's handleIntervalChanged), the name rides along there
        too rather than being the one thing left behind in a bar that
@@ -342,7 +342,7 @@ export default function TVAdvancedChart({
       });
     }
 
-    /* Puts PipTest's own fullscreen toggle right after the screenshot
+    /* Puts Piptest's own fullscreen toggle right after the screenshot
        icon, at the end of the library's own icon cluster, rather than
        in createButton's fixed "end of the bar" slot the
        sessionName label above uses. That spot isn't reachable through
@@ -436,7 +436,7 @@ export default function TVAdvancedChart({
       widget.subscribe("drawing_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("drawing"));
       widget.subscribe("study_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("study"));
 
-      /* Shapes PipTest draws itself (entry/stop/target zones) — they're
+      /* Shapes Piptest draws itself (entry/stop/target zones) — they're
          derived from trade state that each side already has, so they
          must never be picked up as "the user drew this" and mirrored
          to a room, or a viewer would get two of each. */

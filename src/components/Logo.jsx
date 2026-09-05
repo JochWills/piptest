@@ -44,7 +44,7 @@ export function Wordmark({ size = 22, style }) {
      would render. Display is handled entirely in the .wm rules. */
   const common = {
     height: h, width: Math.round(h * WORDMARK_RATIO),
-    alt: "PipTest", draggable: false,
+    alt: "Piptest", draggable: false,
     style,
   };
   return (

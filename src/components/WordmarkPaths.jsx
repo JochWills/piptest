@@ -1,7 +1,7 @@
 import React from "react";
 
 /* ============================================================
-   WordmarkPaths — the PipTest wordmark, vectorised
+   WordmarkPaths — the Piptest wordmark, vectorised
 
    Traced from the supplied artwork, so the letterforms are
    exactly the original rather than an approximation with a
@@ -36,7 +36,7 @@ export default function WordmarkPaths({
       width={height * WORDMARK_RATIO}
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label="PipTest"
+      aria-label="Piptest"
       style={{ display: "block", overflow: "visible", ...style }}
     >
       <path d={PIP} fill={pip} fillRule="evenodd" />

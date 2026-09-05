@@ -1,5 +1,5 @@
 /* ============================================================
-   api.js — talks to the PipTest API
+   api.js — talks to the Piptest API
 
    The access token is kept in a module variable, never in
    localStorage: script injected into the page can read storage,

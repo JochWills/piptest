@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generates the Open Graph / social preview card for PipTest.
+Generates the Open Graph / social preview card for Piptest.
 
 Drawn at 2x and downsampled, so edges and text are antialiased
 without needing a headless browser.

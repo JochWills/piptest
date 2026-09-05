@@ -1,4 +1,4 @@
-# PipTest backend — accounts, database, admin
+# Piptest backend — accounts, database, admin
 
 Real user accounts backed by Postgres, plus an admin dashboard. The app still
 runs without any of this (falling back to browser storage), so you can deploy
@@ -44,7 +44,7 @@ suits a long-running Node server. The string looks like:
 postgresql://postgres.abcdefgh:YOUR-PASSWORD@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
 ```
 
-Nothing else on Supabase needs configuring. PipTest uses it purely as a
+Nothing else on Supabase needs configuring. Piptest uses it purely as a
 Postgres database — the tables are created by our own migrations on first boot.
 
 ### 2. Sync the blueprint
@@ -130,7 +130,7 @@ appears in the sidebar.
 | Render API | 750 instance hours/month | Sleeps after 15 min idle; slow cold start |
 | Render static site | free | nothing |
 
-500 MB is roughly **1,000–2,000 active users** on PipTest's data shape. You'll
+500 MB is roughly **1,000–2,000 active users** on Piptest's data shape. You'll
 feel the sleeping API long before you feel the storage.
 
 **No backups on either free tier.** Once you have users whose data you'd be sorry
@@ -184,7 +184,7 @@ Resend only **sends**. It is not a mailbox and receives nothing, so your existin
 | Key | Value |
 |---|---|
 | `RESEND_API_KEY` | the key from step 4 |
-| `MAIL_FROM` | `PipTest <noreply@send.piptest.com>` |
+| `MAIL_FROM` | `Piptest <noreply@send.piptest.com>` |
 | `MAIL_REPLY_TO` | `info@piptest.com` |
 | `APP_URL` | `https://piptest.com` |
 
@@ -255,7 +255,7 @@ VITE_API_URL=http://localhost:3001 npm run dev
 ## What's deliberately not built yet
 
 **Email verification.** Anyone can sign up with an address they don't own.
-Not urgent while PipTest is free, but needed before anything is charged for.
+Not urgent while Piptest is free, but needed before anything is charged for.
 
 **Rooms still poll.** They're durable now and survive a restart, but the client
 polls every 1.5s. Swap to WebSockets before you have real concurrent users.

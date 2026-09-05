@@ -5,7 +5,7 @@ things change — it's the fastest way to onboard a fresh session.
 
 ## What this is
 
-**PipTest** — a market replay and backtesting tool competing with FXReplay.
+**Piptest** — a market replay and backtesting tool competing with FXReplay.
 Users replay historical crypto candles bar-by-bar, arm trade setups
 (entry/stop/target), share a live session with others via room codes, and
 journal/analyze results. Built by Josh (NOX Media Group).

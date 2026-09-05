@@ -26,18 +26,18 @@ const FEATURES = [
 
 const STEPS = [
   { n: "01", title: "Pick a market and a date", body: "Ten crypto pairs, timeframes from one second to one day, any start date you like. Or let it drop you somewhere random so you can't recognise the chart." },
-  { n: "02", title: "Arm your setup", body: "Direction, entry, stop, target, risk percent. PipTest checks the setup makes sense and works out the position size." },
+  { n: "02", title: "Arm your setup", body: "Direction, entry, stop, target, risk percent. Piptest checks the setup makes sense and works out the position size." },
   { n: "03", title: "Press play", body: "Watch it fill, or not. Stops and targets are checked against every bar's high and low — including the ones that flash past at 50×." },
   { n: "04", title: "Review the book", body: "Tag the setup, write the note while you remember it, then look at what your last hundred trades are actually telling you." },
 ];
 
 const FAQ = [
-  { q: "Is the data real?", a: "Yes — historical candles come straight from Binance's public market data, down to one-second bars. If the feed is ever unreachable, PipTest says so plainly rather than quietly substituting anything." },
-  { q: "Do I need to install anything?", a: "No. PipTest runs in the browser. Your sessions, trades and drawings are saved automatically." },
-  { q: "How is this different from a demo account?", a: "A demo account moves in real time — a week of price action takes a week. PipTest compresses that into an afternoon, and lets you replay the same session as many times as you like." },
+  { q: "Is the data real?", a: "Yes — historical candles come straight from Binance's public market data, down to one-second bars. If the feed is ever unreachable, Piptest says so plainly rather than quietly substituting anything." },
+  { q: "Do I need to install anything?", a: "No. Piptest runs in the browser. Your sessions, trades and drawings are saved automatically." },
+  { q: "How is this different from a demo account?", a: "A demo account moves in real time — a week of price action takes a week. Piptest compresses that into an afternoon, and lets you replay the same session as many times as you like." },
   { q: "Can I share a session with my trading group?", a: "That's the point. Start a room, share the six-character code, and everyone watches your chart live. You control who can draw on it." },
   { q: "What about forex?", a: "Crypto is live today. Forex is next — the data pipeline is the only piece outstanding, since free tick-level FX history needs its own ingest." },
-  { q: "Does it cost anything?", a: "No — PipTest is completely free, with no paid plans or card required. Everything you build stays yours." },
+  { q: "Does it cost anything?", a: "No — Piptest is completely free, with no paid plans or card required. Everything you build stays yours." },
 ];
 
 export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, T, account, onSignOut, onNav, booting }) {
@@ -160,7 +160,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
             Replay the markets.<br />Together. Completely&nbsp;Free.
           </h1>
           <p className="mut" style={{ maxWidth: 580, margin: "0 auto 30px", fontSize: 17, lineHeight: 1.65 }}>
-            PipTest replays real historical markets bar by bar so you can practise your setups
+            Piptest replays real historical markets bar by bar so you can practise your setups
             hundreds of times without risking a cent — alone, or on the same chart as your trading group.
           </p>
           <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 16 }}>
@@ -287,7 +287,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "34px 20px",
           display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
           <Logo size={26} />
-          <span className="sm mut">© {new Date().getFullYear()} PipTest</span>
+          <span className="sm mut">© {new Date().getFullYear()} Piptest</span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 18 }} className="sm mut">
             <NavLink to="features">Features</NavLink>
             <NavLink to="faq">FAQ</NavLink>
@@ -297,7 +297,7 @@ export default function Landing({ onGetStarted, onSignIn, theme, onToggleTheme, 
         </div>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 20px 30px" }}>
           <p className="sm mut" style={{ lineHeight: 1.7, maxWidth: 780 }}>
-            PipTest is a practice and education tool. Simulated results are not a prediction of live
+            Piptest is a practice and education tool. Simulated results are not a prediction of live
             performance — replayed markets have no slippage, no spread and no emotional cost. Nothing
             here is financial advice.
           </p>

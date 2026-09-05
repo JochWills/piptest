@@ -20,7 +20,7 @@
 import { loadWindow, fetchPaged } from "../lib/candles.js";
 import { barMsOf, INTERVALS } from "../theme.js";
 
-/* TradingView resolution code <-> PipTest interval id. These are the
+/* TradingView resolution code <-> Piptest interval id. These are the
    only granularities the rest of the app (replay bar, order engine,
    room sync) understands, so the datafeed must not advertise more
    than this regardless of what Binance/TradingView themselves support. */

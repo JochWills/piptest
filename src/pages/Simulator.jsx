@@ -119,7 +119,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   /* ---------- chart chrome ----------
      Drawing tools, indicators, log/linear, zoom presets are all the
      library's own now (its native left toolbar and legend) — nothing
-     left here to own that state on PipTest's side. */
+     left here to own that state on Piptest's side. */
   const [profileOpen, setProfileOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
 
@@ -180,7 +180,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      render time: it also has to track exits the button never caused
      (Escape, the browser's own "Exit full screen" bar), which only the
      fullscreenchange event reports.
-     No button lives in PipTest's own header for this — `fullscreen` and
+     No button lives in Piptest's own header for this — `fullscreen` and
      `toggleFullscreen` are instead handed down to TVAdvancedChart, which
      puts a real button back where the library's own used to be (next to
      the screenshot icon, in its header). See its own comment for why
@@ -326,7 +326,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   /* ================= chart ready / bar feed =================
      The widget (src/tv/) owns fetching, paging and the replay clock
      itself now — this just wires its output into the trade engine and
-     PipTest's own state, and converts its {time,open,high,low,close}
+     Piptest's own state, and converts its {time,open,high,low,close}
      bars to the {t,o,h,l,c} shape the rest of this file already uses. */
   const tradeRef = useRef(null);
   useEffect(() => { tradeRef.current = trade; }, [trade]);
@@ -506,7 +506,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      place for "can this session's market actually change?" to have an
      answer, and a wrong one. */
   /* The confirm/cancel gate used to live in here too, back when this was
-     only ever reached by clicking one of PipTest's own timeframe buttons.
+     only ever reached by clicking one of Piptest's own timeframe buttons.
      Now it's reached from handleIntervalChanged below, which has already
      asked and gotten a yes by the time this runs — this is purely the
      "make the switch happen" half. Twelve Data's missing 1s resolution
@@ -537,7 +537,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   };
 
   /* Fired by the chart's own native resolution control (see
-     TVAdvancedChart's onIntervalChanged subscription) — PipTest's own
+     TVAdvancedChart's onIntervalChanged subscription) — Piptest's own
      timeframe buttons are gone now, so this is the only door left. The
      widget has *already* switched resolution by the time this runs
      (that's how the library's own dropdown works — it doesn't wait to
@@ -1583,7 +1583,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             {/* chart — the tool rail that used to live here (drawing
                 tools, colour swatches, clear-drawings) is the library's
                 own left toolbar now; its own legend already shows the
-                symbol/interval/OHLC, so PipTest doesn't draw a second
+                symbol/interval/OHLC, so Piptest doesn't draw a second
                 one on top of it any more either. */}
             <div style={{ flex: 1, minWidth: 0, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
               {!restored ? (
@@ -1691,7 +1691,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             <div style={{ padding: "6px 10px" }}>
               {/* the free-drag scrubber is gone — it needed a bar count
                   up front, which nothing here has any more now that the
-                  datafeed pages history itself rather than PipTest
+                  datafeed pages history itself rather than Piptest
                   fetching a bounded array of it up front (see
                   TRADINGVIEW.md). Replay is forward-only by design: no
                   rewinding once you've seen how a bar played out — see
@@ -2108,9 +2108,9 @@ function AdBlockGate({ onRecheck }) {
       display: "grid", placeItems: "center", padding: 20, backdropFilter: "blur(3px)",
     }}>
       <div className="card fade-in" style={{ width: "100%", maxWidth: 400, padding: 26 }}>
-        <h3 style={{ fontSize: 18, marginBottom: 8, textAlign: "center" }}>Please allow ads for PipTest</h3>
+        <h3 style={{ fontSize: 18, marginBottom: 8, textAlign: "center" }}>Please allow ads for Piptest</h3>
         <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 18, textAlign: "center" }}>
-          PipTest stays free because of the one small ad next to the chart. Replay is
+          Piptest stays free because of the one small ad next to the chart. Replay is
           paused until it's allowed for this site — access comes back the moment it is.
         </p>
 

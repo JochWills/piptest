@@ -73,7 +73,7 @@ services:
       - key: TWELVE_DATA_API_KEY
         sync: false                  # from twelvedata.com — enables forex & index-ETF candles
       - key: MAIL_FROM
-        sync: false                  # PipTest <noreply@send.piptest.com>
+        sync: false                  # Piptest <noreply@send.piptest.com>
       - key: MAIL_REPLY_TO
         sync: false                  # info@piptest.com — where replies land
       - key: APP_URL

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Traces the PipTest wordmark artwork into SVG paths.
+Traces the Piptest wordmark artwork into SVG paths.
 
 The supplied logo is a raster: near-black navy "pip" and blue "test" on white.
 A PNG can't adapt to the dark theme and blurs when scaled, so this splits the
@@ -132,7 +132,7 @@ def main():
     jsx = '''import React from "react";
 
 /* ============================================================
-   WordmarkPaths — the PipTest wordmark, vectorised
+   WordmarkPaths — the Piptest wordmark, vectorised
 
    Traced from the supplied artwork, so the letterforms are
    exactly the original rather than an approximation with a
@@ -167,7 +167,7 @@ export default function WordmarkPaths({
       width={height * WORDMARK_RATIO}
       viewBox={`0 0 ${W} ${H}`}
       role="img"
-      aria-label="PipTest"
+      aria-label="Piptest"
       style={{ display: "block", overflow: "visible", ...style }}
     >
       <path d={PIP} fill={pip} fillRule="evenodd" />

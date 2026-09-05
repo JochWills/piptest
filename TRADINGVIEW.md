@@ -1,4 +1,4 @@
-# Migrating PipTest to TradingView Advanced Charts
+# Migrating Piptest to TradingView Advanced Charts
 
 The custom canvas chart — `src/chart/ReplayChart.jsx` (TradingView's free
 Lightweight Charts plus a hand-rolled drawing overlay), mounted from
@@ -17,7 +17,7 @@ Approved. Your GitHub account has read access to `tradingview/charting_library`
 
 **Still worth getting in writing, if you haven't**: the docs say the library is
 free provided the TradingView attribution stays visible and the implementation
-is public, "not behind a paywall". PipTest is planned as a subscription product.
+is public, "not behind a paywall". Piptest is planned as a subscription product.
 Competitors clearly operate paid tiers on this library, so there is an answer —
 get it from TradingView directly before building a business model on it.
 

@@ -9,7 +9,7 @@
    ============================================================ */
 
 const KEY = process.env.RESEND_API_KEY;
-const FROM = process.env.MAIL_FROM || "PipTest <noreply@send.piptest.com>";
+const FROM = process.env.MAIL_FROM || "Piptest <noreply@send.piptest.com>";
 /* Replies to automated mail should reach a human. Without this they bounce
    off a no-reply address and the person assumes nobody is listening. */
 const REPLY_TO = process.env.MAIL_REPLY_TO || "";
@@ -63,7 +63,7 @@ const shell = (title, body) => `
       ${body}
     </div>
     <p style="margin:22px 0 0;font-size:12px;color:#8792a2;line-height:1.6;">
-      PipTest is a practice tool. Simulated results are not a prediction of live performance.
+      Piptest is a practice tool. Simulated results are not a prediction of live performance.
     </p>
   </div>
 </body></html>`;
@@ -71,7 +71,7 @@ const shell = (title, body) => `
 export function resetEmail({ name, url, minutes }) {
   const html = shell("Reset your password", `
     <p style="margin:0 0 18px;font-size:14px;color:#404a58;line-height:1.65;">
-      Hi ${escapeHtml(name)} — someone asked to reset the password on your PipTest account.
+      Hi ${escapeHtml(name)} — someone asked to reset the password on your Piptest account.
       Use the button below and you'll be back in shortly.
     </p>
     <a href="${url}" style="display:inline-block;background:#2563EB;color:#ffffff;
@@ -90,7 +90,7 @@ export function resetEmail({ name, url, minutes }) {
 
   const text = `Hi ${name},
 
-Someone asked to reset the password on your PipTest account.
+Someone asked to reset the password on your Piptest account.
 
 Open this link to choose a new one:
 ${url}
@@ -99,13 +99,13 @@ The link works once and expires in ${minutes} minutes.
 
 If this wasn't you, ignore this email — nothing has changed.`;
 
-  return { subject: "Reset your PipTest password", html, text };
+  return { subject: "Reset your Piptest password", html, text };
 }
 
 export function passwordChangedEmail({ name }) {
   const html = shell("Your password was changed", `
     <p style="margin:0 0 16px;font-size:14px;color:#404a58;line-height:1.65;">
-      Hi ${escapeHtml(name)} — the password on your PipTest account has just been changed,
+      Hi ${escapeHtml(name)} — the password on your Piptest account has just been changed,
       and every device has been signed out.
     </p>
     <p style="margin:0;font-size:13px;color:#5c6672;line-height:1.65;">
@@ -113,10 +113,10 @@ export function passwordChangedEmail({ name }) {
     </p>`);
   const text = `Hi ${name},
 
-The password on your PipTest account was just changed and every device has been signed out.
+The password on your Piptest account was just changed and every device has been signed out.
 
 If that wasn't you, reset your password immediately.`;
-  return { subject: "Your PipTest password was changed", html, text };
+  return { subject: "Your Piptest password was changed", html, text };
 }
 
 const escapeHtml = (s = "") =>

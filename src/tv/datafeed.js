@@ -10,7 +10,7 @@
    makes switching timeframe free — the same instant resolves
    correctly on 1s and on 1D with no conversion.
 
-   Every market PipTest offers (crypto via Binance, forex/index
+   Every market Piptest offers (crypto via Binance, forex/index
    ETFs via Twelve Data — see theme.js's SYMBOLS) is resolvable
    here, not just the original crypto set. Twelve Data has no
    sub-minute candles, so those symbols simply don't advertise
@@ -58,7 +58,7 @@ const CONFIG = {
   supports_time: true,
   exchanges: [
     { value: "BINANCE", name: "Binance", desc: "Binance Spot" },
-    { value: "PIPTEST", name: "PipTest", desc: "Forex & index ETFs (Twelve Data)" },
+    { value: "PIPTEST", name: "Piptest", desc: "Forex & index ETFs (Twelve Data)" },
   ],
   symbols_types: [{ name: "crypto", value: "crypto" }, { name: "forex", value: "forex" }, { name: "index", value: "index" }],
 };

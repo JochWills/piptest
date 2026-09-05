@@ -25,7 +25,7 @@ export default function Shell({ page, onNav, onHome, account, theme, onToggleThe
     <div className="shell">
       {/* ---------- compact top bar, phones only ---------- */}
       <header className="shell-top">
-        <button className="shell-topbrand" onClick={onHome} aria-label="PipTest home">
+        <button className="shell-topbrand" onClick={onHome} aria-label="Piptest home">
           <Logo size={26} />
         </button>
         <div className="shell-topright">
@@ -41,7 +41,7 @@ export default function Shell({ page, onNav, onHome, account, theme, onToggleThe
 
       {/* ---------- sidebar / bottom bar ---------- */}
       <aside className="shell-side">
-        <button className="shell-brand" onClick={onHome} aria-label="PipTest home">
+        <button className="shell-brand" onClick={onHome} aria-label="Piptest home">
           <Logo size={28} />
         </button>
 

@@ -1,4 +1,4 @@
-# PipTest — deploy to Render with a GoDaddy domain
+# Piptest — deploy to Render with a GoDaddy domain
 
 Collaborative market replay and manual backtesting. React + Vite, static build.
 
@@ -35,7 +35,7 @@ npm run build    # verify it compiles before pushing
 ```bash
 git init
 git add .
-git commit -m "PipTest initial"
+git commit -m "Piptest initial"
 git branch -M main
 git remote add origin https://github.com/<you>/piptest.git
 git push -u origin main
