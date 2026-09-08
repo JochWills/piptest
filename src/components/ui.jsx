@@ -141,14 +141,14 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
   gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .pagehead-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-/* Daily Pip's chart+setup split — a CSS class, not an inline style, so
-   the mobile query below can actually collapse it to one column (see
-   the inline-style gotcha noted in CLAUDE.md). */
+/* Daily Pip's content+leaderboard split — a CSS class, not an inline
+   style, so the mobile query below can actually collapse it to one
+   column (see the inline-style gotcha noted in CLAUDE.md). */
 .dailypip-grid { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 16px; align-items: start; }
-.dailypip-chart { position: relative; overflow: hidden; height: 620px; }
+.dailypip-chart { position: relative; overflow: hidden; height: 520px; }
 @media (max-width: 860px) {
   .dailypip-grid { grid-template-columns: 1fr; }
-  .dailypip-chart { height: 380px; }
+  .dailypip-chart { height: 360px; }
 }
 
 /* shared utility — hide something below the mobile breakpoint. Defined

@@ -20,9 +20,12 @@ import { validateSetup, buildSetup, runEngine, bookTrade, fmtPrice, fmtMoney, fm
    its own page, not a mode flag bolted onto Simulator.jsx.
 
    Lives inside Shell (sidebar nav), same as Dashboard/Journal/
-   Analytics/Settings — it's a page, not a full-bleed takeover like
-   Simulator, so it composes with PageHead rather than drawing its own
-   header/logo/avatar.
+   Analytics/Settings. Layout is a persistent two-column split: today's
+   leaderboard sits on the right the whole time (visible before you've
+   even opened the challenge, and live-updating once you have), while
+   the left column carries whatever's relevant right now — a prompt to
+   open the challenge, the live countdown/chart/ticket, or today's
+   result once you've already played.
 
    Arming a setup or entering at market both end the countdown and
    start the reveal immediately — there's no reason to make someone
@@ -52,10 +55,18 @@ export default function DailyPip({ account, theme, onExit }) {
     setPhase("loading");
     api.dailyPipToday().then((d) => {
       setToday(d);
-      setPhase(d.attempt ? "already-played" : "arming");
+      /* Doesn't auto-start the countdown on arrival any more — "ready"
+         is a plain prompt, and the clock only starts once the player
+         actually opens the challenge (see openChallenge below). */
+      setPhase(d.attempt ? "already-played" : "ready");
     }).catch((e) => { setErrMsg(e?.message || "Couldn't load today's Pip."); setPhase("error"); });
   };
   useEffect(load, []);
+
+  const openChallenge = () => {
+    if (phase !== "ready") return;
+    setPhase("arming");
+  };
 
   /* ---------- live price, from the chart sitting at the challenge's
      start point — TVAdvancedChart reports this via onCursor as soon as
@@ -110,6 +121,7 @@ export default function DailyPip({ account, theme, onExit }) {
   const lastBarRef = useRef(null);
   const submittedRef = useRef(false);
   const [result, setResult] = useState(null); // { traded, dir, entry, exit, stop, target, r, pnl, reason }
+  const [boardVersion, setBoardVersion] = useState(0); // bumped after a submit lands, so the leaderboard panel refetches
 
   const startReveal = (trade) => {
     setPhase("revealing");
@@ -186,15 +198,14 @@ export default function DailyPip({ account, theme, onExit }) {
       r: closedRec?.r ?? 0, pnl: closedRec?.pnl ?? 0, reason: reason ?? null,
     };
     setResult(body);
-    /* Awaited, not fired-and-forgotten: ResultView fetches the day's
-       leaderboard the moment it mounts, and only flipping to "result"
-       once the submit has actually landed (or failed) is what stops
-       that fetch racing ahead of this exact attempt being recorded —
-       otherwise a player could load the board a beat before their own
-       just-submitted result was in it. */
+    /* Awaited, not fired-and-forgotten: this is what stops the
+       leaderboard panel's own refetch (bumped below) racing ahead of
+       this exact attempt actually being recorded — otherwise it could
+       refresh a beat before the just-submitted result was in it. */
     try {
       const res = await api.dailyPipSubmit(body);
       setToday((t) => ({ ...t, attempt: res.attempt, streak: res.streak }));
+      setBoardVersion((v) => v + 1);
     } catch (e) {
       // still show the result locally even if the POST failed — the
       // server call is what makes it official/leaderboard-visible,
@@ -241,152 +252,163 @@ export default function DailyPip({ account, theme, onExit }) {
         </Card>
       )}
 
-      {phase === "already-played" && today && today !== "error" && (
-        <ResultView today={today} attempt={today.attempt} onExit={onExit} />
-      )}
-
-      {(phase === "arming" || phase === "revealing") && today && today !== "error" && (
+      {today && today !== "error" && phase !== "loading" && (
         <div className="dailypip-grid">
-          <Card className="dailypip-chart" style={{ padding: 0 }}>
-            {phase === "arming" && (
-              <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5,
-                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8,
-                padding: "6px 12px", fontWeight: 600, fontSize: 15 }} className="num">
-                {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
-              </div>
+          <div>
+            {phase === "ready" && (
+              <Card style={{ padding: 28 }}>
+                <div className="cap" style={{ marginBottom: 8 }}>Today's challenge</div>
+                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>
+                  {today.challenge.symbol} — one shared chart, dates hidden
+                </div>
+                <div className="sm mut" style={{ lineHeight: 1.6, marginBottom: 22, maxWidth: 480 }}>
+                  Once you open it, you'll have 3 minutes to place one trade — arm a setup or
+                  enter at market. Arming a trade (or the clock running out) starts the chart
+                  playing forward automatically to the result. No rewinds, one attempt a day.
+                </div>
+                <button className="btn pri" style={{ padding: "10px 22px" }} onClick={openChallenge}>
+                  <Svg s={14}>{Ic.play}</Svg>Open today's Daily Pip
+                </button>
+              </Card>
             )}
-            {phase === "revealing" && (
-              <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5,
-                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8,
-                padding: "6px 12px", fontSize: 13 }} className="mut">
-                Playing out…
-              </div>
-            )}
-            <TVAdvancedChart
-              symbol={today.challenge.symbol}
-              interval={IV_TO_TV_RES[today.challenge.interval] || "5"}
-              theme={theme}
-              startMs={today.challenge.startMs}
-              canDraw={false}
-              hideDates
-              onReady={(apiObj) => { chartCtlRef.current = apiObj; }}
-              onCursor={handleCursor}
-              onBar={handleBar}
-              height="100%"
-            />
-          </Card>
 
-          <Card style={{ padding: 18 }}>
-            <div className="cap" style={{ marginBottom: 12 }}>Setup</div>
-            {phase === "revealing" ? (
-              <div className="sm mut" style={{ lineHeight: 1.6 }}>
-                {armedTrade
-                  ? `${armedTrade.dir === "long" ? "Long" : "Short"} ${fmtPrice(armedTrade.entry)}, stop ${fmtPrice(armedTrade.stop)}${armedTrade.target != null ? `, target ${fmtPrice(armedTrade.target)}` : ""} — watching for it to resolve.`
-                  : "Time ran out with nothing armed — playing forward a short window."}
-              </div>
-            ) : (
+            {(phase === "arming" || phase === "revealing") && (
               <>
-                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-                  {["long", "short"].map((d) => (
-                    <button key={d} onClick={() => setForm((f) => ({ ...f, dir: d }))}
-                      className={"btn " + (form.dir === d ? (d === "long" ? "buy" : "sell") : "")}
-                      style={{ flex: 1 }}>{d === "long" ? "Long" : "Short"}</button>
-                  ))}
-                </div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  <Field label="Entry">
-                    <input className="in" value={form.entry} placeholder={price ? `market ${fmtPrice(price)}` : "required"}
-                      onChange={(e) => setForm((f) => ({ ...f, entry: e.target.value }))} />
-                  </Field>
-                  <Field label="Stop loss">
-                    <input className="in" value={form.stop} placeholder="—"
-                      onChange={(e) => setForm((f) => ({ ...f, stop: e.target.value }))} />
-                  </Field>
-                  <Field label="Take profit">
-                    <input className="in" value={form.target} placeholder="optional"
-                      onChange={(e) => setForm((f) => ({ ...f, target: e.target.value }))} />
-                  </Field>
-                  <Field label="Risk % of equity">
-                    <input className="in" type="number" min="0.01" max="100" step="0.1" value={form.riskPct}
-                      onChange={(e) => setForm((f) => ({ ...f, riskPct: e.target.value }))} />
-                  </Field>
-                </div>
-                {form.entry === "" && price && form.stop && setupErrors.length === 0 && (
-                  <div className="sm mut" style={{ margin: "10px 0" }}>Entry blank — using {fmtPrice(price)}.</div>
-                )}
-                {(setupErrors.length > 0 || formErr) && (
-                  <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", borderRadius: 8,
-                    padding: "9px 11px", margin: "12px 0" }}>
-                    {(setupErrors.length ? setupErrors : [formErr]).map((m, i) => (
-                      <div key={i} style={{ fontSize: 12, color: "var(--down)", lineHeight: 1.55 }}>{m}</div>
-                    ))}
-                  </div>
-                )}
-                <button className="btn pri" style={{ width: "100%", marginTop: 12, padding: 10 }}
-                  disabled={!form.stop || setupErrors.length > 0} onClick={() => arm(false)}>
-                  <Svg s={14}>{Ic.plus}</Svg>Arm setup
-                </button>
-                <button className="btn" style={{ width: "100%", marginTop: 7 }}
-                  disabled={!form.stop || !price || setupErrors.length > 0} onClick={() => arm(true)}>
-                  Enter at market
-                </button>
-                <div className="sm mut" style={{ marginTop: 10, lineHeight: 1.5 }}>
-                  Arming a setup or entering at market stops the clock and plays the chart forward
-                  right away — no rewind, one shot.
-                </div>
+                <Card className="dailypip-chart" style={{ padding: 0, marginBottom: 16 }}>
+                  {phase === "arming" && (
+                    <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5,
+                      background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8,
+                      padding: "6px 12px", fontWeight: 600, fontSize: 15 }} className="num">
+                      {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
+                    </div>
+                  )}
+                  {phase === "revealing" && (
+                    <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5,
+                      background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8,
+                      padding: "6px 12px", fontSize: 13 }} className="mut">
+                      Playing out…
+                    </div>
+                  )}
+                  <TVAdvancedChart
+                    symbol={today.challenge.symbol}
+                    interval={IV_TO_TV_RES[today.challenge.interval] || "5"}
+                    theme={theme}
+                    startMs={today.challenge.startMs}
+                    canDraw={false}
+                    hideDates
+                    onReady={(apiObj) => { chartCtlRef.current = apiObj; }}
+                    onCursor={handleCursor}
+                    onBar={handleBar}
+                    height="100%"
+                  />
+                </Card>
+
+                <Card style={{ padding: 18 }}>
+                  {phase === "revealing" ? (
+                    <div className="sm mut" style={{ lineHeight: 1.6 }}>
+                      {armedTrade
+                        ? `${armedTrade.dir === "long" ? "Long" : "Short"} ${fmtPrice(armedTrade.entry)}, stop ${fmtPrice(armedTrade.stop)}${armedTrade.target != null ? `, target ${fmtPrice(armedTrade.target)}` : ""} — watching for it to resolve.`
+                        : "Time ran out with nothing armed — playing forward a short window."}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {["long", "short"].map((d) => (
+                            <button key={d} onClick={() => setForm((f) => ({ ...f, dir: d }))}
+                              className={"btn " + (form.dir === d ? (d === "long" ? "buy" : "sell") : "")}
+                              style={{ width: 68 }}>{d === "long" ? "Long" : "Short"}</button>
+                          ))}
+                        </div>
+                        <div style={{ width: 130 }}>
+                          <Field label="Entry">
+                            <input className="in" value={form.entry} placeholder={price ? `market ${fmtPrice(price)}` : "required"}
+                              onChange={(e) => setForm((f) => ({ ...f, entry: e.target.value }))} />
+                          </Field>
+                        </div>
+                        <div style={{ width: 130 }}>
+                          <Field label="Stop loss">
+                            <input className="in" value={form.stop} placeholder="—"
+                              onChange={(e) => setForm((f) => ({ ...f, stop: e.target.value }))} />
+                          </Field>
+                        </div>
+                        <div style={{ width: 130 }}>
+                          <Field label="Take profit">
+                            <input className="in" value={form.target} placeholder="optional"
+                              onChange={(e) => setForm((f) => ({ ...f, target: e.target.value }))} />
+                          </Field>
+                        </div>
+                        <div style={{ width: 100 }}>
+                          <Field label="Risk %">
+                            <input className="in" type="number" min="0.01" max="100" step="0.1" value={form.riskPct}
+                              onChange={(e) => setForm((f) => ({ ...f, riskPct: e.target.value }))} />
+                          </Field>
+                        </div>
+                        <button className="btn pri" style={{ padding: "0 16px", height: 36 }}
+                          disabled={!form.stop || setupErrors.length > 0} onClick={() => arm(false)}>
+                          <Svg s={14}>{Ic.plus}</Svg>Arm setup
+                        </button>
+                        <button className="btn" style={{ padding: "0 16px", height: 36 }}
+                          disabled={!form.stop || !price || setupErrors.length > 0} onClick={() => arm(true)}>
+                          Enter at market
+                        </button>
+                      </div>
+                      {form.entry === "" && price && form.stop && setupErrors.length === 0 && (
+                        <div className="sm mut" style={{ margin: "12px 0 0" }}>Entry blank — using {fmtPrice(price)}.</div>
+                      )}
+                      {(setupErrors.length > 0 || formErr) && (
+                        <div style={{ background: "var(--downSoft)", border: "1px solid var(--down)", borderRadius: 8,
+                          padding: "9px 11px", margin: "12px 0 0" }}>
+                          {(setupErrors.length ? setupErrors : [formErr]).map((m, i) => (
+                            <div key={i} style={{ fontSize: 12, color: "var(--down)", lineHeight: 1.55 }}>{m}</div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="sm mut" style={{ marginTop: 12, lineHeight: 1.5 }}>
+                        Arming a setup or entering at market stops the clock and plays the chart
+                        forward right away — no rewind, one shot.
+                      </div>
+                    </>
+                  )}
+                </Card>
               </>
             )}
-          </Card>
-        </div>
-      )}
 
-      {phase === "result" && result && today && (
-        <ResultView today={today} attempt={result} onExit={onExit} justPlayed />
+            {(phase === "result" || phase === "already-played") && (
+              <AttemptSummary
+                today={today}
+                attempt={phase === "result" ? result : today.attempt}
+                justPlayed={phase === "result"}
+              />
+            )}
+          </div>
+
+          <LeaderboardPanel today={today} version={boardVersion} />
+        </div>
       )}
     </div>
   );
 }
 
-/* ---------- result + leaderboard ---------- */
-function ResultView({ today, attempt, onExit, justPlayed }) {
+/* ---------- persistent leaderboard, right column ---------- */
+function LeaderboardPanel({ today, version }) {
   const [board, setBoard] = useState(null); // { entries, you } | "error" | null
   useEffect(() => {
     let alive = true;
+    setBoard(null);
     api.dailyPipLeaderboard(today.challenge.challengeDate)
       .then((d) => { if (alive) setBoard(d); })
       .catch(() => { if (alive) setBoard("error"); });
     return () => { alive = false; };
-  }, [today.challenge.challengeDate]);
-
-  const tone = !attempt.traded ? "mut" : attempt.r > 0 ? "up" : attempt.r < 0 ? "down" : "mut";
+  }, [today.challenge.challengeDate, version]);
 
   return (
-    <Card style={{ padding: 24, maxWidth: 480, width: "100%", margin: "20px auto" }}>
-      <div className="cap" style={{ marginBottom: 6 }}>
-        {today.challenge.symbol} · {today.challenge.challengeDate}
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }} className={"num " + tone}>
-        {attempt.traded ? fmtR(attempt.r) : "No trade placed"}
-      </div>
-      {attempt.traded && (
-        <div className="sm mut" style={{ marginBottom: 16 }}>
-          {attempt.dir === "long" ? "Long" : "Short"} {fmtPrice(attempt.entry)} → {fmtPrice(attempt.exitPrice)}
-          {" "}({attempt.reason}) · {fmtMoney(attempt.pnl)}
-        </div>
-      )}
-      {justPlayed && (
-        <div className="sm mut" style={{ marginBottom: 16 }}>
-          {today.streak?.current > 0 ? `${today.streak.current}-day streak — nice.` : "First one recorded — come back tomorrow."}
-        </div>
-      )}
-
-      <div style={{ height: 1, background: "var(--border)", margin: "16px 0" }} />
-
-      <div className="cap" style={{ marginBottom: 10 }}>Today's leaderboard</div>
+    <Card style={{ padding: 18 }}>
+      <div className="cap" style={{ marginBottom: 12 }}>Today's leaderboard</div>
       {board === null && <span className="spinner" />}
       {board === "error" && <div className="sm mut">Couldn't load the leaderboard.</div>}
       {board && board !== "error" && (
-        <div style={{ display: "grid", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+        <div style={{ display: "grid", gap: 6, maxHeight: 500, overflowY: "auto" }}>
           {board.entries.length === 0 && <div className="sm mut">No one's played yet today.</div>}
           {board.entries.map((e, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13,
@@ -402,8 +424,32 @@ function ResultView({ today, attempt, onExit, justPlayed }) {
       {board && board !== "error" && board.you && (
         <div className="sm mut" style={{ marginTop: 10 }}>You're #{board.you.rank} today.</div>
       )}
+    </Card>
+  );
+}
 
-      <button className="btn" style={{ width: "100%", marginTop: 18 }} onClick={onExit}>Back to Analytics</button>
+/* ---------- your result, left column ---------- */
+function AttemptSummary({ today, attempt, justPlayed }) {
+  const tone = !attempt.traded ? "mut" : attempt.r > 0 ? "up" : attempt.r < 0 ? "down" : "mut";
+  return (
+    <Card style={{ padding: 24 }}>
+      <div className="cap" style={{ marginBottom: 6 }}>
+        {today.challenge.symbol} · {today.challenge.challengeDate}
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }} className={"num " + tone}>
+        {attempt.traded ? fmtR(attempt.r) : "No trade placed"}
+      </div>
+      {attempt.traded && (
+        <div className="sm mut" style={{ marginBottom: 12 }}>
+          {attempt.dir === "long" ? "Long" : "Short"} {fmtPrice(attempt.entry)} → {fmtPrice(attempt.exitPrice)}
+          {" "}({attempt.reason}) · {fmtMoney(attempt.pnl)}
+        </div>
+      )}
+      <div className="sm mut">
+        {justPlayed
+          ? (today.streak?.current > 0 ? `${today.streak.current}-day streak — nice.` : "First one recorded — come back tomorrow.")
+          : "You've already played today's Pip — come back tomorrow for a new one."}
+      </div>
     </Card>
   );
 }
