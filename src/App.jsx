@@ -488,17 +488,7 @@ export default function App() {
     );
   }
 
-  if (route.page === "dailypip") {
-    /* Full-bleed, same reasoning as `sim` above — a countdown and a
-       chart with no distractions, not Shell's sidebar/header chrome. */
-    return wrap(
-      <Suspense fallback={<PageLoading full />}>
-        <DailyPip account={account} theme={theme} onExit={() => go("analytics")} />
-      </Suspense>
-    );
-  }
-
-  const page = ["dashboard", "journal", "analytics", "settings"].includes(route.page) ? route.page : "dashboard";
+  const page = ["dashboard", "journal", "analytics", "settings", "dailypip"].includes(route.page) ? route.page : "dashboard";
 
   return wrap(
     <Shell
@@ -517,6 +507,9 @@ export default function App() {
           <Journal trades={trades} onUpdateTrade={updateTrade} onExport={exportCsv} />
         )}
         {page === "analytics" && <Analytics trades={trades} />}
+        {page === "dailypip" && (
+          <DailyPip account={account} theme={theme} onExit={() => go("analytics")} />
+        )}
         {/* Settings reads straight off `account` from its very first render
             (no optional chaining — it's always been guaranteed non-null by
             the auth gate above), so unlike the other pages it can't just be
