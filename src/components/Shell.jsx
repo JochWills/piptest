@@ -65,8 +65,10 @@ export default function Shell({ page, onNav, onHome, account, theme, onToggleThe
               </span>
             </span>
           </div>
-          <button className="btn ghost shell-home" onClick={onHome}>← Home page</button>
           <div className="shell-footbtns">
+            <a className="btn ghost" href="https://discord.gg/gsNa4Vnc9W" target="_blank" rel="noopener noreferrer" title="Join our Discord" aria-label="Join our Discord">
+              <Svg s={15}>{Ic.discord}</Svg>
+            </a>
             <button className="btn ghost" onClick={onToggleTheme} title="Toggle theme" aria-label="Toggle theme">
               <Svg s={15}>{theme === "dark" ? Ic.sun : Ic.moon}</Svg>
             </button>

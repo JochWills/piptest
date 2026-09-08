@@ -427,6 +427,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       }
       if (t1 !== t0) {
         setTrade(t1);
+        /* stop/target hit closes the trade outright (t1 goes to null,
+           as opposed to a fill, which just flips watching -> open) —
+           clear the stale entry/stop/target so the setup panel doesn't
+           reappear pre-filled with the trade that just finished. */
+        if (t1 == null) { setForm((f) => ({ ...f, entry: "", stop: "", target: "" })); setFormErr(""); }
         /* a stop/target hit during play is the one trade transition
            with no button click behind it anywhere else in this file
            to hang a broadcast off — this is the only place it happens. */
@@ -475,6 +480,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     setTrades((l) => [rec, ...l]);
     onTradesClosed && onTradesClosed([rec]);
     setTrade(null);
+    setForm((f) => ({ ...f, entry: "", stop: "", target: "" }));
+    setFormErr("");
     broadcastTrade(null, [rec]);
   };
 
