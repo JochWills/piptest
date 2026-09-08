@@ -219,6 +219,28 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     return () => clearInterval(id);
   }, [account?.plan, recheckAdBlock]);
 
+  /* ---------- ad rail slide cycle ----------
+     On for 30s, off for 4 minutes, repeating for as long as the page is
+     open — a plain setInterval doesn't fit since the two phases run for
+     different lengths, so this chains setTimeout calls instead, each one
+     scheduling the next with whichever duration matches the phase it just
+     entered. `alive` guards the same way the room-poll loop further down
+     does: a call landing after unmount would otherwise queue one more
+     setTimeout no cleanup could ever reach. Detection in adblock.js uses
+     an unrelated decoy element, not this one, so cycling it doesn't trip
+     the ad-block gate above. */
+  const [adVisible, setAdVisible] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    let timer;
+    const cycle = (show) => {
+      setAdVisible(show);
+      timer = setTimeout(() => { if (alive) cycle(!show); }, show ? 30000 : 240000);
+    };
+    cycle(true);
+    return () => { alive = false; clearTimeout(timer); };
+  }, []);
+
   const role = room ? room.participants?.[account.handle]?.role || "viewer" : "host";
   const isHost = room && room.participants?.[account.handle]?.role === "host";
   /* Sharing a session is view-only, full stop: a guest watches, the
@@ -1601,7 +1623,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
           same as the existing narrow-window breakpoint below already
           does for its own reason. */}
       <div className="sim-main" style={{ display: "grid",
-        gridTemplateColumns: fullscreen ? "minmax(0,1fr) 292px" : "156px minmax(0,1fr) 292px", gap: 0, flex: 1, minHeight: 0 }}>
+        gridTemplateColumns: fullscreen ? "minmax(0,1fr) 292px" : `${adVisible ? 156 : 0}px minmax(0,1fr) 292px`,
+        gap: 0, flex: 1, minHeight: 0, transition: fullscreen ? "none" : "grid-template-columns .5s ease" }}>
 
         {/* ---- left: ad slot ----
             Market watch (and its watchlist editor) was retired — no live
@@ -1610,13 +1633,24 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
             rail is now entirely the ad's. PIP Affiliates' 120×600
             skyscraper creative, fixed pixel size rather than stretched to
             the rail's ~200px usable width, same as any other ad network:
-            they serve that exact box, not a responsive one. */}
+            they serve that exact box, not a responsive one.
+
+            Slides on/off on the cycle above rather than unmounting: the
+            column width and the creative's own translateX both animate
+            off adVisible, in the same direction, so it reads as one slide
+            instead of a width-collapse with the ad just popping out at
+            the end of it. overflow hidden keeps it from poking into the
+            chart mid-slide. Stays mounted the whole time (kept out of the
+            layout by the column collapsing to 0, not display:none) so the
+            transition has something to animate between renders. */}
         {!fullscreen && (
           <aside className="sim-left" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)",
             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
-            padding: 14, overflowY: "auto", minHeight: 0 }}>
+            padding: adVisible ? 14 : 0, overflow: "hidden", minHeight: 0, transition: "padding .5s ease" }}>
             <a href="https://clicks.pipaffiliates.com/c?m=131252&c=1297452" target="_blank" rel="noopener"
-              referrerPolicy="no-referrer-when-downgrade" style={{ flexShrink: 0 }}>
+              referrerPolicy="no-referrer-when-downgrade" style={{ flexShrink: 0,
+                transform: adVisible ? "translateX(0)" : "translateX(-160px)",
+                opacity: adVisible ? 1 : 0, transition: "transform .5s ease, opacity .5s ease" }}>
               <img src="https://ads.pipaffiliates.com/i/131252?c=1297452" width={120} height={600}
                 referrerPolicy="no-referrer-when-downgrade" alt="Advertisement" style={{ display: "block", borderRadius: 8 }} />
             </a>
