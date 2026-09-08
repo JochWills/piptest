@@ -63,25 +63,31 @@ const RANK_COLORS = ["#F0B429", "#B0B7C3", "#C77B3F"]; // gold, silver, bronze �
    show. Not real data, so a fixed hand-picked sequence rather than
    anything computed from `today`. */
 function ReadyDecor() {
-  const closes = [34, 38, 33, 41, 37, 46, 42, 51, 47, 39, 33, 42, 50, 57, 63, 71];
-  const W = 300, H = 120, PAD_TOP = 36, n = closes.length, gap = 5;
+  /* A hand-picked wobble-then-dip-then-rally shape — the dip is where the
+     "current bar" marker sits, echoing where a countdown would catch you
+     mid-setup. `amber` marks the one candle rendered in the highlight
+     colour regardless of up/down, same as the reference design's single
+     off-palette candle at the dip's low. */
+  const closes = [46, 50, 44, 48, 41, 45, 37, 31, 34, 26, 20, 15, 23, 33, 45, 41, 55, 67, 63, 78, 90];
+  const amberIdx = 11;
+  const highlightIdx = 11;
+  const W = 340, H = 150, PAD_TOP = 46, n = closes.length, gap = 3;
   const bw = (W - gap * (n - 1)) / n;
-  const scaleY = (v) => PAD_TOP + (H - (v / 80) * H);
-  const highlightIdx = 10;
+  const scaleY = (v) => PAD_TOP + (H - (v / 95) * H);
 
   return (
     <svg width={W} height={H + PAD_TOP} viewBox={`0 0 ${W} ${H + PAD_TOP}`} style={{ display: "block", overflow: "visible" }}>
       {closes.map((close, i) => {
-        const open = i === 0 ? close - 3 : closes[i - 1];
+        const open = i === 0 ? close - 4 : closes[i - 1];
         const up = close >= open;
         const x = i * (bw + gap);
         const yOpen = scaleY(open), yClose = scaleY(close);
-        const top = Math.min(yOpen, yClose), bodyH = Math.max(2, Math.abs(yOpen - yClose));
-        const color = up ? "var(--up)" : "var(--down)";
+        const top = Math.min(yOpen, yClose), bodyH = Math.max(2.5, Math.abs(yOpen - yClose));
+        const color = i === amberIdx ? "#F0A63A" : up ? "var(--up)" : "var(--down)";
         return (
-          <g key={i} opacity={i === highlightIdx ? 1 : 0.8}>
-            <line x1={x + bw / 2} y1={top - 6} x2={x + bw / 2} y2={top + bodyH + 6} stroke={color} strokeWidth="1.5" />
-            <rect x={x} y={top} width={bw} height={bodyH} rx="1.5" fill={color} />
+          <g key={i}>
+            <line x1={x + bw / 2} y1={top - 5} x2={x + bw / 2} y2={top + bodyH + 5} stroke={color} strokeWidth="1.3" />
+            <rect x={x} y={top} width={bw} height={bodyH} rx="1" fill={color} />
           </g>
         );
       })}
@@ -90,10 +96,15 @@ function ReadyDecor() {
         const y = scaleY(Math.min(closes[highlightIdx - 1], closes[highlightIdx]));
         return (
           <g>
-            <line x1={x} y1="30" x2={x} y2={y} stroke="var(--border)" strokeDasharray="3 3" />
-            <circle cx={x} cy={y} r="4.5" fill="var(--brand)" stroke="var(--surface)" strokeWidth="2" />
-            <rect x={x - 26} y="2" width="52" height="24" rx="7" fill="var(--surface2)" stroke="var(--border)" />
-            <text x={x} y="18" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--ink)">3:00</text>
+            <line x1={x} y1="40" x2={x} y2={y} stroke="var(--dim)" strokeDasharray="2 3" strokeWidth="1" />
+            {/* soft glow — concentric, decreasing-opacity circles rather than
+                an SVG filter, so it renders identically (and cheaply)
+                everywhere a filter's clipping/perf quirks might not */}
+            <circle cx={x} cy={y} r="11" fill="#8FD9FF" opacity="0.14" />
+            <circle cx={x} cy={y} r="7" fill="#8FD9FF" opacity="0.22" />
+            <circle cx={x} cy={y} r="4" fill="#EAF9FF" stroke="#8FD9FF" strokeWidth="1" />
+            <rect x={x - 28} y="4" width="56" height="26" rx="8" fill="var(--surface2)" stroke="var(--border)" />
+            <text x={x} y="21" textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--ink)">3:00</text>
           </g>
         );
       })()}
@@ -179,6 +190,21 @@ export default function DailyPip({ account, theme, onExit }) {
   const submittedRef = useRef(false);
   const [result, setResult] = useState(null); // { traded, dir, entry, exit, stop, target, r, pnl, reason }
   const [boardVersion, setBoardVersion] = useState(0); // bumped after a submit lands, so the leaderboard panel refetches
+
+  /* ---------- post-game replay, "View trade replay" on the completed card ----------
+     Once the challenge is over there's nothing left to protect — the real
+     symbol/date is already shown right there in the summary — so this
+     replay shows real dates (hideDates omitted) and plays back the same
+     bars, at the same pace, that the live reveal did. Capped at the same
+     `maxRevealBars` for the same reason the original reveal was: nothing
+     else would ever tell it to stop. */
+  const [showReplay, setShowReplay] = useState(false);
+  const replayCtlRef = useRef(null);
+  const replayBarsRef = useRef(0);
+  const handleReplayBar = () => {
+    replayBarsRef.current += 1;
+    if (replayBarsRef.current >= (today?.maxRevealBars || 400)) replayCtlRef.current?.replay.pause();
+  };
 
   const startReveal = (trade) => {
     setPhase("revealing");
@@ -462,11 +488,33 @@ export default function DailyPip({ account, theme, onExit }) {
             )}
 
             {(phase === "result" || phase === "already-played") && (
-              <AttemptSummary
-                today={today}
-                attempt={phase === "result" ? result : today.attempt}
-                justPlayed={phase === "result"}
-              />
+              <>
+                <AttemptSummary
+                  today={today}
+                  attempt={phase === "result" ? result : today.attempt}
+                  justPlayed={phase === "result"}
+                  replayOpen={showReplay}
+                  onSetReplay={setShowReplay}
+                />
+                {showReplay && (
+                  <Card className="dailypip-chart" style={{ padding: 0, marginTop: 16 }}>
+                    <TVAdvancedChart
+                      symbol={today.challenge.symbol}
+                      interval={IV_TO_TV_RES[today.challenge.interval] || "5"}
+                      theme={theme}
+                      startMs={today.challenge.startMs}
+                      onReady={(apiObj) => {
+                        replayCtlRef.current = apiObj;
+                        replayBarsRef.current = 0;
+                        apiObj.replay.setStep(barMsOf(today.challenge.interval));
+                        apiObj.replay.play();
+                      }}
+                      onBar={handleReplayBar}
+                      height="100%"
+                    />
+                  </Card>
+                )}
+              </>
             )}
           </div>
 
@@ -532,27 +580,66 @@ function LeaderboardPanel({ today, version }) {
 }
 
 /* ---------- your result, left column ---------- */
-function AttemptSummary({ today, attempt, justPlayed }) {
+function AttemptSummary({ today, attempt, justPlayed, replayOpen, onSetReplay }) {
   const tone = !attempt.traded ? "mut" : attempt.r > 0 ? "up" : attempt.r < 0 ? "down" : "mut";
+  const tint = tone === "up" ? "var(--upSoft)" : tone === "down" ? "var(--downSoft)" : "var(--surface2)";
+  const borderTint = tone === "mut" ? "var(--border)" : `color-mix(in srgb, var(--${tone}) 35%, var(--border))`;
+  const iconBg = tone === "mut" ? "var(--surface3)" : `var(--${tone})`;
+  const iconColor = tone === "mut" ? "var(--muted)" : "#fff";
+
   return (
-    <Card style={{ padding: 24 }}>
-      <div className="cap" style={{ marginBottom: 6 }}>
-        {today.challenge.symbol} · {today.challenge.challengeDate}
-      </div>
-      <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }} className={"num " + tone}>
-        {attempt.traded ? fmtR(attempt.r) : "No trade placed"}
-      </div>
-      {attempt.traded && (
-        <div className="sm mut" style={{ marginBottom: 12 }}>
-          {attempt.dir === "long" ? "Long" : "Short"} {fmtPrice(attempt.entry)} → {fmtPrice(attempt.exitPrice)}
-          {" "}({attempt.reason}) · {fmtMoney(attempt.pnl)}
+    <div>
+      <Card style={{ padding: 24, background: tint, borderColor: borderTint }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, flex: "1 1 240px", minWidth: 0 }}>
+            <div style={{ width: 56, height: 56, borderRadius: "50%", flexShrink: 0,
+              background: iconBg, color: iconColor, display: "grid", placeItems: "center" }}>
+              <Svg s={26}>{attempt.traded ? Ic.trophy : Ic.calendar}</Svg>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div className="cap" style={{ marginBottom: 4 }}>Today's challenge</div>
+              <div style={{ fontSize: 21, fontWeight: 700 }}>{attempt.traded ? "Completed!" : "No trade placed"}</div>
+              <div className="sm mut" style={{ marginTop: 4 }}>
+                {today.challenge.symbol} · {today.challenge.challengeDate}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ width: 1, alignSelf: "stretch", background: borderTint }} className="hide-sm" />
+
+          <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+            <div className="cap" style={{ marginBottom: 4 }}>Your result</div>
+            <div style={{ fontSize: 30, fontWeight: 700, lineHeight: 1.15 }} className={"num " + tone}>
+              {attempt.traded ? fmtR(attempt.r) : "—"}
+            </div>
+            {attempt.traded ? (
+              <div className="sm mut" style={{ marginTop: 4 }}>
+                {attempt.dir === "long" ? "Long" : "Short"} {fmtPrice(attempt.entry)} → {fmtPrice(attempt.exitPrice)}
+                {" "}({attempt.reason}) · {fmtMoney(attempt.pnl)}
+              </div>
+            ) : (
+              <div className="sm mut" style={{ marginTop: 4 }}>
+                {justPlayed ? "Time ran out with nothing armed." : "Nothing was placed that day."}
+              </div>
+            )}
+          </div>
         </div>
-      )}
-      <div className="sm mut">
+      </Card>
+
+      <div className="sm mut" style={{ marginTop: 12 }}>
         {justPlayed
           ? (today.streak?.current > 0 ? `${today.streak.current}-day streak — nice.` : "First one recorded — come back tomorrow.")
           : "You've already played today's Pip — come back tomorrow for a new one."}
       </div>
-    </Card>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+        <button className="btn pri" style={{ padding: "10px 20px" }} onClick={() => onSetReplay(true)}>
+          <Svg s={14}>{Ic.chart}</Svg>{replayOpen ? "Replaying…" : "View trade replay"}
+        </button>
+        <button className="btn" style={{ padding: "10px 20px" }} onClick={() => onSetReplay(false)}>
+          <Svg s={14}>{Ic.calendar}</Svg>Back to Daily Pip
+        </button>
+      </div>
+    </div>
   );
 }

@@ -384,6 +384,16 @@ export const Ic = {
     <circle cx="8" cy="8" r="1.1" fill="currentColor" />
   </>,
   target: <><circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /></>,
+  trophy: <>
+    <path d="M4.5 2.5h7v2c0 2.2-1.6 4-3.5 4s-3.5-1.8-3.5-4v-2z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
+    <path d="M4.5 3.3H2.8a1.7 1.7 0 0 0 1.7 2.9M11.5 3.3h1.7a1.7 1.7 0 0 1-1.7 2.9" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+    <path d="M8 8.5v2.3M6 13h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <path d="M6.3 10.8h3.4v1.4H6.3z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
+  </>,
+  calendar: <>
+    <rect x="2.4" y="3.2" width="11.2" height="10.4" rx="1.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
+    <path d="M2.4 6.3h11.2M5.2 1.8v2.4M10.8 1.8v2.4" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+  </>,
   logout: <path d="M6 3.2H3.4v9.6H6M9.3 5.4 11.9 8l-2.6 2.6M11.9 8H6" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
   chat: <path d="M2.5 3.6h11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.4l-3.1 2.8V11H2.5a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.35" fill="none" strokeLinejoin="round" strokeLinecap="round" />,
   /* four corner brackets pointing outward/inward — enter/exit fullscreen */
