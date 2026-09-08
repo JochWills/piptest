@@ -146,9 +146,14 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
    column (see the inline-style gotcha noted in CLAUDE.md). */
 .dailypip-grid { display: grid; grid-template-columns: minmax(0,1fr) 320px; gap: 16px; align-items: start; }
 .dailypip-chart { position: relative; overflow: hidden; height: 520px; }
+.dailypip-ready { display: flex; gap: 24px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.dailypip-ready-decor { flex-shrink: 0; }
 @media (max-width: 860px) {
   .dailypip-grid { grid-template-columns: 1fr; }
   .dailypip-chart { height: 360px; }
+}
+@media (max-width: 720px) {
+  .dailypip-ready-decor { display: none; }
 }
 
 /* shared utility — hide something below the mobile breakpoint. Defined

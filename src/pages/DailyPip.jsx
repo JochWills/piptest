@@ -44,6 +44,63 @@ const COUNTDOWN_S = 180;
 const NO_TRADE_REVEAL_BARS = 60; // shorter fixed window when nothing was armed at all
 const EQUITY = 10000; // arbitrary — R-multiple scoring is invariant to it (R = pnl/riskAmt, both scale with equity together)
 
+/* One picked deterministically per UTC day (by date, not randomness) so it
+   doesn't jump around on a re-render or a reload — same day, same line. */
+const QUOTES = [
+  "Consistent practice compounds.",
+  "Plans are cheap. Discipline is not.",
+  "The market pays for patience, not predictions.",
+  "Small edges, repeated, become an edge.",
+  "Risk first. Reward follows.",
+  "One good process beats a hundred good guesses.",
+];
+
+const RANK_COLORS = ["#F0B429", "#B0B7C3", "#C77B3F"]; // gold, silver, bronze — medal colours stay fixed regardless of theme
+
+/* Purely decorative — a plausible little candlestick wobble with a
+   highlighted "current bar" and a floating countdown pill, hinting at
+   what opening the challenge looks like before there's a real chart to
+   show. Not real data, so a fixed hand-picked sequence rather than
+   anything computed from `today`. */
+function ReadyDecor() {
+  const closes = [34, 38, 33, 41, 37, 46, 42, 51, 47, 39, 33, 42, 50, 57, 63, 71];
+  const W = 300, H = 120, PAD_TOP = 36, n = closes.length, gap = 5;
+  const bw = (W - gap * (n - 1)) / n;
+  const scaleY = (v) => PAD_TOP + (H - (v / 80) * H);
+  const highlightIdx = 10;
+
+  return (
+    <svg width={W} height={H + PAD_TOP} viewBox={`0 0 ${W} ${H + PAD_TOP}`} style={{ display: "block", overflow: "visible" }}>
+      {closes.map((close, i) => {
+        const open = i === 0 ? close - 3 : closes[i - 1];
+        const up = close >= open;
+        const x = i * (bw + gap);
+        const yOpen = scaleY(open), yClose = scaleY(close);
+        const top = Math.min(yOpen, yClose), bodyH = Math.max(2, Math.abs(yOpen - yClose));
+        const color = up ? "var(--up)" : "var(--down)";
+        return (
+          <g key={i} opacity={i === highlightIdx ? 1 : 0.8}>
+            <line x1={x + bw / 2} y1={top - 6} x2={x + bw / 2} y2={top + bodyH + 6} stroke={color} strokeWidth="1.5" />
+            <rect x={x} y={top} width={bw} height={bodyH} rx="1.5" fill={color} />
+          </g>
+        );
+      })}
+      {(() => {
+        const x = highlightIdx * (bw + gap) + bw / 2;
+        const y = scaleY(Math.min(closes[highlightIdx - 1], closes[highlightIdx]));
+        return (
+          <g>
+            <line x1={x} y1="30" x2={x} y2={y} stroke="var(--border)" strokeDasharray="3 3" />
+            <circle cx={x} cy={y} r="4.5" fill="var(--brand)" stroke="var(--surface)" strokeWidth="2" />
+            <rect x={x - 26} y="2" width="52" height="24" rx="7" fill="var(--surface2)" stroke="var(--border)" />
+            <text x={x} y="18" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--ink)">3:00</text>
+          </g>
+        );
+      })()}
+    </svg>
+  );
+}
+
 export default function DailyPip({ account, theme, onExit }) {
   const [phase, setPhase] = useState("loading");
   // { challenge, attempt, streak, maxRevealBars } from GET /daily-pip/today
@@ -215,11 +272,22 @@ export default function DailyPip({ account, theme, onExit }) {
   };
 
   const streakBadge = today && today !== "error" && (
-    <div className="btn" style={{ cursor: "default" }}>
-      <Svg s={14}>{Ic.bolt}</Svg>
-      {today.streak?.current > 0 ? `${today.streak.current}-day streak` : "No streak yet"}
-    </div>
+    <Card style={{ padding: "13px 18px", display: "flex", gap: 12, alignItems: "flex-start", minWidth: 250 }}>
+      <span style={{ color: "var(--brand)", flexShrink: 0, marginTop: 1 }}><Svg s={17}>{Ic.bolt}</Svg></span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>
+          {today.streak?.current > 0 ? `${today.streak.current}-day streak` : "No streak yet"}
+        </div>
+        <div className="sm mut" style={{ marginTop: 2 }}>
+          {today.streak?.current > 0 ? "Keep it going — play today's Pip." : "Complete today's challenge to start."}
+        </div>
+      </div>
+    </Card>
   );
+
+  const quote = today && today !== "error"
+    ? QUOTES[new Date(today.challenge.challengeDate + "T00:00:00Z").getUTCDate() % QUOTES.length]
+    : null;
 
   return (
     <div>
@@ -257,18 +325,25 @@ export default function DailyPip({ account, theme, onExit }) {
           <div>
             {phase === "ready" && (
               <Card style={{ padding: 28 }}>
-                <div className="cap" style={{ marginBottom: 8 }}>Today's challenge</div>
-                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>
-                  {today.challenge.symbol} — one shared chart, dates hidden
+                <div className="dailypip-ready">
+                  <div style={{ flex: 1, minWidth: 260 }}>
+                    <div className="cap" style={{ marginBottom: 8 }}>Today's challenge</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>
+                      {today.challenge.symbol} — one shared chart, dates hidden
+                    </div>
+                    <div className="sm mut" style={{ lineHeight: 1.6, marginBottom: 22, maxWidth: 480 }}>
+                      Once you open it, you'll have 3 minutes to place one trade — arm a setup or
+                      enter at market. Arming a trade (or the clock running out) starts the chart
+                      playing forward automatically to the result. No rewinds, one attempt a day.
+                    </div>
+                    <button className="btn pri" style={{ padding: "10px 22px" }} onClick={openChallenge}>
+                      <Svg s={14}>{Ic.play}</Svg>Open today's Daily Pip
+                    </button>
+                  </div>
+                  <div className="dailypip-ready-decor">
+                    <ReadyDecor />
+                  </div>
                 </div>
-                <div className="sm mut" style={{ lineHeight: 1.6, marginBottom: 22, maxWidth: 480 }}>
-                  Once you open it, you'll have 3 minutes to place one trade — arm a setup or
-                  enter at market. Arming a trade (or the clock running out) starts the chart
-                  playing forward automatically to the result. No rewinds, one attempt a day.
-                </div>
-                <button className="btn pri" style={{ padding: "10px 22px" }} onClick={openChallenge}>
-                  <Svg s={14}>{Ic.play}</Svg>Open today's Daily Pip
-                </button>
               </Card>
             )}
 
@@ -398,6 +473,14 @@ export default function DailyPip({ account, theme, onExit }) {
           <LeaderboardPanel today={today} version={boardVersion} />
         </div>
       )}
+
+      {quote && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+          marginTop: 26, paddingTop: 16, borderTop: "1px solid var(--border)", flexWrap: "wrap", gap: 8 }}>
+          <span className="sm mut" style={{ fontStyle: "italic" }}>— "{quote}"</span>
+          <span className="sm mut">Trade. Learn. Improve.</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -420,13 +503,21 @@ function LeaderboardPanel({ today, version }) {
       {board === null && <span className="spinner" />}
       {board === "error" && <div className="sm mut">Couldn't load the leaderboard.</div>}
       {board && board !== "error" && (
-        <div style={{ display: "grid", gap: 6, maxHeight: 500, overflowY: "auto" }}>
+        <div style={{ display: "grid", gap: 4, maxHeight: 500, overflowY: "auto" }}>
           {board.entries.length === 0 && <div className="sm mut">No one's played yet today.</div>}
           {board.entries.map((e, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13,
-              padding: "4px 0", borderBottom: i < board.entries.length - 1 ? "1px solid var(--border)" : "none" }}>
-              <span>{i + 1}. {e.handle}</span>
-              <span className="num" style={{ fontWeight: 600, color: !e.traded ? "var(--muted)" : e.r > 0 ? "var(--up)" : e.r < 0 ? "var(--down)" : "var(--muted)" }}>
+            <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "7px 0", borderBottom: i < board.entries.length - 1 ? "1px solid var(--border)" : "none" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <span style={{
+                  width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                  display: "grid", placeItems: "center", fontSize: 11, fontWeight: 700,
+                  background: i < 3 ? RANK_COLORS[i] : "var(--surface3)",
+                  color: i < 3 ? "#1A1A1A" : "var(--muted)",
+                }}>{i + 1}</span>
+                <span style={{ fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.handle}</span>
+              </div>
+              <span className="num" style={{ fontWeight: 600, flexShrink: 0, color: !e.traded ? "var(--muted)" : e.r > 0 ? "var(--up)" : e.r < 0 ? "var(--down)" : "var(--muted)" }}>
                 {e.traded ? fmtR(e.r) : "—"}
               </span>
             </div>
