@@ -433,11 +433,33 @@ export default function TVAdvancedChart({
       chart.onSymbolChanged().subscribe(null, () => {
         replay.setMarket(bareSymbol(), chart.resolution());
       });
+      /* ---- pick-a-time-on-the-chart, for the rewind button ----
+         Arms the library's own single-point "vertical line" tool as a
+         one-shot crosshair: the very next shape it creates is treated
+         as the click's answer, not a real drawing. Piggybacks on the
+         drawing_event subscription right below rather than a second
+         one, since that's the only channel a shape's creation reaches
+         this code through at all. */
+      let pendingPick = null;
+
       /* Drawing and indicator changes drive room sync, but down two
          completely different paths now (drawing-level mirror vs.
          layout snapshot), so the caller needs to know which just
          happened — see stripDrawings above. */
       widget.subscribe("drawing_event", (sourceId, drawingEventType) => {
+        if (pendingPick && drawingEventType === "create") {
+          const info = (chart.getAllShapes() || []).find((s) => s.id === sourceId);
+          if (info && info.name === "vertical_line") {
+            const cb = pendingPick;
+            pendingPick = null;
+            let time = null;
+            try { time = chart.getShapeById(sourceId)?.getPoints()?.[0]?.time ?? null; } catch (e) {}
+            try { chart.removeEntity(sourceId); } catch (e) {}
+            try { widget.selectLineTool("cursor"); } catch (e) {}
+            if (time != null) cb(time);
+            return; // the marker never existed as far as room sync/undo/redo are concerned
+          }
+        }
         cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("drawing");
         /* a drag/edit of the Long/Short Position shape currently
            mirrored into the setup form (see chart.selection() below)
@@ -559,6 +581,21 @@ export default function TVAdvancedChart({
 
       const api = {
         widget, chart, replay, control, feed,
+
+        /* Arms the one-shot click-to-pick described above; cb(timeSec)
+           fires once, then the tool reverts to the normal cursor on
+           its own — no need for the caller to call cancelPickTime
+           after a successful pick, only to actually cancel one. */
+        pickTime(cb) {
+          pendingPick = cb;
+          try { widget.selectLineTool("vertical_line"); } catch (e) {}
+        },
+        cancelPickTime() {
+          if (pendingPick) {
+            pendingPick = null;
+            try { widget.selectLineTool("cursor"); } catch (e) {}
+          }
+        },
 
         /* --- trade visualisation (entry / stop / target zones) ---
            createShape resolves asynchronously (Promise<EntityId>, per

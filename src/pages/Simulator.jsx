@@ -357,6 +357,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      bars to the {t,o,h,l,c} shape the rest of this file already uses. */
   const tradeRef = useRef(null);
   useEffect(() => { tradeRef.current = trade; }, [trade]);
+  /* read from the rewind button's pick callback, which can fire an
+     arbitrary amount of time after it's armed (however long the user
+     takes to click a candle) — needs whatever `cursor` actually is
+     *then*, not whatever it was when the picker was armed. */
+  const cursorRef = useRef(cursor);
+  useEffect(() => { cursorRef.current = cursor; }, [cursor]);
   /* handleBar (below) is memoized narrowly ([onTradesClosed]) so it
      doesn't go stale mid-play, same reasoning as tradeRef — these
      back it with the current symbol/interval/room for the room
@@ -600,14 +606,20 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   };
 
   /* ================= transport =================
-     Replay only ever moves forward — no stepping back, deliberately: once
-     a bar's played out you've seen the outcome, and rewinding to "redo"
-     a decision against a result you already know isn't a real backtest.
-     Re-stepping forward within what's already been seen this visit
-     (e.g. right after a room resync) still walks the small ring buffer
-     of recently-seen bars via jumpTo rather than asking the datafeed for
-     something it already has; anything actually new comes from
-     replay.stepFor.
+     Stepping/playing only ever moves forward on its own — nothing here
+     auto-advances backward. Rewinding is a deliberate, explicit action
+     the user reaches for on purpose (see rewindTo/startRewindPick
+     below, restoring a button removed for the opposite reason not long
+     ago): the position it's meant to serve, "back out of this and try
+     a different read of the same setup", is a real backtesting
+     workflow, not just a way to redo a decision after peeking at the
+     result — the trade-erasure rewindTo does on the way back is what
+     keeps that honest, rather than just moving the chart and leaving
+     the blotter spoiling what happens next. Re-stepping forward within
+     what's already been seen this visit (e.g. right after a room
+     resync) still walks the small ring buffer of recently-seen bars via
+     jumpTo rather than asking the datafeed for something it already
+     has; anything actually new comes from replay.stepFor.
 
      This covers `stepMs` of calendar time, not always one bar — the
      chosen step size (the dropdown next to Play) can span several
@@ -665,6 +677,58 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     }
     if (idx === lastIdx && coveredMs < stepMs) ctl.replay.stepFor(stepMs - coveredMs);
   }, [stepMs]);
+
+  const [picking, setPicking] = useState(false);
+
+  /* Cuts the timeline back to `targetMs`: resets the seen-bar ring
+     buffer to a single fresh anchor there (same shape a fresh mount
+     starts with) and repositions the widget via jumpTo — but the part
+     that actually makes this a rewind rather than just "look at an
+     earlier candle" is erasing anything that only exists because of
+     bars between there and here. A trade armed or filled at/after the
+     target hasn't happened yet from this new vantage point, so it's
+     discarded outright rather than left sitting there; a closed trade
+     whose entry or exit falls in that same erased stretch is dropped
+     from the blotter for the same reason — otherwise the blotter would
+     keep spoiling an outcome the whole point of rewinding was to un-see.
+     Anything entirely on the near side of the target (a trade already
+     open before it, drawings, session notes) is untouched. */
+  const rewindTo = (targetMs) => {
+    const ctl = chartCtlRef.current;
+    if (!ctl) return;
+    const t = tradeRef.current;
+    if (t && ((t.armedTs != null && t.armedTs >= targetMs) || (t.filledTs != null && t.filledTs >= targetMs))) {
+      setTrade(null);
+      broadcastTrade(null);
+      /* same as any other way a trade stops existing (closeNow, a stop/
+         target hit) — the panel shouldn't keep showing a setup for a
+         trade that, from here, was never made. */
+      setForm((f) => ({ ...f, entry: "", stop: "", target: "" }));
+      setFormErr("");
+    }
+    setTrades((list) => list.filter((rec) => rec.openedTs < targetMs && rec.closedTs < targetMs));
+    seenRef.current = [targetMs];
+    seenBarsRef.current = [null];
+    seenIdxRef.current = 0;
+    chartStartRef.current = targetMs;
+    ctl.replay.jumpTo(targetMs, ctl.widget);
+  };
+
+  /* Arms/disarms the click-a-candle picker exposed as api.pickTime —
+     clicking the button again while already armed cancels it instead
+     of picking, same toggle shape as play/pause. */
+  const startRewindPick = () => {
+    const ctl = chartCtlRef.current;
+    if (!ctl || !canControl) return;
+    if (picking) { ctl.cancelPickTime(); setPicking(false); return; }
+    setPicking(true);
+    ctl.pickTime((timeSec) => {
+      setPicking(false);
+      const targetMs = timeSec * 1000;
+      if (targetMs >= cursorRef.current) return; // only backward — a forward "rewind" is just stepping
+      rewindTo(targetMs);
+    });
+  };
   /* drives the widget's own replay clock off Simulator's playing/step
      state, rather than the other way round — room sync and the transport
      buttons both just flip this state, same as before.
@@ -1408,6 +1472,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       const k = e.key.toLowerCase();
       if (e.key === " ") { e.preventDefault(); if (canControl && !adBlocked) setPlaying((p) => !p); return; }
       if (e.key === "ArrowRight") { e.preventDefault(); if (canControl && !adBlocked) stepForward(); return; }
+      /* Same reach caveat as "f" below — this only catches Escape while
+         focus is still on the outer page, not once it's moved into the
+         chart's iframe for the actual click. Clicking the rewind button
+         a second time is the reliable cancel; this is just the bonus. */
+      if (e.key === "Escape" && picking) { chartCtlRef.current?.cancelPickTime(); setPicking(false); return; }
       if (k === "?") { setHelpOpen(true); return; }
       /* Plain "f", not the library's own Shift+F — this only reaches
          the page when focus is here rather than inside the chart's
@@ -1417,7 +1486,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canControl, stepForward, toggleFullscreen, adBlocked]);
+  }, [canControl, stepForward, toggleFullscreen, adBlocked, picking]);
 
   useEffect(() => {
     const away = (e) => { if (!e.target.closest?.("[data-pop]")) { setRoomOpen(false); setChatOpen(false); setProfileOpen(false); setSessionsOpen(false); } };
@@ -1795,15 +1864,22 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   up front, which nothing here has any more now that the
                   datafeed pages history itself rather than Piptest
                   fetching a bounded array of it up front (see
-                  TRADINGVIEW.md). Replay is forward-only by design: no
-                  rewinding once you've seen how a bar played out — see
-                  stepForward's own note on why. */}
+                  TRADINGVIEW.md). Stepping/playing only ever move
+                  forward on their own — rewinding is the button below,
+                  a deliberate action rather than something that just
+                  happens, see rewindTo's own note on why that's the
+                  actual difference. */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", rowGap: 4 }}>
                 <span className={playing ? "live" : ""} title={playing ? "Playing" : "Paused"}
                   style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0,
                     background: playing ? "var(--up)" : "var(--dim)" }} />
 
                 <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+                  <button className={"btn " + (picking ? "on" : "ghost")} style={{ padding: "4px 7px" }} disabled={!canControl}
+                    onClick={startRewindPick}
+                    title={picking ? "Click a candle to rewind to it (click again to cancel)" : "Rewind to a candle you click"}>
+                    <Svg s={13}>{Ic.back}</Svg>
+                  </button>
                   <button className="btn pri" style={{ padding: "4px 11px" }} disabled={!canControl}
                     onClick={() => setPlaying((p) => !p)} title="Play / pause (space)">
                     <Svg s={13}>{playing ? Ic.pause : Ic.play}</Svg>
@@ -1811,6 +1887,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   <button className="btn ghost" style={{ padding: "4px 7px" }} disabled={!canControl}
                     onClick={stepForward} title="Step forward (→)"><Svg s={13}>{Ic.fwd}</Svg></button>
                 </div>
+                {picking && <span className="sm mut" style={{ flexShrink: 0 }}>Click a candle…</span>}
 
                 <select className="in" value={stepId} disabled={!canControl}
                   onChange={(e) => setStepId(e.target.value)}
