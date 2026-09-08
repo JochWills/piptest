@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { PageHead } from "../components/Shell.jsx";
-import { Card, Stat, Empty, Svg, Ic } from "../components/ui.jsx";
+import { Card, Stat, Empty } from "../components/ui.jsx";
 import { SYMBOLS } from "../theme.js";
 import {
   computeStats, groupBy, rHistogram, sessionOf, dayOf,

@@ -9,7 +9,8 @@ import crypto from "node:crypto";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { sendMail, resetEmail, passwordChangedEmail, MAIL_ENABLED } from "./mailer.js";
-import { q, logEvent } from "./db.js";
+import { q, pool, logEvent, dateColToStr } from "./db.js";
+import { resolveChallenge, utcDateKey, MAX_REVEAL_BARS } from "./dailyPip.js";
 import {
   hashPassword, verifyPassword, signAccess, issueRefresh, rotateRefresh,
   revokeRefresh, revokeAllForUser, setRefreshCookie, clearRefreshCookie,
@@ -547,6 +548,136 @@ router.patch("/trades/:id", requireAuth, writeLimiter, async (req, res) => {
      req.params.id, req.user.id]);
   if (!r.rowCount) return res.status(404).json({ error: "not_found" });
   res.json({ ok: true });
+});
+
+/* =====================================================
+   THE DAILY PIP
+   One shared historical chart per UTC day (see dailyPip.js), one
+   attempt per user per day. Result is computed client-side and
+   submitted here — same trust model the rest of trades already has
+   (nothing anywhere re-verifies a trade's outcome server-side); what
+   IS enforced server-side is the one-attempt-per-day gate and which
+   chart everyone gets, via the unique index + the transaction below.
+   ===================================================== */
+const rowToAttempt = (r) => ({
+  challengeDate: dateColToStr(r.challenge_date),
+  traded: r.traded, dir: r.dir, qty: r.qty, entry: r.entry, exitPrice: r.exit_price,
+  stop: r.stop, target: r.target, r: r.r, pnl: r.pnl, reason: r.reason,
+  submittedAt: r.submitted_at ? new Date(r.submitted_at).getTime() : null,
+});
+const streakOf = (u) => ({
+  current: u?.daily_pip_streak ?? 0,
+  longest: u?.daily_pip_longest_streak ?? 0,
+  lastDate: dateColToStr(u?.daily_pip_last_date),
+});
+
+router.get("/daily-pip/today", requireAuth, async (req, res) => {
+  const dateKey = utcDateKey();
+  const challenge = await resolveChallenge(dateKey);
+  const [{ rows: attemptRows }, { rows: userRows }] = await Promise.all([
+    q("SELECT * FROM daily_pip_attempts WHERE user_id=$1 AND challenge_date=$2", [req.user.id, dateKey]),
+    q("SELECT daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date FROM users WHERE id=$1", [req.user.id]),
+  ]);
+  res.json({
+    challenge, maxRevealBars: MAX_REVEAL_BARS,
+    attempt: attemptRows[0] ? rowToAttempt(attemptRows[0]) : null,
+    streak: streakOf(userRows[0]),
+  });
+});
+
+router.post("/daily-pip/attempts", requireAuth, writeLimiter, async (req, res) => {
+  const b = req.body || {};
+  const challengeDate = str(b.challengeDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(challengeDate)) {
+    return res.status(400).json({ error: "invalid", message: "Missing or invalid challengeDate." });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    /* check-then-insert, not `ON CONFLICT DO NOTHING RETURNING *` —
+       verified against this repo's pg-mem dependency that RETURNING
+       on a no-op conflict misbehaves there, and this is the first
+       route that actually needs a real transaction (the streak
+       update below has to land atomically with the insert), so it's
+       worth getting the double-submit path right rather than
+       trusting a shortcut neither test layer can fully confirm. A
+       second POST for a day already recorded is treated as a
+       harmless resubmit — same result handed back, not an error —
+       since the client can't always tell whether an earlier POST's
+       response was merely lost after it actually landed. */
+    const existing = await client.query(
+      "SELECT * FROM daily_pip_attempts WHERE user_id=$1 AND challenge_date=$2",
+      [req.user.id, challengeDate]);
+    if (existing.rows[0]) {
+      await client.query("COMMIT");
+      const u = await q("SELECT daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date FROM users WHERE id=$1", [req.user.id]);
+      return res.json({ attempt: rowToAttempt(existing.rows[0]), streak: streakOf(u.rows[0]) });
+    }
+    const known = await client.query("SELECT 1 FROM daily_pip_challenges WHERE challenge_date=$1", [challengeDate]);
+    if (!known.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "unknown_challenge", message: "That day's Daily Pip doesn't exist." });
+    }
+    const traded = !!b.traded;
+    const inserted = await client.query(
+      `INSERT INTO daily_pip_attempts
+         (user_id, challenge_date, traded, dir, qty, entry, exit_price, stop, target, r, pnl, reason)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING *`,
+      [req.user.id, challengeDate, traded, traded ? str(b.dir) || null : null,
+       traded ? num(b.qty) : null, traded ? num(b.entry) : null, traded ? num(b.exitPrice) : null,
+       traded ? num(b.stop) : null, traded ? num(b.target) : null,
+       num(b.r) ?? 0, num(b.pnl) ?? 0, traded ? (str(b.reason) || null) : null]
+    );
+    /* streak: +1 if yesterday was the last completed day, reset to 1
+       otherwise (including "never played before"); longest tracked
+       alongside in the same statement so it can never drift out of
+       sync with current. `date - integer` stays a date (unlike
+       `date - interval`, which promotes to timestamp) — keeps the
+       comparison a clean date-to-date one. */
+    const streakRow = await client.query(
+      `UPDATE users SET
+         daily_pip_streak = CASE
+           WHEN daily_pip_last_date = $2::date - 1 THEN daily_pip_streak + 1
+           WHEN daily_pip_last_date = $2::date THEN daily_pip_streak
+           ELSE 1
+         END,
+         daily_pip_longest_streak = GREATEST(daily_pip_longest_streak, CASE
+           WHEN daily_pip_last_date = $2::date - 1 THEN daily_pip_streak + 1
+           WHEN daily_pip_last_date = $2::date THEN daily_pip_streak
+           ELSE 1
+         END),
+         daily_pip_last_date = $2::date
+       WHERE id=$1
+       RETURNING daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date`,
+      [req.user.id, challengeDate]
+    );
+    await client.query("COMMIT");
+    res.json({ attempt: rowToAttempt(inserted.rows[0]), streak: streakOf(streakRow.rows[0]) });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+});
+
+router.get("/daily-pip/leaderboard/:date", requireAuth, async (req, res) => {
+  const date = req.params.date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "invalid" });
+  const { rows } = await q(
+    `SELECT a.user_id, u.handle, u.avatar, a.r, a.traded, a.reason
+       FROM daily_pip_attempts a JOIN users u ON u.id = a.user_id
+      WHERE a.challenge_date = $1
+      ORDER BY a.r DESC LIMIT 100`,
+    [date]);
+  const entries = rows.map((r) => ({ handle: r.handle, avatar: r.avatar || null, r: r.r, traded: r.traded, reason: r.reason }));
+  /* rank computed here in JS, not a SQL window function — pg-mem
+     doesn't implement OVER (), which would make this untestable
+     through the existing harness, and a day's attempt count (one row
+     per user) is small enough that this costs nothing. */
+  const myIdx = rows.findIndex((r) => r.user_id === req.user.id);
+  res.json({ date, entries, you: myIdx >= 0 ? { rank: myIdx + 1, r: entries[myIdx].r } : null });
 });
 
 /* =====================================================

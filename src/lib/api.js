@@ -147,6 +147,11 @@ export const api = {
   twelveDataCandles: (symbol, interval, from, to) =>
     raw(`/api/market/twelvedata/candles?symbol=${symbol}&interval=${interval}&from=${from}&to=${to}`),
 
+  /* the daily pip */
+  dailyPipToday:       ()       => raw("/api/daily-pip/today"),
+  dailyPipSubmit:      (b)      => raw("/api/daily-pip/attempts", { method: "POST", body: b }),
+  dailyPipLeaderboard: (date)   => raw(`/api/daily-pip/leaderboard/${date}`),
+
   /* rooms */
   kvGet: (k)        => raw(`/api/kv/${encodeURIComponent(k)}`),
   kvPut: (k, v)     => raw(`/api/kv/${encodeURIComponent(k)}`, { method: "PUT", body: { value: v } }),

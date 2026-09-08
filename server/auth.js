@@ -158,4 +158,7 @@ export const publicUser = (u) => ({
   id: u.id, email: u.email, handle: u.handle, name: u.name,
   role: u.role, status: u.status, plan: u.plan, avatar: u.avatar || null,
   createdAt: u.created_at, lastLoginAt: u.last_login_at,
+  dailyPipStreak: u.daily_pip_streak ?? 0,
+  dailyPipLongestStreak: u.daily_pip_longest_streak ?? 0,
+  dailyPipLastDate: u.daily_pip_last_date ?? null,
 });

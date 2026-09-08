@@ -158,6 +158,8 @@ export default function TVAdvancedChart({
                      // to map that back, same as the interval/startMs props coming in the other way
   canDraw = true,   // false for a room viewer — hides the drawing toolbar entirely rather than
                      // just disabling Piptest's own UI around it, since drawing is now the library's
+  hideDates = false,// true for The Daily Pip — see the tickMarkFormatter/chartOverrides note
+                     // below for exactly what this does and doesn't hide
   sessionName,      // shown as a plain label in the chart's own header — see the headerReady block
                      // below. Read once at mount; Piptest has no way to rename a session mid-play,
                      // so there's nothing to keep this in sync with after that.
@@ -222,6 +224,12 @@ export default function TVAdvancedChart({
       "mainSeriesProperties.candleStyle.borderDownColor": theme === "dark" ? "#EF4444" : "#DC2626",
       "mainSeriesProperties.candleStyle.wickUpColor": theme === "dark" ? "#22C55E" : "#16A34A",
       "mainSeriesProperties.candleStyle.wickDownColor": theme === "dark" ? "#EF4444" : "#DC2626",
+      /* the crosshair's own floating date label — the other place a
+         date surfaces beyond the axis ticks themselves (see
+         custom_formatters below, which is what actually blanks
+         those). No flag hides the time axis outright; nothing else
+         in `overrides`/`disabled_features` touches dates at all. */
+      ...(hideDates ? { "scalesProperties.showTimeScaleCrosshairLabel": false } : {}),
     };
 
     const widget = new window.TradingView.widget({
@@ -288,6 +296,15 @@ export default function TVAdvancedChart({
         foregroundColor: theme === "dark" ? "#161A21" : "#FFFFFF",
       },
       overrides: chartOverrides,
+      /* tickMarkFormatter is called for every label the time axis
+         draws — returning "" is what actually blanks the axis dates,
+         since there's no disabled_features/enabled_features flag for
+         "hide the time axis" at all (confirmed against the vendored
+         charting_library.d.ts — go_to_date above only removes the
+         manual jump-to-date dialog, a different thing). Only applied
+         for The Daily Pip; every other caller gets the library's
+         normal formatting. */
+      ...(hideDates ? { custom_formatters: { tickMarkFormatter: () => "" } } : {}),
     });
 
     widgetRef.current = widget;

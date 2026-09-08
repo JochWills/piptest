@@ -10,6 +10,18 @@ import pg from "pg";
 
 const { Pool } = pg;
 
+/* pg's default `date` (OID 1082) parser hands back a JS Date built
+   from the LOCAL-time multi-arg constructor — confirmed directly: on
+   a server not running in UTC, re-serializing that via .toISOString()
+   (which is always UTC) silently shifts the calendar date backward by
+   a day whenever local time is ahead of UTC. The daily_pip_* date
+   columns depend on the exact calendar date round-tripping correctly
+   regardless of what timezone the server process happens to run in
+   (Render's/local dev's may differ), so this disables that parsing
+   globally and gets the raw "YYYY-MM-DD" text pg already sends on the
+   wire instead — no Date object, no timezone to get wrong. */
+pg.types.setTypeParser(1082, (v) => v);
+
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set — the API cannot start without a database.");
 }
@@ -41,6 +53,24 @@ pool.on("error", (err) => {
 });
 
 export const q = (text, params) => pool.query(text, params);
+
+/* A `date` column comes back as a plain "YYYY-MM-DD" string against
+   real Postgres (the type-parser override above), but pg-mem — the
+   in-memory Postgres server/test-api.mjs runs against — is a separate
+   implementation with its own row serialization and doesn't go
+   through that override at all; confirmed directly, it still hands
+   back a genuine JS Date there. Whichever one it is, it's anchored at
+   LOCAL midnight when it IS a Date object (both pg's pre-override
+   default and pg-mem build it that way) — reading it back with local
+   getters, not toISOString()/getUTC*() (which shift a day backward
+   whenever local time is ahead of UTC), is what round-trips correctly
+   in both environments regardless of server timezone. */
+export function dateColToStr(v) {
+  if (v == null) return null;
+  if (typeof v === "string") return v.slice(0, 10);
+  const y = v.getFullYear(), m = String(v.getMonth() + 1).padStart(2, "0"), d = String(v.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -135,6 +165,32 @@ CREATE TABLE IF NOT EXISTS kv (
   value      jsonb NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- The Daily Pip: one shared historical chart per UTC calendar day (see
+-- server/dailyPip.js for how symbol/interval/start_ms are picked), and
+-- at most one attempt per user per day (daily_pip_user_date_key below).
+CREATE TABLE IF NOT EXISTS daily_pip_challenges (
+  challenge_date date PRIMARY KEY,
+  symbol     text NOT NULL,
+  interval   text NOT NULL,
+  start_ms   bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS daily_pip_attempts (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  challenge_date date NOT NULL,
+  traded         boolean NOT NULL DEFAULT false,   -- false = time ran out, nothing armed
+  dir            text, qty double precision, entry double precision,
+  exit_price     double precision, stop double precision, target double precision,
+  r              double precision NOT NULL DEFAULT 0,
+  pnl            double precision NOT NULL DEFAULT 0,
+  reason         text,   -- stop | target | timeout | unfilled | null (untraded)
+  submitted_at   timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS daily_pip_user_date_key ON daily_pip_attempts (user_id, challenge_date);
+CREATE INDEX IF NOT EXISTS daily_pip_leaderboard_idx ON daily_pip_attempts (challenge_date, r DESC);
 `;
 
 export async function migrate() {
@@ -142,6 +198,9 @@ export async function migrate() {
   /* added after the first release, so bring existing tables forward */
   await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar text");
   await q("ALTER TABLE bt_sessions ADD COLUMN IF NOT EXISTS start_balance integer NOT NULL DEFAULT 10000");
+  await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_pip_streak integer NOT NULL DEFAULT 0");
+  await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_pip_longest_streak integer NOT NULL DEFAULT 0");
+  await q("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_pip_last_date date");
 
   /* Backfill trades.session_id for rows created before the client ever
      sent one (every trade before this existed). session_id has no FK —
@@ -153,14 +212,28 @@ export async function migrate() {
      that's since been deleted; see the /admin/orphaned-trades routes for
      what cleans those up. Scoped to session_id IS NULL and safe to run
      on every boot: once a trade is tagged this never touches it again. */
-  await q(`
-    UPDATE trades t
-    SET session_id = s.id
-    FROM bt_sessions s, jsonb_array_elements(coalesce(s.state->'trades', '[]'::jsonb)) elem
-    WHERE t.session_id IS NULL
-      AND s.user_id = t.user_id
-      AND elem->>'id' = t.id
-  `);
+  try {
+    await q(`
+      UPDATE trades t
+      SET session_id = s.id
+      FROM bt_sessions s, jsonb_array_elements(coalesce(s.state->'trades', '[]'::jsonb)) elem
+      WHERE t.session_id IS NULL
+        AND s.user_id = t.user_id
+        AND elem->>'id' = t.id
+    `);
+  } catch (e) {
+    /* pg-mem (the in-memory Postgres server/test-api.mjs runs migrate()
+       against) can't parse/execute a lateral jsonb_array_elements() join
+       inside UPDATE...FROM at all — confirmed directly, not guessed:
+       every rewrite tried (CROSS JOIN LATERAL, a subquery) hits the same
+       wall, since it's pg-mem's lateral-correlation support that's
+       missing, not this particular syntax. Real Postgres has always run
+       this fine (it's the standard, documented form). This is a one-time
+       backfill for pre-existing rows anyway — skipping it against a
+       freshly created test database costs nothing, since there's
+       nothing yet for it to backfill there. */
+    console.error("trades.session_id backfill skipped:", e.message);
+  }
 
   console.log("schema ready");
 }

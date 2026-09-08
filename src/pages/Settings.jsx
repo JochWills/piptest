@@ -89,7 +89,8 @@ export default function Settings({ account, onSaveAccount, onChangePassword, onW
             Piptest is completely free — everything is unlocked.
           </p>
           <div style={{ display: "flex", gap: 26, flexWrap: "wrap" }}>
-            {[["Sessions", sessions.length], ["Trades logged", trades.length]].map(([l, v]) => (
+            {[["Sessions", sessions.length], ["Trades logged", trades.length],
+              ["Daily Pip streak", account?.dailyPipStreak ?? 0]].map(([l, v]) => (
               <div key={l}>
                 <div className="cap" style={{ marginBottom: 4 }}>{l}</div>
                 <div className="num" style={{ fontSize: 20, fontWeight: 600 }}>{v}</div>

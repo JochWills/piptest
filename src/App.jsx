@@ -19,6 +19,7 @@ const Simulator = lazy(() => import("./pages/Simulator.jsx"));
 const Journal = lazy(() => import("./pages/Journal.jsx"));
 const Analytics = lazy(() => import("./pages/Analytics.jsx"));
 const Settings = lazy(() => import("./pages/Settings.jsx"));
+const DailyPip = lazy(() => import("./pages/DailyPip.jsx"));
 import { store, K } from "./lib/store.js";
 import { api, API_ENABLED, setToken, refresh, onAuthLost } from "./lib/api.js";
 import * as data from "./lib/data.js";
@@ -32,7 +33,7 @@ import { fmtShort, uid } from "./lib/trading.js";
    development and the current deploy keep working.
    ============================================================ */
 
-const ROUTES = ["home", "auth", "reset", "privacy", "terms", "sim", "dashboard", "journal", "analytics", "settings"];
+const ROUTES = ["home", "auth", "reset", "privacy", "terms", "sim", "dashboard", "journal", "analytics", "settings", "dailypip"];
 
 const parseHash = () => {
   const h = (window.location.hash || "").replace(/^#\/?/, "");
@@ -483,6 +484,16 @@ export default function App() {
           autoJoinCode={pendingJoin?.id === meta.id ? pendingJoin.code : null}
           onAutoJoinDone={() => setPendingJoin(null)}
         />
+      </Suspense>
+    );
+  }
+
+  if (route.page === "dailypip") {
+    /* Full-bleed, same reasoning as `sim` above — a countdown and a
+       chart with no distractions, not Shell's sidebar/header chrome. */
+    return wrap(
+      <Suspense fallback={<PageLoading full />}>
+        <DailyPip account={account} theme={theme} onExit={() => go("analytics")} />
       </Suspense>
     );
   }

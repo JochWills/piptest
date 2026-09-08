@@ -17,7 +17,7 @@ process.env.ADMIN_EMAILS = "boss@piptest.com";
 process.env.NODE_ENV = "development";
 process.env.DATABASE_URL = "postgres://localhost/test";
 
-const { migrate } = await import("./db.js");
+const { migrate, q } = await import("./db.js");
 const { router } = await import("./routes.js");
 const express = (await import("express")).default;
 const cookieParser = (await import("cookie-parser")).default;
@@ -217,6 +217,80 @@ try {
   ok(r.status === 200 && r.body.candles.length === 0, "an interval Twelve Data doesn't offer (1s) comes back empty, not an error");
 
   global.fetch = origFetch;
+
+  console.log("\n=== the daily pip ===");
+  let d = await call("/api/daily-pip/today", { token: userToken });
+  ok(d.status === 200 && !!d.body.challenge?.symbol, "today's challenge resolves");
+  ok(d.body.attempt === null, "no attempt yet for a fresh user");
+  ok(d.body.streak.current === 0, "streak starts at zero");
+  const challengeDate = d.body.challenge.challengeDate;
+
+  const d2 = await call("/api/daily-pip/today", { token: adminToken });
+  ok(d2.body.challenge.challengeDate === challengeDate && d2.body.challenge.symbol === d.body.challenge.symbol,
+     "every user gets the identical challenge for the same day");
+
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: userToken,
+    body: { challengeDate, traded: true, dir: "long", qty: 1, entry: 100, exitPrice: 102, stop: 99, target: 103, r: 2, pnl: 200, reason: "target" } });
+  ok(r.status === 200 && r.body.attempt.r === 2, "attempt recorded");
+  ok(r.body.streak.current === 1, "first attempt starts a 1-day streak");
+
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: userToken,
+    body: { challengeDate, traded: true, dir: "short", qty: 1, entry: 50, exitPrice: 49, stop: 51, target: 48, r: 1, pnl: 100, reason: "target" } });
+  ok(r.status === 200 && r.body.attempt.r === 2, "resubmitting the same day is idempotent — original result kept, not overwritten");
+  ok(r.body.streak.current === 1, "resubmit doesn't double-count the streak");
+
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: userToken, body: { challengeDate: "not-a-date", traded: false } });
+  ok(r.status === 400, "malformed challengeDate rejected");
+
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: userToken, body: { challengeDate: "2099-01-01", traded: false } });
+  ok(r.status === 404 && r.body.error === "unknown_challenge", "a date with no matching challenge row is rejected");
+
+  r = await call("/api/auth/register", { method: "POST",
+    body: { email: "second@piptest.com", password: "another-pass-9", name: "Second", handle: "second_pe" } });
+  const secondToken = r.body.accessToken;
+  await call("/api/daily-pip/attempts", { method: "POST", token: secondToken,
+    body: { challengeDate, traded: true, dir: "long", qty: 1, entry: 100, exitPrice: 99, stop: 99, target: 103, r: -1, pnl: -100, reason: "stop" } });
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: adminToken,
+    body: { challengeDate, traded: false } });
+  ok(r.body.attempt.traded === false && r.body.attempt.r === 0, "time-ran-out-with-nothing-armed still records an attempt");
+
+  r = await call(`/api/daily-pip/leaderboard/${challengeDate}`, { token: userToken });
+  ok(r.status === 200 && r.body.entries.length === 3, "leaderboard lists every attempt for the day");
+  ok(r.body.entries[0].handle === "josh_pe" && r.body.entries[0].r === 2, "higher R ranks first");
+  ok(r.body.entries.some((e) => e.traded === false), "an untraded (0R) attempt still appears on the board");
+  ok(r.body.you.rank === 1, "the caller's own rank is reported correctly");
+
+  /* Streak continuity across days, with no clock-mocking: the streak
+     transition is computed entirely from the challengeDate supplied
+     in the request, not from now(), so adjacent days can just be
+     fabricated directly against daily_pip_challenges (real request
+     flow only ever resolves "today", so a direct insert is the only
+     way to get a row for a date other than today without waiting a
+     real day). */
+  const addDays = (dateStr, n) => {
+    const dt = new Date(dateStr + "T00:00:00Z");
+    dt.setUTCDate(dt.getUTCDate() + n);
+    return dt.toISOString().slice(0, 10);
+  };
+  const yesterday = addDays(challengeDate, -1);
+  const twoDaysAgo = addDays(challengeDate, -2);
+  await q("INSERT INTO daily_pip_challenges (challenge_date, symbol, interval, start_ms) VALUES ($1,'BTCUSDT','5m',1) ON CONFLICT DO NOTHING", [yesterday]);
+  await q("INSERT INTO daily_pip_challenges (challenge_date, symbol, interval, start_ms) VALUES ($1,'BTCUSDT','5m',1) ON CONFLICT DO NOTHING", [twoDaysAgo]);
+
+  r = await call("/api/auth/register", { method: "POST",
+    body: { email: "streaker@piptest.com", password: "streak-pass-9", name: "Streaker", handle: "streaker" } });
+  const streakToken = r.body.accessToken;
+  await call("/api/daily-pip/attempts", { method: "POST", token: streakToken, body: { challengeDate: yesterday, traded: false } });
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: streakToken, body: { challengeDate, traded: false } });
+  ok(r.body.streak.current === 2, "playing yesterday then today extends the streak to 2");
+  ok(r.body.streak.longest === 2, "longest streak tracks the current one");
+
+  r = await call("/api/auth/register", { method: "POST",
+    body: { email: "gapper@piptest.com", password: "gapper-pass-9", name: "Gapper", handle: "gapper" } });
+  const gapToken = r.body.accessToken;
+  await call("/api/daily-pip/attempts", { method: "POST", token: gapToken, body: { challengeDate: twoDaysAgo, traded: false } });
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: gapToken, body: { challengeDate, traded: false } });
+  ok(r.body.streak.current === 1, "a gap (two-days-ago, then today, skipping yesterday) resets the streak to 1, not +1");
 
   console.log("\n=== disabling a user ===");
   r = await call("/api/admin/users/" + userId, { method: "PATCH", token: adminToken, body: { status: "disabled" } });
