@@ -384,11 +384,15 @@ export const Ic = {
     <circle cx="8" cy="8" r="1.1" fill="currentColor" />
   </>,
   target: <><circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeWidth="1.4" fill="none" /><circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.4" fill="none" /></>,
+  /* Filled, not outlined — this one's meant to read as a solid badge at
+     32-40px inside a colour-matched circle (see the Daily Pip "Completed!"
+     card), where a thin stroke reads as a wireframe rather than a trophy. */
   trophy: <>
-    <path d="M4.5 2.5h7v2c0 2.2-1.6 4-3.5 4s-3.5-1.8-3.5-4v-2z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
-    <path d="M4.5 3.3H2.8a1.7 1.7 0 0 0 1.7 2.9M11.5 3.3h1.7a1.7 1.7 0 0 1-1.7 2.9" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
-    <path d="M8 8.5v2.3M6 13h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    <path d="M6.3 10.8h3.4v1.4H6.3z" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinejoin="round" />
+    <path d="M4 2h8v2.3a4 4 0 0 1-8 0V2z" fill="currentColor" />
+    <path d="M4 2.8H2.6a1.6 1.6 0 0 0 1.6 2.7M12 2.8h1.4a1.6 1.6 0 0 1-1.6 2.7" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
+    <rect x="7.2" y="8.3" width="1.6" height="2.2" fill="currentColor" />
+    <rect x="5.6" y="10.3" width="4.8" height="1.3" rx=".6" fill="currentColor" />
+    <rect x="5" y="12.6" width="6" height="1.3" rx=".6" fill="currentColor" />
   </>,
   calendar: <>
     <rect x="2.4" y="3.2" width="11.2" height="10.4" rx="1.6" stroke="currentColor" strokeWidth="1.3" fill="none" />

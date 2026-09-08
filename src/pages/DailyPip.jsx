@@ -67,30 +67,49 @@ function ReadyDecor() {
      "current bar" marker sits, echoing where a countdown would catch you
      mid-setup. `amber` marks the one candle rendered in the highlight
      colour regardless of up/down, same as the reference design's single
-     off-palette candle at the dip's low. */
-  const closes = [46, 50, 44, 48, 41, 45, 37, 31, 34, 26, 20, 15, 23, 33, 45, 41, 55, 67, 63, 78, 90];
+     off-palette candle right at the dip's low. */
+  const closes = [40, 45, 40, 46, 41, 48, 42, 37, 43, 38, 32, 25, 19, 22, 30, 42, 38, 52, 60, 55, 66, 78];
   const amberIdx = 11;
-  const highlightIdx = 11;
-  const W = 340, H = 150, PAD_TOP = 46, n = closes.length, gap = 3;
+  const highlightIdx = 12;
+  const W = 340, H = 160, PAD_TOP = 46, n = closes.length, gap = 3;
   const bw = (W - gap * (n - 1)) / n;
   const scaleY = (v) => PAD_TOP + (H - (v / 95) * H);
+  const fadeId = "dpFade" + amberIdx; // unique-enough per mount — two of these never share a page
 
   return (
     <svg width={W} height={H + PAD_TOP} viewBox={`0 0 ${W} ${H + PAD_TOP}`} style={{ display: "block", overflow: "visible" }}>
-      {closes.map((close, i) => {
-        const open = i === 0 ? close - 4 : closes[i - 1];
-        const up = close >= open;
-        const x = i * (bw + gap);
-        const yOpen = scaleY(open), yClose = scaleY(close);
-        const top = Math.min(yOpen, yClose), bodyH = Math.max(2.5, Math.abs(yOpen - yClose));
-        const color = i === amberIdx ? "#F0A63A" : up ? "var(--up)" : "var(--down)";
-        return (
-          <g key={i}>
-            <line x1={x + bw / 2} y1={top - 5} x2={x + bw / 2} y2={top + bodyH + 5} stroke={color} strokeWidth="1.3" />
-            <rect x={x} y={top} width={bw} height={bodyH} rx="1" fill={color} />
-          </g>
-        );
-      })}
+      <defs>
+        {/* Left third fades to fully transparent — the leading candles
+            dissolve into the card's own background rather than stopping
+            on a hard edge, same as the reference. Applied as a mask
+            (not per-rect opacity) so overlapping wicks/bodies fade as
+            one continuous image instead of double-fading where they
+            overlap. */}
+        <linearGradient id={fadeId} x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" />
+          <stop offset="0.3" stopColor="#fff" stopOpacity="1" />
+          <stop offset="1" stopColor="#fff" stopOpacity="1" />
+        </linearGradient>
+        <mask id={fadeId + "m"}>
+          <rect x="0" y="0" width={W} height={H + PAD_TOP} fill={`url(#${fadeId})`} />
+        </mask>
+      </defs>
+      <g mask={`url(#${fadeId}m)`}>
+        {closes.map((close, i) => {
+          const open = i === 0 ? close - 4 : closes[i - 1];
+          const up = close >= open;
+          const x = i * (bw + gap);
+          const yOpen = scaleY(open), yClose = scaleY(close);
+          const top = Math.min(yOpen, yClose), bodyH = Math.max(2.5, Math.abs(yOpen - yClose));
+          const color = i === amberIdx ? "#F0A63A" : up ? "var(--up)" : "var(--down)";
+          return (
+            <g key={i}>
+              <line x1={x + bw / 2} y1={top - 5} x2={x + bw / 2} y2={top + bodyH + 5} stroke={color} strokeWidth="1.3" />
+              <rect x={x} y={top} width={bw} height={bodyH} rx="1" fill={color} />
+            </g>
+          );
+        })}
+      </g>
       {(() => {
         const x = highlightIdx * (bw + gap) + bw / 2;
         const y = scaleY(Math.min(closes[highlightIdx - 1], closes[highlightIdx]));
@@ -582,19 +601,22 @@ function LeaderboardPanel({ today, version }) {
 /* ---------- your result, left column ---------- */
 function AttemptSummary({ today, attempt, justPlayed, replayOpen, onSetReplay }) {
   const tone = !attempt.traded ? "mut" : attempt.r > 0 ? "up" : attempt.r < 0 ? "down" : "mut";
-  const tint = tone === "up" ? "var(--upSoft)" : tone === "down" ? "var(--downSoft)" : "var(--surface2)";
-  const borderTint = tone === "mut" ? "var(--border)" : `color-mix(in srgb, var(--${tone}) 35%, var(--border))`;
-  const iconBg = tone === "mut" ? "var(--surface3)" : `var(--${tone})`;
+  const tint = tone === "mut" ? "var(--surface2)"
+    : `radial-gradient(130% 170% at 10% 20%, color-mix(in srgb, var(--${tone}) 20%, transparent), transparent 55%), var(--${tone}Soft)`;
+  const borderTint = tone === "mut" ? "var(--border)" : `color-mix(in srgb, var(--${tone}) 25%, var(--border))`;
+  const iconBg = tone === "mut" ? "var(--surface3)"
+    : `radial-gradient(circle at 35% 28%, color-mix(in srgb, var(--${tone}) 88%, white 18%), var(--${tone}) 72%)`;
+  const iconGlow = tone === "mut" ? "none" : `0 0 26px 6px color-mix(in srgb, var(--${tone}) 30%, transparent)`;
   const iconColor = tone === "mut" ? "var(--muted)" : "#fff";
 
   return (
     <div>
-      <Card style={{ padding: 24, background: tint, borderColor: borderTint }}>
+      <Card style={{ padding: 24, background: tint, borderColor: borderTint, borderRadius: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flex: "1 1 240px", minWidth: 0 }}>
-            <div style={{ width: 56, height: 56, borderRadius: "50%", flexShrink: 0,
-              background: iconBg, color: iconColor, display: "grid", placeItems: "center" }}>
-              <Svg s={26}>{attempt.traded ? Ic.trophy : Ic.calendar}</Svg>
+          <div style={{ display: "flex", alignItems: "center", gap: 18, flex: "1 1 240px", minWidth: 0 }}>
+            <div style={{ width: 66, height: 66, borderRadius: "50%", flexShrink: 0,
+              background: iconBg, boxShadow: iconGlow, color: iconColor, display: "grid", placeItems: "center" }}>
+              <Svg s={30}>{attempt.traded ? Ic.trophy : Ic.calendar}</Svg>
             </div>
             <div style={{ minWidth: 0 }}>
               <div className="cap" style={{ marginBottom: 4 }}>Today's challenge</div>
