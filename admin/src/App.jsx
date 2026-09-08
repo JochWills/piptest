@@ -98,6 +98,7 @@ const EVENT = {
   password_changed: ["changed password", "b"],
   admin_update_user: ["admin edited a user", "b"],
   admin_delete_user: ["admin deleted a user", "r"],
+  admin_reset_daily_pip: ["admin reset a Daily Pip", "b"],
   refresh_reuse_detected: ["token reuse — sessions revoked", "r"],
 };
 
@@ -500,6 +501,16 @@ function UserDrawer({ id, me, onClose, onChanged }) {
     catch (e) { setErr(e.message); setBusy(false); }
   };
 
+  const resetDailyPip = async () => {
+    setBusy(true);
+    try {
+      const r = await api.resetDailyPip(id);
+      setD((x) => ({ ...x, dailyPip: { ...x.dailyPip, streak: r.streak, attemptToday: null } }));
+      onChanged();
+    } catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  };
+
   const u = d?.user;
   const t = d?.trades;
   const winRate = t && t.n ? (t.wins / t.n) * 100 : 0;
@@ -569,6 +580,44 @@ function UserDrawer({ id, me, onClose, onChanged }) {
                 </div>
               )}
             </div>
+
+            {d.dailyPip && (
+              <div className="card" style={{ padding: 16 }}>
+                <div className="cap" style={{ marginBottom: 12 }}>Daily Pip</div>
+                <div style={{ display: "flex", gap: 20, marginBottom: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <div className="sm mut">Current streak</div>
+                    <div style={{ fontWeight: 600 }}>
+                      {d.dailyPip.streak.current} day{d.dailyPip.streak.current === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="sm mut">Longest streak</div>
+                    <div style={{ fontWeight: 600 }}>
+                      {d.dailyPip.streak.longest} day{d.dailyPip.streak.longest === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="sm mut">Today ({d.dailyPip.today})</div>
+                    <div style={{ fontWeight: 600 }}>
+                      {d.dailyPip.attemptToday
+                        ? (d.dailyPip.attemptToday.traded
+                          ? `${d.dailyPip.attemptToday.r >= 0 ? "+" : ""}${Number(d.dailyPip.attemptToday.r).toFixed(2)}R`
+                          : "played, no trade")
+                        : "not played yet"}
+                    </div>
+                  </div>
+                </div>
+                <p className="sm mut" style={{ lineHeight: 1.6, marginBottom: 12 }}>
+                  {d.dailyPip.attemptToday
+                    ? "Clears today's recorded attempt — and undoes the streak bump it made — so they can play again."
+                    : "They haven't played today's Daily Pip yet, so there's nothing to reset."}
+                </p>
+                <button className="btn" disabled={busy || !d.dailyPip.attemptToday} onClick={resetDailyPip}>
+                  Reset today's attempt
+                </button>
+              </div>
+            )}
 
             {d.sessions.length > 0 && (
               <div className="card" style={{ overflow: "hidden" }}>

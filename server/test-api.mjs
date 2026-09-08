@@ -279,7 +279,7 @@ try {
 
   r = await call("/api/auth/register", { method: "POST",
     body: { email: "streaker@piptest.com", password: "streak-pass-9", name: "Streaker", handle: "streaker" } });
-  const streakToken = r.body.accessToken;
+  const streakToken = r.body.accessToken, streakerId = r.body.user.id;
   await call("/api/daily-pip/attempts", { method: "POST", token: streakToken, body: { challengeDate: yesterday, traded: false } });
   r = await call("/api/daily-pip/attempts", { method: "POST", token: streakToken, body: { challengeDate, traded: false } });
   ok(r.body.streak.current === 2, "playing yesterday then today extends the streak to 2");
@@ -291,6 +291,31 @@ try {
   await call("/api/daily-pip/attempts", { method: "POST", token: gapToken, body: { challengeDate: twoDaysAgo, traded: false } });
   r = await call("/api/daily-pip/attempts", { method: "POST", token: gapToken, body: { challengeDate, traded: false } });
   ok(r.body.streak.current === 1, "a gap (two-days-ago, then today, skipping yesterday) resets the streak to 1, not +1");
+
+  console.log("\n=== admin: reset a user's Daily Pip ===");
+  r = await call("/api/admin/users/" + streakerId + "/daily-pip/reset", { method: "POST", token: userToken });
+  ok(r.status === 403, "a non-admin cannot reset another user's Daily Pip");
+
+  r = await call("/api/admin/users/00000000-0000-0000-0000-000000000000/daily-pip/reset", { method: "POST", token: adminToken });
+  ok(r.status === 404, "resetting a nonexistent user 404s");
+
+  r = await call("/api/auth/register", { method: "POST",
+    body: { email: "unplayed@piptest.com", password: "unplayed-pass-9", name: "Unplayed", handle: "unplayed" } });
+  const unplayedId = r.body.user.id;
+  r = await call("/api/admin/users/" + unplayedId + "/daily-pip/reset", { method: "POST", token: adminToken });
+  ok(r.status === 200 && r.body.hadAttempt === false, "resetting a user who hasn't played today is a harmless no-op");
+
+  r = await call("/api/admin/users/" + streakerId + "/daily-pip/reset", { method: "POST", token: adminToken });
+  ok(r.status === 200 && r.body.hadAttempt === true, "resetting a played attempt reports it existed");
+  ok(r.body.streak.current === 1, "the streak bump from today's (now-cleared) attempt is undone — back to 1 (from yesterday)");
+
+  d = await call("/api/daily-pip/today", { token: streakToken });
+  ok(d.body.attempt === null, "the reset user can see today's Pip as unplayed again");
+
+  r = await call("/api/daily-pip/attempts", { method: "POST", token: streakToken,
+    body: { challengeDate, traded: true, dir: "long", qty: 1, entry: 10, exitPrice: 12, stop: 9, target: 13, r: 2, pnl: 200, reason: "target" } });
+  ok(r.status === 200 && r.body.attempt.r === 2, "the reset user can submit a fresh attempt for today");
+  ok(r.body.streak.current === 2, "replaying restores the streak exactly as if the gap never happened");
 
   console.log("\n=== disabling a user ===");
   r = await call("/api/admin/users/" + userId, { method: "PATCH", token: adminToken, body: { status: "disabled" } });

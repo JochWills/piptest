@@ -67,6 +67,7 @@ export const api = {
   user:       (id)    => raw(`/api/admin/users/${id}`),
   patchUser:  (id, b) => raw(`/api/admin/users/${id}`, { method: "PATCH", body: b }),
   deleteUser: (id)    => raw(`/api/admin/users/${id}`, { method: "DELETE" }),
+  resetDailyPip: (id, date) => raw(`/api/admin/users/${id}/daily-pip/reset`, { method: "POST", body: date ? { date } : {} }),
   events:     (n = 80)=> raw(`/api/admin/events?limit=${n}`),
   orphanedTrades:      () => raw("/api/admin/orphaned-trades"),
   purgeOrphanedTrades: () => raw("/api/admin/orphaned-trades/purge", { method: "POST" }),

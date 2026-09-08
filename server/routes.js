@@ -974,11 +974,13 @@ router.patch("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => 
 /* full picture of one account, for the admin console */
 router.get("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
   const { rows } = await q(
-    `SELECT id, email, handle, name, role, status, plan, avatar, created_at, last_login_at
+    `SELECT id, email, handle, name, role, status, plan, avatar, created_at, last_login_at,
+            daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date
        FROM users WHERE id=$1`, [req.params.id]);
   if (!rows[0]) return res.status(404).json({ error: "not_found" });
 
-  const [sessions, trades, events] = await Promise.all([
+  const todayKey = utcDateKey();
+  const [sessions, trades, events, dailyPipToday] = await Promise.all([
     q(`SELECT id, name, symbol, interval, stats, updated_at
          FROM bt_sessions WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 20`, [req.params.id]),
     q(`SELECT count(*)::int AS n,
@@ -987,6 +989,7 @@ router.get("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
               count(*) FILTER (WHERE pnl > 0)::int AS wins
          FROM trades WHERE user_id=$1`, [req.params.id]),
     q(`SELECT type, created_at FROM events WHERE user_id=$1 ORDER BY id DESC LIMIT 20`, [req.params.id]),
+    q(`SELECT * FROM daily_pip_attempts WHERE user_id=$1 AND challenge_date=$2`, [req.params.id, todayKey]),
   ]);
 
   res.json({
@@ -997,6 +1000,11 @@ router.get("/admin/users/:id", requireAuth, requireAdmin, async (req, res) => {
     })),
     trades: trades.rows[0],
     events: events.rows,
+    dailyPip: {
+      streak: streakOf(rows[0]),
+      today: todayKey,
+      attemptToday: dailyPipToday.rows[0] ? rowToAttempt(dailyPipToday.rows[0]) : null,
+    },
   });
 });
 
@@ -1011,6 +1019,63 @@ router.delete("/admin/users/:id", requireAuth, requireAdmin, async (req, res) =>
   await q("DELETE FROM users WHERE id=$1", [req.params.id]);
   await logEvent(req.user.id, "admin_delete_user", { handle: rows[0].handle }, reqIp(req));
   res.json({ ok: true });
+});
+
+/* Clears one user's Daily Pip attempt for a given day (defaults to
+   today — the only day the normal flow can ever replay, since /daily-
+   pip/today always resolves the *current* UTC day's challenge) so
+   they can play it again. Also undoes exactly the streak bump that
+   attempt made, mirroring the increment in POST /daily-pip/attempts —
+   but only when that attempt is still the one on record as "last
+   played" (the WHERE guard below), so calling this twice, or on a day
+   that's since been superseded by a real later attempt, is a safe
+   no-op on the streak rather than a double-decrement. Longest streak
+   is left untouched: it's a high-water mark, not something a support
+   reset should be able to un-earn. */
+router.post("/admin/users/:id/daily-pip/reset", requireAuth, requireAdmin, async (req, res) => {
+  const targetId = req.params.id;
+  const rawDate = req.body?.date;
+  if (rawDate && !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) return res.status(400).json({ error: "invalid" });
+  const dateKey = rawDate || utcDateKey();
+
+  const userRows = await q("SELECT id FROM users WHERE id=$1", [targetId]);
+  if (!userRows.rows[0]) return res.status(404).json({ error: "not_found" });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT id FROM daily_pip_attempts WHERE user_id=$1 AND challenge_date=$2",
+      [targetId, dateKey]);
+    if (!existing.rows[0]) {
+      await client.query("ROLLBACK");
+      const u = await q("SELECT daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date FROM users WHERE id=$1", [targetId]);
+      return res.json({ ok: true, hadAttempt: false, date: dateKey, streak: streakOf(u.rows[0]) });
+    }
+    await client.query(
+      "DELETE FROM daily_pip_attempts WHERE user_id=$1 AND challenge_date=$2",
+      [targetId, dateKey]);
+    const streakRow = await client.query(
+      `UPDATE users SET
+         daily_pip_streak = GREATEST(daily_pip_streak - 1, 0),
+         daily_pip_last_date = CASE WHEN daily_pip_streak - 1 > 0 THEN daily_pip_last_date - 1 ELSE NULL END
+       WHERE id=$1 AND daily_pip_last_date=$2::date
+       RETURNING daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date`,
+      [targetId, dateKey]);
+    await client.query("COMMIT");
+    let streak = streakRow.rows[0] ? streakOf(streakRow.rows[0]) : null;
+    if (!streak) {
+      const u = await q("SELECT daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date FROM users WHERE id=$1", [targetId]);
+      streak = streakOf(u.rows[0]);
+    }
+    await logEvent(req.user.id, "admin_reset_daily_pip", { target: targetId, date: dateKey }, reqIp(req));
+    res.json({ ok: true, hadAttempt: true, date: dateKey, streak });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 });
 
 /* Trades left behind by a session deleted before session_id was tracked
