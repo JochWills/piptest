@@ -294,7 +294,19 @@ export default function DailyPip({ account, theme, onExit }) {
                     interval={IV_TO_TV_RES[today.challenge.interval] || "5"}
                     theme={theme}
                     startMs={today.challenge.startMs}
-                    canDraw={false}
+                    /* canDraw defaults to true — gives the left drawing-tool
+                       rail and the header's own resolution dropdown together
+                       (see TVAdvancedChart's disabled_features comment: the
+                       two travel as a pair). Switching resolution there just
+                       re-realigns the datafeed at the same cursor moment —
+                       same mechanism that already feeds `price` via onCursor
+                       — so it works in both "arming" and "revealing" with no
+                       extra wiring here; the reveal's own step size (set once
+                       in startReveal, below) stays anchored to the
+                       challenge's real interval regardless of what
+                       resolution the chart is displaying. `go_to_date` stays
+                       disabled unconditionally in TVAdvancedChart either
+                       way, so this doesn't reopen the hidden-dates hole. */
                     hideDates
                     onReady={(apiObj) => { chartCtlRef.current = apiObj; }}
                     onCursor={handleCursor}
