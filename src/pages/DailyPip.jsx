@@ -330,6 +330,37 @@ export default function DailyPip({ account, theme, onExit }) {
     </Card>
   );
 
+  /* ---------- time left on today's UTC-day challenge ----------
+     A different clock from the per-attempt countdown above: this one
+     just answers "how long until a new Daily Pip replaces this one",
+     ticking down to the next UTC midnight regardless of phase (still
+     relevant on the result/already-played screens — it's when the
+     leaderboard freezes and tomorrow's chart takes over, not something
+     tied to whether you've played). Re-derived from a real clock read
+     every tick, not decremented locally, so it can't drift. */
+  const [dayNow, setDayNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setDayNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const dayLeftMs = Date.UTC(
+    new Date(dayNow).getUTCFullYear(), new Date(dayNow).getUTCMonth(), new Date(dayNow).getUTCDate() + 1
+  ) - dayNow;
+  const dayLeftH = Math.floor(dayLeftMs / 3600000);
+  const dayLeftM = Math.floor((dayLeftMs % 3600000) / 60000);
+
+  const timeLeftBadge = today && today !== "error" && (
+    <Card style={{ padding: "13px 18px", display: "flex", gap: 12, alignItems: "flex-start", minWidth: 220 }}>
+      <span style={{ color: "var(--muted)", flexShrink: 0, marginTop: 1 }}><Svg s={17}>{Ic.clock}</Svg></span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 14 }} className="num">
+          {dayLeftH}h {String(dayLeftM).padStart(2, "0")}m left
+        </div>
+        <div className="sm mut" style={{ marginTop: 2 }}>New challenge at 00:00 UTC</div>
+      </div>
+    </Card>
+  );
+
   const quote = today && today !== "error"
     ? QUOTES[new Date(today.challenge.challengeDate + "T00:00:00Z").getUTCDate() % QUOTES.length]
     : null;
@@ -340,7 +371,7 @@ export default function DailyPip({ account, theme, onExit }) {
         eyebrow="Daily challenge"
         title="The Daily Pip"
         sub="One shared chart. Every trader, every day. No rewinds, one shot."
-        actions={streakBadge}
+        actions={<>{timeLeftBadge}{streakBadge}</>}
       />
 
       {phase === "loading" && (

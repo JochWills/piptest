@@ -398,6 +398,10 @@ export const Ic = {
     <rect x="2.4" y="3.2" width="11.2" height="10.4" rx="1.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
     <path d="M2.4 6.3h11.2M5.2 1.8v2.4M10.8 1.8v2.4" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
   </>,
+  clock: <>
+    <circle cx="8" cy="8" r="5.8" stroke="currentColor" strokeWidth="1.3" fill="none" />
+    <path d="M8 4.8V8l2.6 1.5" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+  </>,
   logout: <path d="M6 3.2H3.4v9.6H6M9.3 5.4 11.9 8l-2.6 2.6M11.9 8H6" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
   chat: <path d="M2.5 3.6h11a1 1 0 0 1 1 1V10a1 1 0 0 1-1 1H7.4l-3.1 2.8V11H2.5a1 1 0 0 1-1-1V4.6a1 1 0 0 1 1-1z" stroke="currentColor" strokeWidth="1.35" fill="none" strokeLinejoin="round" strokeLinecap="round" />,
   /* four corner brackets pointing outward/inward — enter/exit fullscreen */
