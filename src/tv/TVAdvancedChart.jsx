@@ -147,6 +147,9 @@ export default function TVAdvancedChart({
   onBar,            // (bar) => void  — every bar the replay reveals
   onCursor,         // (ms, bar) => void
   onDrawingsChanged,// () => void     — for room sync
+  onPositionToolChanged,// (sel|null) => void — sel is {dir,entry,stop,target} while a Long/Short
+                     // Position drawing is selected (and live-updates while its handles are
+                     // dragged); null the moment nothing (or something else) is selected instead
   onState,          // (state) => void — { playing, atEnd, stepMs, covered, earliest }; fires when the
                      // replay controller's own state changes, including reaching the end of data on its own
   onIntervalChanged,// (tvResolution) => void — the chart's own native resolution control changed the
@@ -170,13 +173,14 @@ export default function TVAdvancedChart({
   const status = useLibrary();
   const [err, setErr] = useState("");
 
-  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged, onToggleFullscreen });
-  cbs.current = { onBar, onCursor, onDrawingsChanged, onReady, onState, onIntervalChanged, onToggleFullscreen };
+  const cbs = useRef({ onBar, onCursor, onDrawingsChanged, onPositionToolChanged, onReady, onState, onIntervalChanged, onToggleFullscreen });
+  cbs.current = { onBar, onCursor, onDrawingsChanged, onPositionToolChanged, onReady, onState, onIntervalChanged, onToggleFullscreen };
 
   useEffect(() => {
     if (status !== "ready" || !boxRef.current) return;
     let dead = false;
     let loadGen = 0; // see api.load() below
+    let onChartReadyCleanup = () => {}; // replaced once onChartReady fires — see the selection subscription below
 
     /* `dead` already guards onChartReady below against a stale widget's
        late callback — it needs to guard these three too. datafeed/replay
@@ -433,8 +437,97 @@ export default function TVAdvancedChart({
          completely different paths now (drawing-level mirror vs.
          layout snapshot), so the caller needs to know which just
          happened — see stripDrawings above. */
-      widget.subscribe("drawing_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("drawing"));
+      widget.subscribe("drawing_event", (sourceId, drawingEventType) => {
+        cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("drawing");
+        /* a drag/edit of the Long/Short Position shape currently
+           mirrored into the setup form (see chart.selection() below)
+           fires here, not through selection().onChanged() — selection
+           itself hasn't changed, only the shape's own points/props
+           have. Re-reading it on every such event is what makes the
+           setup panel track the shape live while its handles move,
+           not just once at the moment it's clicked. */
+        if (mirroredShapeId != null && sourceId === mirroredShapeId) {
+          if (drawingEventType === "remove") { mirroredShapeId = null; cbs.current.onPositionToolChanged && cbs.current.onPositionToolChanged(null); }
+          else {
+            const sel = readPositionShape(sourceId);
+            if (sel) cbs.current.onPositionToolChanged && cbs.current.onPositionToolChanged(sel);
+          }
+        }
+      });
       widget.subscribe("study_event", () => cbs.current.onDrawingsChanged && cbs.current.onDrawingsChanged("study"));
+
+      /* ---- Long/Short Position tool -> setup form mirror ----
+         `getAllShapes()` reports each shape's tool as "long_position" /
+         "short_position" — confirmed directly against a live shape,
+         not assumed from the type declarations, which document a
+         *different*, PascalCase name ("LineToolRiskRewardLong") that
+         turns out to belong only to the internal class, never to
+         anything the public API actually hands back.
+
+         The entry level is the tool's own anchor point:
+         getPoints()[0].price. Stop/target are NOT prices at all —
+         getProperties().stopLevel / .profitLevel are the offset from
+         entry in TICKS (price units × the symbol's pricescale), not
+         absolute prices and not a plain price delta either. Confirmed
+         by injecting known stopLevel/profitLevel values into a real
+         shape and reading back the chart's own rendered price-axis
+         labels for it: entry ± (level / chart.symbolExt().pricescale)
+         landed exactly on what the chart itself displayed, pixel for
+         pixel. Getting this wrong is what shipped once already — a
+         raw stopLevel read straight into the setup form as if it were
+         a price (off by ~100x on a 2-decimal symbol, since pricescale
+         there is 100), which is also why every property name here is
+         confirmed against a live shape rather than the type
+         declarations: declaration coverage for this tool is thin, and
+         two names already turned out to mean something other than
+         what they look like. */
+      const POSITION_TOOLS = { long_position: "long", short_position: "short" };
+      let mirroredShapeId = null;
+      const numFrom = (v) => (v == null ? null : (typeof v === "object" && typeof v.value === "function" ? v.value() : Number(v)));
+      function readPositionShape(id) {
+        try {
+          const info = (chart.getAllShapes() || []).find((s) => s.id === id);
+          const dir = info && POSITION_TOOLS[info.name];
+          if (!dir) return null;
+          const shape = chart.getShapeById(id);
+          if (!shape) return null;
+          const points = shape.getPoints() || [];
+          const props = shape.getProperties() || {};
+          const entry = numFrom(points[0]?.price);
+          const pricescale = chart.symbolExt()?.pricescale;
+          const stopTicks = numFrom(props.stopLevel);
+          const targetTicks = numFrom(props.profitLevel);
+          if (!(entry > 0) || !(pricescale > 0) || stopTicks == null) return null;
+          const stopDist = stopTicks / pricescale;
+          const targetDist = targetTicks > 0 ? targetTicks / pricescale : null;
+          const stop = dir === "long" ? entry - stopDist : entry + stopDist;
+          const target = targetDist == null ? null : (dir === "long" ? entry + targetDist : entry - targetDist);
+          if (!(stop > 0)) return null;
+          return { dir, entry, stop, target: target > 0 ? target : null };
+        } catch (e) { return null; }
+      }
+      function syncSelection() {
+        let items = [];
+        try { items = chart.selection().allItems() || []; } catch (e) {}
+        const sel = items.length === 1 ? readPositionShape(items[0]) : null;
+        if (sel) {
+          mirroredShapeId = items[0];
+          cbs.current.onPositionToolChanged && cbs.current.onPositionToolChanged(sel);
+        } else if (mirroredShapeId != null) {
+          /* only fires the "clear" callback on the transition out of
+             mirroring something — selecting an unrelated shape (or
+             nothing) when we were never mirroring one leaves the
+             setup form alone, so this can't stomp on values the user
+             typed in by hand. */
+          mirroredShapeId = null;
+          cbs.current.onPositionToolChanged && cbs.current.onPositionToolChanged(null);
+        }
+      }
+      let selectionSub = null;
+      try {
+        selectionSub = chart.selection().onChanged();
+        selectionSub.subscribe(null, syncSelection);
+      } catch (e) {}
 
       /* Shapes Piptest draws itself (entry/stop/target zones) — they're
          derived from trade state that each side already has, so they
@@ -736,10 +829,13 @@ export default function TVAdvancedChart({
 
       apiRef.current = api;
       cbs.current.onReady && cbs.current.onReady(api);
+
+      onChartReadyCleanup = () => { try { selectionSub && selectionSub.unsubscribe(syncSelection); } catch (e) {} };
     });
 
     return () => {
       dead = true;
+      onChartReadyCleanup();
       try { widget.remove(); } catch (e) {}
       widgetRef.current = null; apiRef.current = null;
     };

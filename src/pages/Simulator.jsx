@@ -847,6 +847,27 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     })();
   }, [room, canControl, pushRoom]);
 
+  /* A Long/Short Position drawing tool is effectively a setup sketched
+     on the chart instead of typed into the panel — while one is
+     selected, mirror its entry/stop/target (and side) into the same
+     form the panel inputs write to, live, through every drag of its
+     handles; the moment nothing (or something else) is selected,
+     clear those three fields back out rather than leaving a stale
+     read-only-feeling value sitting in an editable box. Risk % is left
+     alone — the drawing doesn't carry Piptest's risk-sizing concept at
+     all, so there's nothing on it to mirror there. */
+  const handlePositionToolChanged = useCallback((sel) => {
+    if (sel) {
+      setForm((f) => ({ ...f, dir: sel.dir,
+        entry: sel.entry.toFixed(dec(sel.entry)),
+        stop: sel.stop.toFixed(dec(sel.stop)),
+        target: sel.target != null ? sel.target.toFixed(dec(sel.target)) : "" }));
+      setFormErr("");
+    } else {
+      setForm((f) => ({ ...f, entry: "", stop: "", target: "" }));
+    }
+  }, []);
+
   /* ---- what actually publishes drawings to a room ----
 
      The library's `drawing_event` looked like the natural trigger and
@@ -1676,6 +1697,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
                   startMs={chartStartRef.current} canDraw={canControl} sessionName={displaySessionName}
                   onReady={handleReady} onBar={handleBar} onCursor={handleCursor}
                   onState={handleReplayState} onDrawingsChanged={handleDrawingsChanged}
+                  onPositionToolChanged={handlePositionToolChanged}
                   onIntervalChanged={handleIntervalChanged}
                   fullscreen={fullscreen} onToggleFullscreen={toggleFullscreen}
                   height="100%"
