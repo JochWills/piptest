@@ -34,7 +34,8 @@ function DailyPipIcon({ account }) {
   const playedToday = account?.dailyPipLastDate === today;
   return (
     <span className={"dailypip-flame" + (playedToday ? "" : " grey")}>
-      🔥<b>{streak}</b>
+      <span className="dailypip-flame-shape" />
+      <b>{streak}</b>
     </span>
   );
 }
