@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
 import { IV_TO_TV_RES } from "../tv/marketFeed.js";
-import { barMsOf, INTERVALS } from "../theme.js";
+import { barMsOf, INTERVALS, THEMES } from "../theme.js";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Svg, Ic, FlameIcon } from "../components/ui.jsx";
 import { api, API_ENABLED } from "../lib/api.js";
@@ -132,6 +132,7 @@ function ReadyDecor() {
 }
 
 export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
+  const T = THEMES[theme]; // real hex colours — the chart's own shape API can't take a CSS var
   const [phase, setPhase] = useState("loading");
   // { challenge, attempt, streak, maxRevealBars } from GET /daily-pip/today
   const [today, setToday] = useState(null);
@@ -267,12 +268,38 @@ export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
 
   /* ---------- chart + reveal ---------- */
   const chartCtlRef = useRef(null);
+  const [chartReady, setChartReady] = useState(false);
   const revealTradeRef = useRef(null);
   const barsRef = useRef(0);
   const lastBarRef = useRef(null);
   const submittedRef = useRef(false);
   const [result, setResult] = useState(null); // { traded, dir, entry, exit, stop, target, r, pnl, reason }
   const [boardVersion, setBoardVersion] = useState(0); // bumped after a submit lands, so the leaderboard panel refetches
+
+  /* ---------- entry/stop/target lines on the chart ----------
+     Same shape API Simulator uses for its own trade zones (see its
+     "trade zones" effect) — three horizontal lines via the widget's
+     own createShape, not a hand-drawn overlay. Keyed off `armedTrade`
+     (already real state, not the ref trading.js mutates internally),
+     so this also picks up a watching limit order's "Limit" label
+     flipping to "Entry" the moment handleBar sees it actually fill —
+     see the setArmedTrade call there. chartReady covers the one race
+     where a trade gets armed before the widget's own onReady has
+     landed; without it there'd be nothing yet to draw on. */
+  const zoneShapesRef = useRef([]);
+  useEffect(() => {
+    const ctl = chartCtlRef.current;
+    if (!ctl) return;
+    for (const h of zoneShapesRef.current) ctl.removeShape(h);
+    zoneShapesRef.current = [];
+    if (phase !== "revealing" || !armedTrade) return;
+    const t = armedTrade;
+    zoneShapesRef.current.push(ctl.drawZone({ price: t.entry, color: T.brand,
+      text: `${t.status === "open" ? "Entry" : "Limit"} ${fmtPrice(t.entry)}` }));
+    if (t.stop != null) zoneShapesRef.current.push(ctl.drawZone({ price: t.stop, color: T.down, text: `Stop ${fmtPrice(t.stop)}` }));
+    if (t.target != null) zoneShapesRef.current.push(ctl.drawZone({ price: t.target, color: T.up, text: `Target ${fmtPrice(t.target)}` }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armedTrade, phase, chartReady]);
 
   /* ---------- post-game replay, "View trade replay" on the completed card ----------
      Once the challenge is over there's nothing left to protect — the real
@@ -283,11 +310,35 @@ export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
      else would ever tell it to stop. */
   const [showReplay, setShowReplay] = useState(false);
   const replayCtlRef = useRef(null);
+  const [replayReady, setReplayReady] = useState(false);
+  // a fresh chart mounts every time the replay is opened (it's inside an
+  // `{showReplay && ...}` block, not just hidden) — reset so a stale
+  // "ready" from a previous open can't skip drawing the zones on this one
+  useEffect(() => { setReplayReady(false); }, [showReplay]);
   const replayBarsRef = useRef(0);
   const handleReplayBar = () => {
     replayBarsRef.current += 1;
     if (replayBarsRef.current >= (today?.maxRevealBars || 400)) replayCtlRef.current?.replay.pause();
   };
+
+  /* Same entry/stop/target lines as the live reveal, drawn once against
+     the final recorded attempt rather than a live-mutating trade — by
+     the time there's a replay to show, the outcome is already fixed. */
+  const replayZoneShapesRef = useRef([]);
+  useEffect(() => {
+    const ctl = replayCtlRef.current;
+    if (!ctl) return;
+    for (const h of replayZoneShapesRef.current) ctl.removeShape(h);
+    replayZoneShapesRef.current = [];
+    if (!showReplay) return;
+    const a = phase === "result" ? result : today?.attempt;
+    if (!a || !a.traded) return;
+    const label = a.reason === "unfilled" ? "Limit" : "Entry";
+    replayZoneShapesRef.current.push(ctl.drawZone({ price: a.entry, color: T.brand, text: `${label} ${fmtPrice(a.entry)}` }));
+    if (a.stop != null) replayZoneShapesRef.current.push(ctl.drawZone({ price: a.stop, color: T.down, text: `Stop ${fmtPrice(a.stop)}` }));
+    if (a.target != null) replayZoneShapesRef.current.push(ctl.drawZone({ price: a.target, color: T.up, text: `Target ${fmtPrice(a.target)}` }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReplay, replayReady, phase, result, today]);
 
   /* ---------- playback speed ----------
      How much calendar time each auto-played step covers — same idea as
@@ -347,6 +398,11 @@ export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
     if (t0) {
       const { trade: t1, closed } = runEngine(t0, [b], -1, 0);
       revealTradeRef.current = t1;
+      /* runEngine hands back the SAME object when a bar changes nothing
+         (see its own comment) — a real reference change means a watching
+         limit order just filled, which is exactly when the on-chart
+         zone's "Limit" label needs to flip to "Entry". */
+      if (t1 !== t0) setArmedTrade(t1);
       if (closed.length) {
         chartCtlRef.current?.replay.pause();
         finishAttempt(t0, closed[0], closed[0].reason);
@@ -544,7 +600,7 @@ export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
                        disabled unconditionally in TVAdvancedChart either
                        way, so this doesn't reopen the hidden-dates hole. */
                     hideDates
-                    onReady={(apiObj) => { chartCtlRef.current = apiObj; }}
+                    onReady={(apiObj) => { chartCtlRef.current = apiObj; setChartReady(true); }}
                     onCursor={handleCursor}
                     onBar={handleBar}
                     height="100%"
@@ -662,6 +718,7 @@ export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
                           replayBarsRef.current = 0;
                           apiObj.replay.setStep(barMsOf(revealStepId));
                           apiObj.replay.play();
+                          setReplayReady(true);
                         }}
                         onBar={handleReplayBar}
                         height="100%"

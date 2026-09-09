@@ -795,6 +795,34 @@ export default function TVAdvancedChart({
           }
         },
 
+        /* Recreates the caller's OWN drawings from a getDrawings()
+           snapshot, as normal fully-editable shapes — unlike
+           applyDrawings above, which is for mirroring someone ELSE's
+           drawings (locked, hidden from the objects tree, excluded
+           from save). This is what carries a solo session's (or a
+           room host's) own hand-drawn analysis across a remount the
+           widget itself has no memory of — Simulator's own
+           switchInterval forces exactly that remount on every
+           timeframe change, and until this there was nothing on
+           either side of it to save/restore drawings across, so they
+           just vanished. A one-shot recreate, not a live sync: no id
+           tracking, since nothing here needs updating in place
+           afterwards the way a continuously-mirrored shape does. */
+        restoreDrawings(list) {
+          if (!Array.isArray(list)) return;
+          for (const d of list) {
+            if (!d || !Array.isArray(d.points) || !d.points.length) continue;
+            try {
+              Promise.resolve(chart.createMultipointShape(d.points, { shape: d.name }))
+                .then((newId) => {
+                  if (newId == null || dead || !d.props) return;
+                  try { chart.getShapeById(newId)?.setProperties(d.props); } catch (e) {}
+                })
+                .catch(() => {});
+            } catch (e) {}
+          }
+        },
+
         /* What a room gets: the structural snapshot with drawings
            taken out, plus the drawings as their own list. Distinct
            from save() above, which stays whole because a solo

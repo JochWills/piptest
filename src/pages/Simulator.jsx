@@ -52,6 +52,13 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const [stepId, setStepId] = useState("1m");
   const chartCtlRef = useRef(null);
   const [chartReady, setChartReady] = useState(false);
+  /* A remount (switchInterval below) tears the widget down with no
+     memory of its own drawings — captured here right beforehand and
+     handed to the fresh widget's restoreDrawings once handleReady
+     fires on it. See TVAdvancedChart's own note on why this needs a
+     manual save/restore rather than something the library does for
+     itself across a remount it doesn't know is coming. */
+  const pendingOwnDrawingsRef = useRef(null);
   /* bumped on every drawing/study edit (see handleDrawingsChanged) purely
      so the autosave effect below has something to react to — drawing a
      trendline while paused doesn't touch trades/cursor/notes/symbol/interval
@@ -384,6 +391,10 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
   const handleReady = useCallback((api) => {
     chartCtlRef.current = api;
     setChartReady(true);
+    if (pendingOwnDrawingsRef.current) {
+      api.restoreDrawings(pendingOwnDrawingsRef.current);
+      pendingOwnDrawingsRef.current = null;
+    }
     /* a fresh widget instance has nothing loaded onto it yet, no
        matter what was loaded onto whatever instance came before it, so
        this can't just leave lastAppliedLayoutRef holding a stale value
@@ -567,6 +578,9 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     const at = cur?.t ?? cursor;
     chartStartRef.current = at;
     seenRef.current = [at]; seenBarsRef.current = [null]; seenIdxRef.current = 0;
+    /* last chance to read these off the OLD widget — the new one that
+       handleReady sees after setIv below starts with nothing on it */
+    pendingOwnDrawingsRef.current = chartCtlRef.current?.getDrawings() || null;
     setIv(nextIv);
     /* tell a viewer's chart to remount at the new timeframe right away,
        rather than waiting on the next ~1.5s poll (still the fallback
