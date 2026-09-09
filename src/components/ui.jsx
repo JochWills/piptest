@@ -435,3 +435,32 @@ export const Ic = {
 export const Svg = ({ children, s = 16, style }) => (
   <svg width={s} height={s} viewBox="0 0 16 16" fill="none" style={style} aria-hidden="true">{children}</svg>
 );
+
+/* Josh's own flame artwork (public/flame.png — resized down from the
+   ~1200px source he supplied to 149x160, plenty even at 3x retina for
+   the sizes this renders at, without shipping the original 700KB
+   file). Grey state is the same image desaturated via CSS rather than
+   a second asset — one file to keep in sync, not two. The streak
+   number sits absolutely positioned over the image's own bright lower
+   belly (~70% down, dead centre) rather than in a plain box, so it
+   reads as "inside" the flame. Shared by Shell's nav icon and the
+   in-page streak badge on DailyPip. */
+const FLAME_W = 149, FLAME_H = 160;
+
+export function FlameIcon({ lit, streak, size = 19 }) {
+  const h = size, w = Math.round(size * (FLAME_W / FLAME_H));
+  // shrink to fit as the streak grows digits — a fixed size read fine at
+  // "12" but a three-digit streak spilled clean outside the flame's belly
+  const digits = String(streak).length;
+  const fontSize = size * (digits >= 3 ? 0.27 : digits === 2 ? 0.38 : 0.44);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", width: w, height: h, flexShrink: 0 }}>
+      <img src="/flame.png" alt="" width={w} height={h}
+        style={{ display: "block", width: w, height: h,
+          filter: lit ? "none" : "grayscale(1) brightness(1.35) opacity(0.85)" }} />
+      <b style={{ position: "absolute", left: "50%", top: "70%", transform: "translate(-50%, -50%)",
+        fontSize: Math.round(fontSize), fontWeight: 800, lineHeight: 1, whiteSpace: "nowrap",
+        color: lit ? "#5A2107" : "#33383F" }}>{streak}</b>
+    </span>
+  );
+}

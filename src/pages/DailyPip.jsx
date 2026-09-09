@@ -3,7 +3,7 @@ import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
 import { IV_TO_TV_RES } from "../tv/marketFeed.js";
 import { barMsOf, INTERVALS } from "../theme.js";
 import { PageHead } from "../components/Shell.jsx";
-import { Card, Field, Svg, Ic } from "../components/ui.jsx";
+import { Card, Field, Svg, Ic, FlameIcon } from "../components/ui.jsx";
 import { api, API_ENABLED } from "../lib/api.js";
 import { validateSetup, buildSetup, runEngine, bookTrade, fmtPrice, fmtMoney, fmtR } from "../lib/trading.js";
 
@@ -399,7 +399,10 @@ export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
 
   const streakBadge = today && today !== "error" && (
     <Card style={{ padding: "9px 16px", display: "flex", gap: 9, alignItems: "center" }}>
-      <span style={{ color: "var(--brand)", flexShrink: 0 }}><Svg s={15}>{Ic.bolt}</Svg></span>
+      {today.streak?.current > 0
+        ? <FlameIcon size={17} streak={today.streak.current}
+            lit={today.streak.lastDate === new Date().toISOString().slice(0, 10)} />
+        : <span style={{ color: "var(--brand)", flexShrink: 0 }}><Svg s={15}>{Ic.bolt}</Svg></span>}
       <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap" }}>
         {today.streak?.current > 0 ? `${today.streak.current}-day streak` : "No streak yet"}
       </div>
