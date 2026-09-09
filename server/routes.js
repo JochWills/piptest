@@ -656,6 +656,29 @@ router.post("/daily-pip/attempts", requireAuth, writeLimiter, async (req, res) =
     res.json({ attempt: rowToAttempt(inserted.rows[0]), streak: streakOf(streakRow.rows[0]) });
   } catch (e) {
     await client.query("ROLLBACK");
+    /* A genuine two-tabs-at-once submit can still lose the race even
+       after passing the "existing" check above — both transactions
+       can see "no row yet" under READ COMMITTED before either
+       commits, so the loser's INSERT hits the unique index and
+       errors. Rather than matching a specific error code (untested
+       against pg-mem, which this route's own tests run against),
+       just re-check reality: if a row exists now, the other request's
+       insert won and this is the same harmless idempotent-resubmit
+       case as the check above, not a real failure — hand back that
+       row instead of a 500. Any row found here can only have been
+       created by a concurrent request that committed in the gap
+       between our own existence check and our own insert (an
+       already-existing row would have been caught by that check),
+       so this can't mask an unrelated error behind a stale row. */
+    try {
+      const raced = await q(
+        "SELECT * FROM daily_pip_attempts WHERE user_id=$1 AND challenge_date=$2",
+        [req.user.id, challengeDate]);
+      if (raced.rows[0]) {
+        const u = await q("SELECT daily_pip_streak, daily_pip_longest_streak, daily_pip_last_date FROM users WHERE id=$1", [req.user.id]);
+        return res.json({ attempt: rowToAttempt(raced.rows[0]), streak: streakOf(u.rows[0]) });
+      }
+    } catch { /* fall through to the original error below */ }
     throw e;
   } finally {
     client.release();

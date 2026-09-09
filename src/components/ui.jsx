@@ -29,6 +29,8 @@ a  { color: inherit; text-decoration: none; }
 .cap { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 .sm  { font-size: 12.5px; }
 .mut { color: var(--muted); }
+.up  { color: var(--up); }
+.down { color: var(--down); }
 
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
 

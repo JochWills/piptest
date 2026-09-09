@@ -137,10 +137,72 @@ export default function DailyPip({ account, theme, onExit }) {
   const [today, setToday] = useState(null);
   const [errMsg, setErrMsg] = useState("");
 
+  /* ---------- recovering a submit that never reached the server ----------
+     finishAttempt (below) shows a result locally the instant it's computed,
+     then POSTs it — but if that POST is lost (a dropped connection, not a
+     rejection), the server never records the attempt at all. Without this,
+     a reload would find no server-side attempt for today and hand back
+     "ready", letting the same — now fully spoiled — chart be replayed with
+     the outcome already known. So the last submitted body is cached here
+     first, cleared only once the server actually confirms it: found on a
+     later load with no matching server attempt, it's shown as today's
+     result immediately (this browser knows it played, even if the server
+     doesn't yet) and kept retrying quietly in the background rather than
+     ever reopening "ready" for a day already played. Not airtight — someone
+     who knows to clear this key by hand can still get around it — but it
+     closes the one-click version of the gap (an ordinary dropped request,
+     or toggling offline in devtools) without needing the server to
+     re-verify trade outcomes, which is a bigger trust-model change than
+     this warrants. */
+  const pendingKey = () => `dailypip_pending_${account?.id || "anon"}`;
+  const readPending = () => {
+    try { const s = localStorage.getItem(pendingKey()); return s ? JSON.parse(s) : null; } catch { return null; }
+  };
+  const savePending = (body) => { try { localStorage.setItem(pendingKey(), JSON.stringify(body)); } catch { /* best-effort */ } };
+  const clearPending = () => { try { localStorage.removeItem(pendingKey()); } catch { /* best-effort */ } };
+
+  const trySubmit = async (body) => {
+    try {
+      const res = await api.dailyPipSubmit(body);
+      setToday((t) => (t && t !== "error" ? { ...t, attempt: res.attempt, streak: res.streak } : t));
+      setBoardVersion((v) => v + 1);
+      clearPending();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // true while this browser has a locally-known attempt the server doesn't
+  // have confirmed yet — drives the background retry effect below.
+  const [pendingSync, setPendingSync] = useState(false);
+  useEffect(() => {
+    if (!pendingSync) return;
+    const id = setInterval(() => {
+      const p = readPending();
+      if (!p) { setPendingSync(false); return; }
+      trySubmit(p).then((ok) => { if (ok) setPendingSync(false); });
+    }, 15000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSync]);
+
   const load = () => {
     if (!API_ENABLED) { setPhase("ineligible"); return; }
     setPhase("loading");
-    api.dailyPipToday().then((d) => {
+    api.dailyPipToday().then(async (d) => {
+      if (!d.attempt) {
+        const pending = readPending();
+        if (pending && pending.challengeDate === d.challenge.challengeDate) {
+          setToday({ ...d, attempt: pending });
+          setPhase("already-played");
+          const ok = await trySubmit(pending);
+          setPendingSync(!ok);
+          return;
+        }
+      } else {
+        clearPending(); // server already has today's attempt — any leftover local copy is stale
+      }
       setToday(d);
       /* Doesn't auto-start the countdown on arrival any more — "ready"
          is a plain prompt, and the clock only starts once the player
@@ -314,19 +376,22 @@ export default function DailyPip({ account, theme, onExit }) {
       r: closedRec?.r ?? 0, pnl: closedRec?.pnl ?? 0, reason: reason ?? null,
     };
     setResult(body);
+    /* Cached locally before the submit is even attempted — see the
+       pending-recovery block up top. If the POST below is lost rather
+       than rejected, this is what stops a later reload from handing
+       back "ready" for a day this browser already knows it played. */
+    savePending(body);
     /* Awaited, not fired-and-forgotten: this is what stops the
        leaderboard panel's own refetch (bumped below) racing ahead of
        this exact attempt actually being recorded — otherwise it could
        refresh a beat before the just-submitted result was in it. */
-    try {
-      const res = await api.dailyPipSubmit(body);
-      setToday((t) => ({ ...t, attempt: res.attempt, streak: res.streak }));
-      setBoardVersion((v) => v + 1);
-    } catch (e) {
-      // still show the result locally even if the POST failed — the
-      // server call is what makes it official/leaderboard-visible,
-      // but the player's own screen shouldn't just hang on a network blip
-    }
+    const ok = await trySubmit(body);
+    /* Still show the result locally even if the POST never landed —
+       the server call is what makes it official/leaderboard-visible,
+       but the player's own screen shouldn't just hang on a network
+       blip. trySubmit already left the pending copy in place on
+       failure; this just starts the quiet background retry for it. */
+    if (!ok) setPendingSync(true);
     setPhase("result");
   };
 
@@ -722,11 +787,8 @@ function AttemptSummary({ today, attempt, justPlayed, replayOpen, onSetReplay })
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-        <button className="btn pri" style={{ padding: "10px 20px" }} onClick={() => onSetReplay(true)}>
-          <Svg s={14}>{Ic.chart}</Svg>{replayOpen ? "Replaying…" : "View trade replay"}
-        </button>
-        <button className="btn" style={{ padding: "10px 20px" }} onClick={() => onSetReplay(false)}>
-          <Svg s={14}>{Ic.calendar}</Svg>Back to Daily Pip
+        <button className={"btn " + (replayOpen ? "" : "pri")} style={{ padding: "10px 20px" }} onClick={() => onSetReplay(!replayOpen)}>
+          <Svg s={14}>{Ic.chart}</Svg>{replayOpen ? "Hide trade replay" : "View trade replay"}
         </button>
       </div>
     </div>
