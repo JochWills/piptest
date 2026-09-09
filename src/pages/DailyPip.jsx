@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import TVAdvancedChart from "../tv/TVAdvancedChart.jsx";
 import { IV_TO_TV_RES } from "../tv/marketFeed.js";
-import { barMsOf } from "../theme.js";
+import { barMsOf, INTERVALS } from "../theme.js";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Svg, Ic } from "../components/ui.jsx";
 import { api, API_ENABLED } from "../lib/api.js";
@@ -225,13 +225,27 @@ export default function DailyPip({ account, theme, onExit }) {
     if (replayBarsRef.current >= (today?.maxRevealBars || 400)) replayCtlRef.current?.replay.pause();
   };
 
+  /* ---------- playback speed ----------
+     How much calendar time each auto-played step covers — same idea as
+     Simulator's own step picker (see theme.js's INTERVALS comment), just
+     without the manual next/play controls: there's nothing to drive here,
+     only how fast it drives itself. One shared control for both the live
+     reveal and the post-game replay, since they never render at once. */
+  const [revealStepId, setRevealStepId] = useState("5m");
+  useEffect(() => {
+    if (phase === "revealing") chartCtlRef.current?.replay.setStep(barMsOf(revealStepId));
+  }, [revealStepId, phase]);
+  useEffect(() => {
+    if (showReplay) replayCtlRef.current?.replay.setStep(barMsOf(revealStepId));
+  }, [revealStepId, showReplay]);
+
   const startReveal = (trade) => {
     setPhase("revealing");
     const ctl = chartCtlRef.current;
     revealTradeRef.current = trade ?? null;
     barsRef.current = 0;
     if (!ctl) { finishAttempt(trade ?? null, null, null); return; }
-    ctl.replay.setStep(barMsOf(today.challenge.interval));
+    ctl.replay.setStep(barMsOf(revealStepId));
     ctl.replay.play();
   };
 
@@ -419,15 +433,23 @@ export default function DailyPip({ account, theme, onExit }) {
             {(phase === "arming" || phase === "revealing") && (
               <>
                 <Card className="dailypip-chart" style={{ padding: 0, marginBottom: 16 }}>
+                  {/* Bottom-right, not top-left: TradingView's own header
+                      (Indicators, undo/redo, the resolution dropdown) and
+                      the left drawing-tool rail both live up there, and an
+                      overlay sitting on top of them was exactly the "in
+                      the way of the timeframe" complaint that got this
+                      comment written. Bottom-right is clear of the header,
+                      the left rail, and (with this much right-margin) the
+                      price scale. */}
                   {phase === "arming" && (
-                    <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5,
+                    <div style={{ position: "absolute", bottom: 12, right: 16, zIndex: 5,
                       background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8,
                       padding: "6px 12px", fontWeight: 600, fontSize: 15 }} className="num">
                       {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")}
                     </div>
                   )}
                   {phase === "revealing" && (
-                    <div style={{ position: "absolute", top: 12, left: 12, zIndex: 5,
+                    <div style={{ position: "absolute", bottom: 12, right: 16, zIndex: 5,
                       background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8,
                       padding: "6px 12px", fontSize: 13 }} className="mut">
                       Playing out…
@@ -461,10 +483,20 @@ export default function DailyPip({ account, theme, onExit }) {
 
                 <Card style={{ padding: 18 }}>
                   {phase === "revealing" ? (
-                    <div className="sm mut" style={{ lineHeight: 1.6 }}>
-                      {armedTrade
-                        ? `${armedTrade.dir === "long" ? "Long" : "Short"} ${fmtPrice(armedTrade.entry)}, stop ${fmtPrice(armedTrade.stop)}${armedTrade.target != null ? `, target ${fmtPrice(armedTrade.target)}` : ""} — watching for it to resolve.`
-                        : "Time ran out with nothing armed — playing forward a short window."}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", justifyContent: "space-between" }}>
+                      <div className="sm mut" style={{ lineHeight: 1.6 }}>
+                        {armedTrade
+                          ? `${armedTrade.dir === "long" ? "Long" : "Short"} ${fmtPrice(armedTrade.entry)}, stop ${fmtPrice(armedTrade.stop)}${armedTrade.target != null ? `, target ${fmtPrice(armedTrade.target)}` : ""} — watching for it to resolve.`
+                          : "Time ran out with nothing armed — playing forward a short window."}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                        <span className="sm mut">Speed</span>
+                        <select className="in" value={revealStepId} onChange={(e) => setRevealStepId(e.target.value)}
+                          title="Time per step — how fast the reveal plays forward"
+                          style={{ width: 68, padding: "4px 6px", fontSize: 12.5 }}>
+                          {INTERVALS.map((iv) => <option key={iv.id} value={iv.id}>{iv.label}</option>)}
+                        </select>
+                      </div>
                     </div>
                   ) : (
                     <>
@@ -540,22 +572,32 @@ export default function DailyPip({ account, theme, onExit }) {
                   onSetReplay={setShowReplay}
                 />
                 {showReplay && (
-                  <Card className="dailypip-chart" style={{ padding: 0, marginTop: 16 }}>
-                    <TVAdvancedChart
-                      symbol={today.challenge.symbol}
-                      interval={IV_TO_TV_RES[today.challenge.interval] || "5"}
-                      theme={theme}
-                      startMs={today.challenge.startMs}
-                      onReady={(apiObj) => {
-                        replayCtlRef.current = apiObj;
-                        replayBarsRef.current = 0;
-                        apiObj.replay.setStep(barMsOf(today.challenge.interval));
-                        apiObj.replay.play();
-                      }}
-                      onBar={handleReplayBar}
-                      height="100%"
-                    />
-                  </Card>
+                  <>
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 7, marginTop: 16 }}>
+                      <span className="sm mut">Speed</span>
+                      <select className="in" value={revealStepId} onChange={(e) => setRevealStepId(e.target.value)}
+                        title="Time per step — how fast the replay plays forward"
+                        style={{ width: 68, padding: "4px 6px", fontSize: 12.5 }}>
+                        {INTERVALS.map((iv) => <option key={iv.id} value={iv.id}>{iv.label}</option>)}
+                      </select>
+                    </div>
+                    <Card className="dailypip-chart" style={{ padding: 0, marginTop: 8 }}>
+                      <TVAdvancedChart
+                        symbol={today.challenge.symbol}
+                        interval={IV_TO_TV_RES[today.challenge.interval] || "5"}
+                        theme={theme}
+                        startMs={today.challenge.startMs}
+                        onReady={(apiObj) => {
+                          replayCtlRef.current = apiObj;
+                          replayBarsRef.current = 0;
+                          apiObj.replay.setStep(barMsOf(revealStepId));
+                          apiObj.replay.play();
+                        }}
+                        onBar={handleReplayBar}
+                        height="100%"
+                      />
+                    </Card>
+                  </>
                 )}
               </>
             )}
