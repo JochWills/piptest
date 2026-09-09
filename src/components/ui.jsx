@@ -156,6 +156,24 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
   .dailypip-ready-decor { display: none; }
 }
 
+/* Pins the closing quote to the bottom of the page instead of right
+   under the grid — a CSS class (not inline height/flex) so it still
+   collapses cleanly on mobile, per the same inline-style gotcha. The
+   84px is exactly .shell-inner's own top+bottom padding (24 + 60);
+   PageHead lives inside this flex column too, so it's already
+   accounted for automatically — short phases (e.g. the "ready" card)
+   are the ones that actually need the push, taller ones just clear it
+   on their own. */
+.dailypip-page { display: flex; flex-direction: column; min-height: calc(100vh - 84px); }
+.dailypip-content { flex: 1; }
+.dailypip-quote { margin-top: 26px; }
+@media (max-width: 860px) {
+  /* Mobile swaps in a 54px top bar (.shell-top) and .shell-inner's own
+     padding changes to 18px top / 84px bottom (to clear the fixed
+     bottom tab bar) — different constant than desktop's 24/60. */
+  .dailypip-page { min-height: calc(100vh - 156px); }
+}
+
 /* shared utility — hide something below the mobile breakpoint. Defined
    here (global CSS, injected on every page) rather than inside whichever
    page happens to declare it locally: a page-local <style> tag is still

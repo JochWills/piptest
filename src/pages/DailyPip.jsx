@@ -366,7 +366,7 @@ export default function DailyPip({ account, theme, onExit }) {
     : null;
 
   return (
-    <div>
+    <div className="dailypip-page">
       <PageHead
         eyebrow="Daily challenge"
         title="The Daily Pip"
@@ -374,6 +374,7 @@ export default function DailyPip({ account, theme, onExit }) {
         actions={<>{timeLeftBadge}{streakBadge}</>}
       />
 
+      <div className="dailypip-content">
       {phase === "loading" && (
         <div style={{ padding: "70px 0", display: "grid", placeItems: "center" }}><span className="spinner" /></div>
       )}
@@ -571,10 +572,11 @@ export default function DailyPip({ account, theme, onExit }) {
           <LeaderboardPanel today={today} version={boardVersion} />
         </div>
       )}
+      </div>
 
       {quote && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-          marginTop: 26, paddingTop: 16, borderTop: "1px solid var(--border)", flexWrap: "wrap", gap: 8 }}>
+        <div className="dailypip-quote" style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+          paddingTop: 16, borderTop: "1px solid var(--border)", flexWrap: "wrap", gap: 8 }}>
           <span className="sm mut" style={{ fontStyle: "italic" }}>— "{quote}"</span>
           <span className="sm mut">Trade. Learn. Improve.</span>
         </div>
