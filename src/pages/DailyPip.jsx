@@ -317,15 +317,10 @@ export default function DailyPip({ account, theme, onExit }) {
   };
 
   const streakBadge = today && today !== "error" && (
-    <Card style={{ padding: "13px 18px", display: "flex", gap: 12, alignItems: "flex-start", minWidth: 250 }}>
-      <span style={{ color: "var(--brand)", flexShrink: 0, marginTop: 1 }}><Svg s={17}>{Ic.bolt}</Svg></span>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>
-          {today.streak?.current > 0 ? `${today.streak.current}-day streak` : "No streak yet"}
-        </div>
-        <div className="sm mut" style={{ marginTop: 2 }}>
-          {today.streak?.current > 0 ? "Keep it going — play today's Pip." : "Complete today's challenge to start."}
-        </div>
+    <Card style={{ padding: "9px 16px", display: "flex", gap: 9, alignItems: "center" }}>
+      <span style={{ color: "var(--brand)", flexShrink: 0 }}><Svg s={15}>{Ic.bolt}</Svg></span>
+      <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap" }}>
+        {today.streak?.current > 0 ? `${today.streak.current}-day streak` : "No streak yet"}
       </div>
     </Card>
   );
@@ -350,13 +345,10 @@ export default function DailyPip({ account, theme, onExit }) {
   const dayLeftM = Math.floor((dayLeftMs % 3600000) / 60000);
 
   const timeLeftBadge = today && today !== "error" && (
-    <Card style={{ padding: "13px 18px", display: "flex", gap: 12, alignItems: "flex-start", minWidth: 220 }}>
-      <span style={{ color: "var(--muted)", flexShrink: 0, marginTop: 1 }}><Svg s={17}>{Ic.clock}</Svg></span>
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 14 }} className="num">
-          {dayLeftH}h {String(dayLeftM).padStart(2, "0")}m left
-        </div>
-        <div className="sm mut" style={{ marginTop: 2 }}>New challenge at 00:00 UTC</div>
+    <Card style={{ padding: "9px 16px", display: "flex", gap: 9, alignItems: "center" }}>
+      <span style={{ color: "var(--muted)", flexShrink: 0 }}><Svg s={15}>{Ic.clock}</Svg></span>
+      <div className="num" style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap" }}>
+        {dayLeftH}h {String(dayLeftM).padStart(2, "0")}m left
       </div>
     </Card>
   );
