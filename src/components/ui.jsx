@@ -126,24 +126,6 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
 .shell-navbtn.on .shell-navicon { color: var(--brand); }
 .shell-navicon { display: flex; color: inherit; }
 
-/* Daily Pip's nav icon once there's a streak — a solid flame
-   silhouette (not the system emoji, so the number can sit inside it
-   and both colour states are exact) built from the classic
-   "rotated-square teardrop" CSS shape: three fully-rounded corners
-   plus one sharp one, spun 45deg so the sharp corner becomes the tip.
-   Warm gradient + glow once today's attempt is in; flat grey while
-   the streak is real but as of yesterday. See Shell.jsx's
-   DailyPipIcon. */
-.dailypip-flame { position: relative; display: inline-flex; align-items: center; justify-content: center;
-  width: 19px; height: 19px; flex-shrink: 0; }
-.dailypip-flame-shape { position: absolute; inset: 0; border-radius: 0 50% 50% 50%; transform: rotate(45deg);
-  background: radial-gradient(circle at 38% 32%, #FFE9A8, #FDBA3B 40%, #F5761A 72%, #E23E1F 100%);
-  box-shadow: 0 0 5px 0 rgba(245, 118, 26, .6); }
-.dailypip-flame.grey .dailypip-flame-shape { background: radial-gradient(circle at 38% 32%, #D8DBE0, #A6ADB6 45%, #757D87 100%);
-  box-shadow: none; }
-.dailypip-flame b { position: relative; z-index: 1; margin-top: 3px;
-  font-size: 8.5px; font-weight: 800; line-height: 1; color: #4A1D05; }
-.dailypip-flame.grey b { color: #fff; }
 
 .shell-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
 .shell-user { display: flex; align-items: center; gap: 9px; padding: 6px 4px 10px; }
