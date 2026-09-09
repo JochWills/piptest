@@ -21,37 +21,31 @@ const NAV = [
   { id: "settings",  label: "Settings",  icon: Ic.gear },
 ];
 
-/* The actual twin-lobed fire-emoji silhouette (Twemoji's 1f525.svg,
-   two overlapping flame shapes — an outer body and an inner tongue —
-   traced at its native 36x36 viewBox), not a CSS-shape approximation.
-   Recoloured via gradients per state rather than Twemoji's flat
-   two-tone orange/yellow, and given a streak number sitting in the
-   lower body the way the reference did. */
-const FLAME_OUTER = "M35 19c0-2.062-.367-4.039-1.04-5.868-.46 5.389-3.333 8.157-6.335 6.868-2.812-1.208-.917-5.917-.777-8.164.236-3.809-.012-8.169-6.931-11.794 2.875 5.5.333 8.917-2.333 9.125-2.958.231-5.667-2.542-4.667-7.042-3.238 2.386-3.332 6.402-2.333 9 1.042 2.708-.042 4.958-2.583 5.208-2.84.28-4.418-3.041-2.963-8.333C2.52 10.965 1 14.805 1 19c0 9.389 7.611 17 17 17s17-7.611 17-17z";
-const FLAME_INNER = "M28.394 23.999c.148 3.084-2.561 4.293-4.019 3.709-2.106-.843-1.541-2.291-2.083-5.291s-2.625-5.083-5.708-6c2.25 6.333-1.247 8.667-3.08 9.084-1.872.426-3.753-.001-3.968-4.007C7.352 23.668 6 26.676 6 30c0 .368.023.73.055 1.09C9.125 34.124 13.342 36 18 36s8.875-1.876 11.945-4.91c.032-.36.055-.722.055-1.09 0-2.187-.584-4.236-1.606-6.001z";
+/* Josh's own flame artwork (public/flame.png — resized down from the
+   ~1200px source he supplied to 149x160, plenty for a ~19px icon even
+   at 3x retina, without shipping the original 700KB file). Grey state
+   is the same image desaturated via CSS rather than a second asset —
+   one file to keep in sync, not two. The number sits absolutely
+   positioned over the image's own bright lower belly (~70% down,
+   dead centre) rather than in a plain box, so it reads as "inside"
+   the flame the way the reference did. */
+const FLAME_W = 149, FLAME_H = 160;
 
 function FlameIcon({ lit, streak, size = 19 }) {
-  const g1 = lit ? "flameOuterLit" : "flameOuterGrey";
-  const g2 = lit ? "flameInnerLit" : "flameInnerGrey";
+  const h = size, w = Math.round(size * (FLAME_W / FLAME_H));
+  // shrink to fit as the streak grows digits — a fixed size read fine at
+  // "12" but a three-digit streak spilled clean outside the flame's belly
+  const digits = String(streak).length;
+  const fontSize = size * (digits >= 3 ? 0.27 : digits === 2 ? 0.38 : 0.44);
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" style={{ display: "block", flexShrink: 0 }}>
-      <defs>
-        <radialGradient id={g1} cx="42%" cy="28%" r="80%">
-          {lit
-            ? <><stop offset="0%" stopColor="#FFCB57" /><stop offset="55%" stopColor="#F5761A" /><stop offset="100%" stopColor="#C6350C" /></>
-            : <><stop offset="0%" stopColor="#B7BCC4" /><stop offset="100%" stopColor="#666E79" /></>}
-        </radialGradient>
-        <radialGradient id={g2} cx="45%" cy="30%" r="75%">
-          {lit
-            ? <><stop offset="0%" stopColor="#FFF6D8" /><stop offset="100%" stopColor="#FDBA3B" /></>
-            : <><stop offset="0%" stopColor="#EDEFF2" /><stop offset="100%" stopColor="#9BA1AA" /></>}
-        </radialGradient>
-      </defs>
-      <path fill={`url(#${g1})`} d={FLAME_OUTER} />
-      <path fill={`url(#${g2})`} d={FLAME_INNER} />
-      <text x="17" y="29.5" textAnchor="middle" fontSize="12.5" fontWeight="800"
-        fill={lit ? "#4A1D05" : "#fff"}>{streak}</text>
-    </svg>
+    <span style={{ position: "relative", display: "inline-flex", width: w, height: h, flexShrink: 0 }}>
+      <img src="/flame.png" alt="" width={w} height={h}
+        style={{ display: "block", width: w, height: h,
+          filter: lit ? "none" : "grayscale(1) brightness(1.35) opacity(0.85)" }} />
+      <b style={{ position: "absolute", left: "50%", top: "70%", transform: "translate(-50%, -50%)",
+        fontSize: Math.round(fontSize), fontWeight: 800, lineHeight: 1, whiteSpace: "nowrap",
+        color: lit ? "#5A2107" : "#fff" }}>{streak}</b>
+    </span>
   );
 }
 
