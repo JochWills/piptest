@@ -16,7 +16,7 @@
 
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
-import { q, logEvent } from "./db.js";
+import { q, logEvent, dateColToStr } from "./db.js";
 
 const ACCESS_TTL = "15m";
 const REFRESH_DAYS = 30;
@@ -160,5 +160,5 @@ export const publicUser = (u) => ({
   createdAt: u.created_at, lastLoginAt: u.last_login_at,
   dailyPipStreak: u.daily_pip_streak ?? 0,
   dailyPipLongestStreak: u.daily_pip_longest_streak ?? 0,
-  dailyPipLastDate: u.daily_pip_last_date ?? null,
+  dailyPipLastDate: dateColToStr(u.daily_pip_last_date),
 });

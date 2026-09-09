@@ -21,6 +21,24 @@ const NAV = [
   { id: "settings",  label: "Settings",  icon: Ic.gear },
 ];
 
+/* The Daily Pip nav icon swaps from the plain bolt to a streak flame
+   once there's a streak to show — grey while today's challenge is
+   still unplayed (the streak is real, but as of yesterday), full
+   colour once today's own attempt has landed and the streak reflects
+   it. `account` already carries all three fields straight off the
+   server's own publicUser() (see server/auth.js). */
+function DailyPipIcon({ account }) {
+  const streak = account?.dailyPipStreak || 0;
+  if (streak <= 0) return <Svg s={15}>{Ic.bolt}</Svg>;
+  const today = new Date().toISOString().slice(0, 10); // UTC, matching the server's own utcDateKey()
+  const playedToday = account?.dailyPipLastDate === today;
+  return (
+    <span className={"dailypip-flame" + (playedToday ? "" : " grey")}>
+      🔥<b>{streak}</b>
+    </span>
+  );
+}
+
 export default function Shell({ page, onNav, onHome, account, theme, onToggleTheme, onSignOut, children, wide }) {
   return (
     <div className="shell">
@@ -50,7 +68,9 @@ export default function Shell({ page, onNav, onHome, account, theme, onToggleThe
           {NAV.map((n) => (
             <button key={n.id} onClick={() => onNav(n.id)}
               className={"shell-navbtn" + (page === n.id ? " on" : "")}>
-              <span className="shell-navicon"><Svg s={15}>{n.icon}</Svg></span>
+              <span className="shell-navicon">
+                {n.id === "dailypip" ? <DailyPipIcon account={account} /> : <Svg s={15}>{n.icon}</Svg>}
+              </span>
               <span className="shell-navlabel">{n.label}</span>
             </button>
           ))}

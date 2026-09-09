@@ -126,6 +126,14 @@ textarea.in { resize: vertical; line-height: 1.65; font-family: inherit; }
 .shell-navbtn.on .shell-navicon { color: var(--brand); }
 .shell-navicon { display: flex; color: inherit; }
 
+/* Daily Pip's nav icon once there's a streak — grey (desaturated,
+   since an emoji glyph ignores a CSS color) until today's own
+   attempt is in, full colour once it is. See Shell.jsx's
+   DailyPipIcon. */
+.dailypip-flame { display: inline-flex; align-items: center; gap: 2px; font-size: 14px; line-height: 1; }
+.dailypip-flame.grey { filter: grayscale(1); opacity: .55; }
+.dailypip-flame b { font-size: 10.5px; font-weight: 800; color: inherit; }
+
 .shell-foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); }
 .shell-user { display: flex; align-items: center; gap: 9px; padding: 6px 4px 10px; }
 .shell-userinfo { min-width: 0; display: block; }

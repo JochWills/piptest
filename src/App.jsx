@@ -508,7 +508,16 @@ export default function App() {
         )}
         {page === "analytics" && <Analytics trades={trades} />}
         {page === "dailypip" && (
-          <DailyPip account={account} theme={theme} onExit={() => go("analytics")} />
+          <DailyPip account={account} theme={theme} onExit={() => go("analytics")}
+            /* Keeps the sidebar's own streak indicator (Shell.jsx) live
+               without a full reload — DailyPip tracks its own copy of
+               the streak locally already, this just mirrors the same
+               {current, longest, lastDate} shape back onto the account
+               object Shell reads from. */
+            onStreakUpdate={(streak) => setAccount((a) => a ? ({
+              ...a, dailyPipStreak: streak.current,
+              dailyPipLongestStreak: streak.longest, dailyPipLastDate: streak.lastDate,
+            }) : a)} />
         )}
         {/* Settings reads straight off `account` from its very first render
             (no optional chaining — it's always been guaranteed non-null by

@@ -131,7 +131,7 @@ function ReadyDecor() {
   );
 }
 
-export default function DailyPip({ account, theme, onExit }) {
+export default function DailyPip({ account, theme, onExit, onStreakUpdate }) {
   const [phase, setPhase] = useState("loading");
   // { challenge, attempt, streak, maxRevealBars } from GET /daily-pip/today
   const [today, setToday] = useState(null);
@@ -166,6 +166,7 @@ export default function DailyPip({ account, theme, onExit }) {
       const res = await api.dailyPipSubmit(body);
       setToday((t) => (t && t !== "error" ? { ...t, attempt: res.attempt, streak: res.streak } : t));
       setBoardVersion((v) => v + 1);
+      onStreakUpdate?.(res.streak);
       clearPending();
       return true;
     } catch {
@@ -203,6 +204,7 @@ export default function DailyPip({ account, theme, onExit }) {
       } else {
         clearPending(); // server already has today's attempt — any leftover local copy is stale
       }
+      onStreakUpdate?.(d.streak);
       setToday(d);
       /* Doesn't auto-start the countdown on arrival any more — "ready"
          is a plain prompt, and the clock only starts once the player
