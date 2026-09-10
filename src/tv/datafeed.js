@@ -112,6 +112,26 @@ export function createDatafeed(opts = {}) {
     agg: null,                    // the chart-resolution candle currently being built from sub-bars, if any — see control.step
     jumpGen: 0,                    // bumped on every jumpTo — lets its own retried viewport-restores (below) tell a stale attempt from the current one
     afterBarsSettled: null,        // one-shot callback — see notifyBarsSettled and jumpTo's own comment on why this exists
+    /* How far real, revealed data actually extends — distinct from
+       cursorMs, which is just a bucket-aligned POSITION and can equal a
+       bar's own open with none of that bar's own duration replayed yet.
+       Advanced only by step()/pushRemoteBar() (the two places real data
+       is genuinely revealed) to the END of whatever bar each just
+       handed over; reset to the plain cursor by jumpTo (a jump discards
+       any in-progress reveal same as it discards the forming aggregate —
+       see jumpTo's own comment). getBars (below) uses this, not
+       cursorMs, to decide whether a bucket's full high/low/close is
+       actually safe to serve yet. See getBars' own comment for what
+       this fixes: without it, `feed.getRange` — real, closed exchange
+       data regardless of replay position — hands back a bucket's
+       already-known FUTURE high/low/close the instant its open is in
+       the past, which is always true here since every replay date is
+       already historical to the exchange. Confirmed directly: a brand
+       new session showed its first candle's full wick, and any
+       cumulative study (VWAP, first reported as looking "buggy" on a
+       chart zoom that re-triggers getBars for a range still covering
+       that same unrevealed bucket) inherits the exact same leak. */
+    revealedThroughMs: opts.cursorMs ?? Date.now(),
   };
 
   /* Called at the end of every getBars completion path (a real result,
@@ -197,7 +217,36 @@ export function createDatafeed(opts = {}) {
         const { bars, noData } = await feed.getRange(symbolInfo.name, resolution, fromMs, toMs, countBack);
         /* Do not include a bar stamped exactly `to` — the library already
            holds that one from the previous response. */
-        const clean = bars.filter((b) => b.time < toMs);
+        let clean = bars.filter((b) => b.time < toMs);
+        /* The clamp above only checks a bar's OPEN against the cursor —
+           not the same as "replay has actually revealed all of it". Every
+           bar `feed.getRange` hands back is real, closed exchange data, so
+           for any resolution coarser than the feed's own finest tick (1s
+           crypto, 1m forex/index) the bucket the cursor sits inside already
+           has a complete, real high/low/close the instant its OPEN is in
+           the past — true of every replay date, since it's already
+           historical to the exchange regardless of how far the replay
+           itself has stepped through it. Confirmed directly: a brand new
+           session showed its very first candle's full wick — the next 30
+           minutes of real price movement — before a single step was taken,
+           simply because that bucket's open (b.time === cursorMs) satisfies
+           `b.time < toMs`. Any study that reads the underlying bar array
+           (VWAP first, is what actually surfaced this — a chart zoom can
+           trigger a getBars re-fetch of a range still covering this same
+           not-yet-elapsed bucket, and a cumulative study recomputed over it
+           shows the leak far more visibly than the candle itself does)
+           inherits the exact same leak.
+           revealedThroughMs (not cursorMs — see its own declaration above)
+           is the real fix: exclude any bucket whose full duration hasn't
+           actually been stepped through yet. The bar this excludes isn't
+           gone — control.step()'s own aggregateDisplay pushes the correct,
+           progressively-built version of it via onTick the moment replay
+           actually reaches it; this only stops getBars from pre-empting
+           that with the finished, future version. */
+        if (!state.live) {
+          const ivMs = barMsOf(TV_RES_TO_IV[resolution]);
+          if (Number.isFinite(ivMs)) clean = clean.filter((b) => b.time + ivMs <= state.revealedThroughMs);
+        }
         async_(() => { onResult(clean, { noData: noData && !clean.length }); notifyBarsSettled(); });
       } catch (e) {
         async_(() => { onError(String(e && e.message ? e.message : e)); notifyBarsSettled(); });
@@ -261,6 +310,10 @@ export function createDatafeed(opts = {}) {
       if (!bar) return null;
       state.cursorMs = bar.time;
       state.onCursor(bar.time, bar);
+      /* This bar's own full duration, at whatever resolution was actually
+         stepped, is now genuinely known — see revealedThroughMs's own
+         declaration for what reads this and why. */
+      state.revealedThroughMs = bar.time + barMsOf(TV_RES_TO_IV[stepRes]);
 
       const display = aggregateDisplay(state, bar, symbol, resolution, chartMs, stepRes);
       for (const s of state.subs.values()) {
@@ -287,6 +340,7 @@ export function createDatafeed(opts = {}) {
       if (bar.time < state.cursorMs) return; // stale/out-of-order delivery — never move the cursor backwards
       state.cursorMs = bar.time;
       state.onCursor(bar.time, bar);
+      state.revealedThroughMs = bar.time + barMsOf(TV_RES_TO_IV[subRes || resolution]);
       const chartMs = barMsOf(TV_RES_TO_IV[resolution]);
       const display = aggregateDisplay(state, bar, symbol, resolution, chartMs, subRes || resolution);
       for (const s of state.subs.values()) {
@@ -311,6 +365,7 @@ export function createDatafeed(opts = {}) {
        silently overwriting the precise one the caller already set. */
     jumpTo(ms, widget, symbol, resolution, skipBarLookup) {
       state.cursorMs = ms;
+      state.revealedThroughMs = ms; // nothing beyond the new target is known yet — same reasoning as the forming aggregate this already discards, below
       state.agg = null;
       state.onCursor(ms, null);
       for (const s of state.subs.values()) s.reset && s.reset();
