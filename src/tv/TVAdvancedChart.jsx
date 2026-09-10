@@ -250,6 +250,14 @@ export default function TVAdvancedChart({
          same as Piptest disabling its own tool rail used to. */
       disabled_features: [
         "header_symbol_search",
+        /* header_symbol_search above only hides the header button — the
+           library still binds its own keyboard shortcut (typing while
+           the chart has focus) that pops the same symbol-search overlay
+           regardless, letting a player quietly switch pairs mid-session
+           with no button visible at all. Confirmed against
+           charting_library.d.ts: this is its own separate flag, not a
+           side effect of the one above. */
+        "symbol_search_hot_key",
         "header_compare",
         "go_to_date",
         "timeframes_toolbar",

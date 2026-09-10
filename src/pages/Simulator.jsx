@@ -59,6 +59,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      manual save/restore rather than something the library does for
      itself across a remount it doesn't know is coming. */
   const pendingOwnDrawingsRef = useRef(null);
+  /* Same remount, same problem, but for indicators/panes/settings —
+     those live in a widget.save() layout snapshot, not getDrawings(),
+     so they need their own capture even though pendingLayoutRef
+     already exists (for session-restore and room sync) and already
+     gets applied via api.load() in handleReady below; switchInterval
+     just wasn't feeding it. */
   /* bumped on every drawing/study edit (see handleDrawingsChanged) purely
      so the autosave effect below has something to react to — drawing a
      trendline while paused doesn't touch trades/cursor/notes/symbol/interval
@@ -581,6 +587,19 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     /* last chance to read these off the OLD widget — the new one that
        handleReady sees after setIv below starts with nothing on it */
     pendingOwnDrawingsRef.current = chartCtlRef.current?.getDrawings() || null;
+    /* Same last-chance read, for indicators/panes/settings this time.
+       save() resolves via widget.save()'s own callback rather than
+       synchronously like getDrawings() above, but that settles as a
+       microtask — long before the brand-new widget on the other side
+       of setIv below can possibly reach onChartReady, which needs the
+       whole library to reconstruct the chart first. pendingLayoutRef
+       is the same ref session-restore and room sync already queue a
+       layout into; handleReady's existing apply logic (see its own
+       comment) picks this up with no further change needed there. */
+    const ctlBeforeSwitch = chartCtlRef.current;
+    if (ctlBeforeSwitch) {
+      ctlBeforeSwitch.save().then((layout) => { pendingLayoutRef.current = layout; }).catch(() => {});
+    }
     setIv(nextIv);
     /* tell a viewer's chart to remount at the new timeframe right away,
        rather than waiting on the next ~1.5s poll (still the fallback
