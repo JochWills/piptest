@@ -865,6 +865,55 @@ export default function TVAdvancedChart({
           }
         },
 
+        /* --- indicators across a remount, the OTHER half of it ---
+           save()/load() (below) looked like the right tool for this —
+           it's the documented way to carry indicators across a reload —
+           but it carries the WHOLE captured chart state, resolution
+           included, and switchInterval's remount is exactly the one
+           case where the resolution captured here (the OLD one) and
+           the resolution the new widget actually mounts at (the NEW
+           one) are deliberately different. load()-ing an old-resolution
+           snapshot onto an already-new-resolution widget left restored
+           studies bound to that stale resolution's data — candles kept
+           updating live from the new mount's own props/subscription,
+           but a restored study just sat frozen whatever it last
+           calculated, visibly disconnected from the real price the
+           moment it's plotted on the same scale as price (VWAP is what
+           actually surfaced this; a separate-pane oscillator like RSI
+           can look plausible parked at a stale value in a way an
+           overlaid line right next to the candles cannot).
+           The fix is the same shape as restoreDrawings above: read the
+           bare description (name + inputs) rather than the library's
+           own serialized snapshot, and recreate it fresh on the new
+           widget via createStudy — which resolves against whatever
+           this chart is actually showing right now, same as a user
+           adding it by hand would. Styling overrides are NOT carried
+           over (getStyleValues()'s structured shape doesn't map cleanly
+           onto createStudy's flat override keys) — a restored study can
+           come back its default color rather than whatever the user
+           picked, a real but purely cosmetic tradeoff next to a study
+           that silently stops tracking price at all. */
+        getStudies() {
+          try {
+            return (chart.getAllStudies() || []).map(({ id, name }) => {
+              let inputs = {};
+              try {
+                inputs = Object.fromEntries(
+                  (chart.getStudyById(id).getInputValues() || []).map((v) => [v.id, v.value])
+                );
+              } catch (e) {}
+              return { name, inputs };
+            });
+          } catch (e) { return []; }
+        },
+        restoreStudies(list) {
+          if (!Array.isArray(list)) return;
+          for (const s of list) {
+            if (!s || !s.name) continue;
+            try { chart.createStudy(s.name, false, false, s.inputs || {}).catch(() => {}); } catch (e) {}
+          }
+        },
+
         /* What a room gets: the structural snapshot with drawings
            taken out, plus the drawings as their own list. Distinct
            from save() above, which stays whole because a solo

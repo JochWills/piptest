@@ -59,12 +59,19 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      manual save/restore rather than something the library does for
      itself across a remount it doesn't know is coming. */
   const pendingOwnDrawingsRef = useRef(null);
-  /* Same remount, same problem, but for indicators/panes/settings —
-     those live in a widget.save() layout snapshot, not getDrawings(),
-     so they need their own capture even though pendingLayoutRef
-     already exists (for session-restore and room sync) and already
-     gets applied via api.load() in handleReady below; switchInterval
-     just wasn't feeding it. */
+  /* Same remount, same problem, for indicators this time — but NOT
+     via pendingLayoutRef/api.load() (used below for session-restore
+     and room sync): that carries the OLD widget's whole captured
+     state, resolution included, and switchInterval's entire point is
+     landing on a NEW resolution — a study restored from an old-
+     resolution snapshot onto an already-new-resolution widget came
+     back bound to the stale one, silently frozen rather than tracking
+     live price (see TVAdvancedChart's own restoreStudies for the full
+     story — a real, reported bug, not a hypothetical). getStudies/
+     restoreStudies read and recreate just the bare name+inputs
+     instead, which resolves fresh against whatever the chart actually
+     ends up showing, the same as adding it by hand would. */
+  const pendingOwnStudiesRef = useRef(null);
   /* bumped on every drawing/study edit (see handleDrawingsChanged) purely
      so the autosave effect below has something to react to — drawing a
      trendline while paused doesn't touch trades/cursor/notes/symbol/interval
@@ -401,6 +408,10 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
       api.restoreDrawings(pendingOwnDrawingsRef.current);
       pendingOwnDrawingsRef.current = null;
     }
+    if (pendingOwnStudiesRef.current) {
+      api.restoreStudies(pendingOwnStudiesRef.current);
+      pendingOwnStudiesRef.current = null;
+    }
     /* a fresh widget instance has nothing loaded onto it yet, no
        matter what was loaded onto whatever instance came before it, so
        this can't just leave lastAppliedLayoutRef holding a stale value
@@ -587,19 +598,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     /* last chance to read these off the OLD widget — the new one that
        handleReady sees after setIv below starts with nothing on it */
     pendingOwnDrawingsRef.current = chartCtlRef.current?.getDrawings() || null;
-    /* Same last-chance read, for indicators/panes/settings this time.
-       save() resolves via widget.save()'s own callback rather than
-       synchronously like getDrawings() above, but that settles as a
-       microtask — long before the brand-new widget on the other side
-       of setIv below can possibly reach onChartReady, which needs the
-       whole library to reconstruct the chart first. pendingLayoutRef
-       is the same ref session-restore and room sync already queue a
-       layout into; handleReady's existing apply logic (see its own
-       comment) picks this up with no further change needed there. */
-    const ctlBeforeSwitch = chartCtlRef.current;
-    if (ctlBeforeSwitch) {
-      ctlBeforeSwitch.save().then((layout) => { pendingLayoutRef.current = layout; }).catch(() => {});
-    }
+    /* Same last-chance read, for indicators this time — getStudies(),
+       not save()/pendingLayoutRef: see pendingOwnStudiesRef's own
+       comment for why a full layout snapshot is the wrong tool
+       specifically across a resolution-changing remount. */
+    pendingOwnStudiesRef.current = chartCtlRef.current?.getStudies() || null;
     setIv(nextIv);
     /* tell a viewer's chart to remount at the new timeframe right away,
        rather than waiting on the next ~1.5s poll (still the fallback
@@ -842,7 +845,23 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     setSaveState("saving");
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
-      const layout = chartReady && chartCtlRef.current ? await chartCtlRef.current.save() : pendingLayoutRef.current;
+      /* A switchInterval remount can tear the old widget down and not
+         yet have the new one's onReady land within this same 1s debounce
+         — chartCtlRef.current briefly still points at the dead one in
+         that gap (nothing here clears it early; handleReady is what
+         eventually overwrites it). Calling .save() on it throws from
+         inside the library itself (confirmed directly: a real, if
+         narrow-window, uncaught rejection — not a hypothetical). Left
+         unguarded, that skipped the rest of this autosave entirely,
+         cursor/trades/notes included, not just the layout. Falling back
+         to pendingLayoutRef.current — the same fallback the "not ready
+         yet at all" branch already uses — costs nothing: the very next
+         autosave tick (cursor keeps moving during replay) tries again
+         with a live widget. */
+      let layout = pendingLayoutRef.current;
+      if (chartReady && chartCtlRef.current) {
+        try { layout = await chartCtlRef.current.save(); } catch (e) {}
+      }
       const ok = await data.saveSessionState(meta.id, {
         id: meta.id, cursor, trades, trade, layout, notes, symbol, interval,
       });
