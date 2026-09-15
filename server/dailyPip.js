@@ -43,6 +43,28 @@ export const MAX_REVEAL_BARS = 400;
 
 export const utcDateKey = (d = new Date()) => d.toISOString().slice(0, 10);
 
+/* A stored daily_pip_streak is only still real if it covers yesterday
+   or today — miss a whole UTC day with no attempt and it's broken,
+   even though nothing writes that back to the row until the user's
+   next attempt naturally lands on it (the CASE logic in routes.js
+   already resets to 1 there, since daily_pip_last_date won't match
+   "yesterday" any more). Nothing here ever runs on a schedule to
+   catch a streak the moment it lapses — every place that reports a
+   streak (publicUser() in auth.js, streakOf() in routes.js) computes
+   this at read time instead, which is cheap, always correct no
+   matter how long it's been, and needs no migration or cron job:
+   a user who never plays again just keeps reading 0 forever, a user
+   who comes back gets the real reset written for free by the
+   existing attempt-submit logic. */
+export function effectiveStreak(streak, lastDateStr, todayKey = utcDateKey()) {
+  if (!streak || !lastDateStr) return 0;
+  const last = Date.parse(lastDateStr + "T00:00:00Z");
+  const today = Date.parse(todayKey + "T00:00:00Z");
+  if (!Number.isFinite(last) || !Number.isFinite(today)) return 0;
+  const daysSince = Math.round((today - last) / 86400000);
+  return daysSince <= 1 ? streak : 0;
+}
+
 /* mulberry32 — small, fast, well-known 32-bit PRNG. Seeded from a
    sha256 of the date string (node:crypto, already a dependency used
    this way elsewhere in this server) rather than Math.random(), so

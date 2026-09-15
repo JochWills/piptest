@@ -292,6 +292,34 @@ try {
   r = await call("/api/daily-pip/attempts", { method: "POST", token: gapToken, body: { challengeDate, traded: false } });
   ok(r.body.streak.current === 1, "a gap (two-days-ago, then today, skipping yesterday) resets the streak to 1, not +1");
 
+  /* The bug this covers: a streak only ever gets RESET by the CASE
+     logic in the attempts route, which only runs when the user
+     actually submits something. A user who just stops coming back
+     was still being reported with their old, stale streak forever —
+     nothing ever told them, or the UI, that it had lapsed — until
+     effectiveStreak() (dailyPip.js) started computing this at read
+     time instead. Deliberately never submits a SECOND attempt here:
+     the whole point is that a streak must show broken from a plain
+     GET, with no new attempt to trigger the old write-time reset. */
+  r = await call("/api/auth/register", { method: "POST",
+    body: { email: "ghosted@piptest.com", password: "ghosted-pass-9", name: "Ghosted", handle: "ghosted" } });
+  const ghostToken = r.body.accessToken;
+  /* Backdated on purpose, the same trick used for yesterday/twoDaysAgo
+     above — real gameplay only ever submits for the real "today", so
+     this specific response (streak.current already reads 0, since
+     even fresh off this very submission "today" is two real days past
+     twoDaysAgo) is itself just test setup, not the behavior under
+     test — see the GET assertions right below for that. */
+  await call("/api/daily-pip/attempts", { method: "POST", token: ghostToken, body: { challengeDate: twoDaysAgo, traded: false } });
+
+  d = await call("/api/daily-pip/today", { token: ghostToken });
+  ok(d.body.streak.current === 0, "days later, with no new attempt, GET /daily-pip/today reports the streak as broken");
+  ok(d.body.streak.longest === 1, "longest is a lifetime record — a lapsed current streak doesn't erase it");
+
+  r = await call("/api/me", { token: ghostToken });
+  ok(r.body.user.dailyPipStreak === 0, "the account object (sidebar/nav icon) agrees — no stale streak number anywhere");
+  ok(r.body.user.dailyPipLongestStreak === 1, "publicUser() leaves the longest-streak record alone too");
+
   console.log("\n=== admin: reset a user's Daily Pip ===");
   r = await call("/api/admin/users/" + streakerId + "/daily-pip/reset", { method: "POST", token: userToken });
   ok(r.status === 403, "a non-admin cannot reset another user's Daily Pip");

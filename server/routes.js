@@ -10,7 +10,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { sendMail, resetEmail, passwordChangedEmail, MAIL_ENABLED } from "./mailer.js";
 import { q, pool, logEvent, dateColToStr } from "./db.js";
-import { resolveChallenge, utcDateKey, MAX_REVEAL_BARS } from "./dailyPip.js";
+import { resolveChallenge, utcDateKey, effectiveStreak, MAX_REVEAL_BARS } from "./dailyPip.js";
 import {
   hashPassword, verifyPassword, signAccess, issueRefresh, rotateRefresh,
   revokeRefresh, revokeAllForUser, setRefreshCookie, clearRefreshCookie,
@@ -565,8 +565,11 @@ const rowToAttempt = (r) => ({
   stop: r.stop, target: r.target, r: r.r, pnl: r.pnl, reason: r.reason,
   submittedAt: r.submitted_at ? new Date(r.submitted_at).getTime() : null,
 });
+/* Same lazy break-on-read as publicUser() in auth.js — see
+   effectiveStreak's own comment for why nothing here ever needs to
+   write a broken streak back on its own. */
 const streakOf = (u) => ({
-  current: u?.daily_pip_streak ?? 0,
+  current: effectiveStreak(u?.daily_pip_streak ?? 0, dateColToStr(u?.daily_pip_last_date)),
   longest: u?.daily_pip_longest_streak ?? 0,
   lastDate: dateColToStr(u?.daily_pip_last_date),
 });

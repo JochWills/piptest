@@ -17,6 +17,7 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { q, logEvent, dateColToStr } from "./db.js";
+import { effectiveStreak } from "./dailyPip.js";
 
 const ACCESS_TTL = "15m";
 const REFRESH_DAYS = 30;
@@ -158,7 +159,9 @@ export const publicUser = (u) => ({
   id: u.id, email: u.email, handle: u.handle, name: u.name,
   role: u.role, status: u.status, plan: u.plan, avatar: u.avatar || null,
   createdAt: u.created_at, lastLoginAt: u.last_login_at,
-  dailyPipStreak: u.daily_pip_streak ?? 0,
+  /* Broken-but-not-yet-reset streaks are handled here, not in the
+     database — see effectiveStreak's own comment. */
+  dailyPipStreak: effectiveStreak(u.daily_pip_streak ?? 0, dateColToStr(u.daily_pip_last_date)),
   dailyPipLongestStreak: u.daily_pip_longest_streak ?? 0,
   dailyPipLastDate: dateColToStr(u.daily_pip_last_date),
 });
