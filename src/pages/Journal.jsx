@@ -8,12 +8,27 @@ import { computeStats, fmtPrice, fmtSigned, fmtR, fmtClock, fmtShort, sessionOf 
    Journal — the whole book, filterable, with notes
    ============================================================ */
 
-export default function Journal({ trades, onUpdateTrade, onExport }) {
+export default function Journal({ trades, sessions = [], onUpdateTrade, onExport }) {
   const [q, setQ] = useState("");
   const [dir, setDir] = useState("all");
   const [res, setRes] = useState("all");
   const [sym, setSym] = useState("all");
   const [editing, setEditing] = useState(null);
+
+  /* A trade's own sessionId names the replay session it closed in —
+     Simulator.jsx tags it at that moment, and deleteSession (App.jsx)
+     cascades the trade away with its own session on the spot. A trade
+     with no id that resolves here — no sessionId at all, or one this
+     account's current session list doesn't recognise — is exactly what
+     server/db.js's own migrate() backfill and the admin console's
+     "orphaned trades" tool already call it: it belonged to a session
+     that's since been deleted (server/routes.js's own orphaned-trades
+     routes are the account-wide cleanup for these; this is just the
+     per-trade "where did this come from" a player can see for themselves). */
+  const sessionName = useMemo(() => {
+    const m = new Map(sessions.map((s) => [s.id, s.name]));
+    return (id) => (id && m.get(id)) || "Deleted session";
+  }, [sessions]);
 
   const filtered = useMemo(() => {
     return trades.filter((t) => {
@@ -85,7 +100,7 @@ export default function Journal({ trades, onUpdateTrade, onExport }) {
               <table className="tbl">
                 <thead>
                   <tr>
-                    {["Closed", "Market", "Side", "Entry", "Exit", "Stop", "R", "P&L", "Exit", "Session", ""].map((h) => <th key={h}>{h}</th>)}
+                    {["Closed", "Market", "Side", "Entry", "Exit", "Stop", "R", "P&L", "Exit", "Hours", "Session", ""].map((h) => <th key={h}>{h}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -105,6 +120,7 @@ export default function Journal({ trades, onUpdateTrade, onExport }) {
                       <td style={{ color: t.pnl > 0 ? "var(--up)" : t.pnl < 0 ? "var(--down)" : "var(--muted)" }}>{fmtSigned(t.pnl)}</td>
                       <td className="mut" style={{ fontSize: 12 }}>{t.reason}</td>
                       <td className="mut" style={{ fontSize: 12 }}>{sessionOf(t.openedTs || t.closedTs)}</td>
+                      <td className="mut" style={{ fontSize: 12 }}>{sessionName(t.sessionId)}</td>
                       <td>
                         <button className="btn ghost" style={{ padding: "3px 8px", fontSize: 12 }} onClick={() => setEditing(t)}>
                           {t.note ? "Note" : "Add"}

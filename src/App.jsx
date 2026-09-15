@@ -504,7 +504,7 @@ export default function App() {
             onJoinRoom={joinRoomFromDashboard} />
         )}
         {page === "journal" && (
-          <Journal trades={trades} onUpdateTrade={updateTrade} onExport={exportCsv} />
+          <Journal trades={trades} sessions={sessions} onUpdateTrade={updateTrade} onExport={exportCsv} />
         )}
         {page === "analytics" && <Analytics trades={trades} />}
         {page === "dailypip" && (
