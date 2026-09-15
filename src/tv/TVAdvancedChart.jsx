@@ -183,6 +183,7 @@ export default function TVAdvancedChart({
     let dead = false;
     let loadGen = 0; // see api.load() below
     let onChartReadyCleanup = () => {}; // replaced once onChartReady fires — see the selection subscription below
+    let onSymbolClickCleanup = () => {}; // replaced once onChartReady fires — see the legend title click-blocker below
 
     /* `dead` already guards onChartReady below against a stale widget's
        late callback — it needs to guard these three too. datafeed/replay
@@ -439,6 +440,39 @@ export default function TVAdvancedChart({
     widget.onChartReady(() => {
       if (dead) return;
       const chart = widget.activeChart();
+
+      /* The pane legend's own symbol title ("BTC/USDT", top-left of the
+         chart) is a second, independent door into the same symbol-search
+         dialog the header's search icon/hotkey open — neither
+         header_symbol_search nor symbol_search_hot_key touch it at all
+         (confirmed directly: it still opens "Change symbol" with both
+         set). There's no disabled_features flag for it either — nothing
+         in charting_library.d.ts targets this specific button. Blocking
+         the click here, in the capture phase before the button's own
+         bubble-phase handler runs, is the only lever available; found by
+         inspecting the live DOM rather than guessing, since it's a
+         library-internal element with no documented selector:
+         <button aria-label="Change symbol" data-qa-id="..."> inside a
+         wrapper carrying data-qa-id="title-wrapper legend-source-title".
+         Matching on data-qa-id (a deliberate, stable testing hook) rather
+         than the hashed class name next to it, which is rebuilt-per-
+         version and never meant to be selected from outside the library.
+         Blocking only "click" turned out not to be enough — confirmed
+         directly, the dialog still opened — the library opens it on
+         pointerdown/mousedown, before a click event is ever dispatched.
+         Capturing all three (plus keydown, for Enter/Space activation via
+         keyboard focus) is what actually stops it. */
+      try {
+        const doc = boxRef.current?.querySelector("iframe")?.contentDocument;
+        if (doc) {
+          const isSymbolTitle = (e) =>
+            e.target.closest?.('[data-qa-id*="legend-source-title"], [aria-label="Change symbol"]');
+          const block = (e) => { if (isSymbolTitle(e)) { e.stopPropagation(); e.preventDefault(); } };
+          const events = ["pointerdown", "mousedown", "click", "keydown"];
+          for (const ev of events) doc.addEventListener(ev, block, true);
+          onSymbolClickCleanup = () => { for (const ev of events) doc.removeEventListener(ev, block, true); };
+        }
+      } catch (e) {}
 
       /* keep the replay engine pointed at whatever the user switches to.
          Symbols now come from two exchanges (BINANCE for crypto, PIPTEST
@@ -920,7 +954,10 @@ export default function TVAdvancedChart({
       apiRef.current = api;
       cbs.current.onReady && cbs.current.onReady(api);
 
-      onChartReadyCleanup = () => { try { selectionSub && selectionSub.unsubscribe(syncSelection); } catch (e) {} };
+      onChartReadyCleanup = () => {
+        try { selectionSub && selectionSub.unsubscribe(syncSelection); } catch (e) {}
+        try { onSymbolClickCleanup(); } catch (e) {}
+      };
     });
 
     return () => {
