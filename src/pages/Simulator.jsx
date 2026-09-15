@@ -758,6 +758,13 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
     seenRef.current = [targetMs];
     seenBarsRef.current = [null];
     seenIdxRef.current = 0;
+    /* Reassigning chartStartRef here forces the same widget remount
+       switchInterval's own startMs change does (see chartStartRef's own
+       declaration) — so it needs the same last-chance capture/restore
+       across it, or a rewind silently wipes every drawing and indicator
+       exactly like switchInterval used to before that got fixed. */
+    pendingOwnDrawingsRef.current = ctl.getDrawings?.() || null;
+    pendingOwnStudiesRef.current = ctl.getStudies?.() || null;
     chartStartRef.current = targetMs;
     ctl.replay.jumpTo(targetMs, ctl.widget);
   };
