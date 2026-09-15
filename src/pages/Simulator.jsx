@@ -338,6 +338,14 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      widget's own api.load() once it's ready — see the onReady handler
      below — rather than as React state here. */
   const pendingLayoutRef = useRef(null);
+  /* Companion to pendingLayoutRef, saved/restored alongside it: the
+     bare name+inputs list a session's studies get recreated from on
+     mount, same reasoning as pendingOwnStudiesRef above but for the
+     session-restore-on-reload path rather than switchInterval — see
+     TVAdvancedChart's own load(freshStudies) for why a plain reload
+     turned out to need this too, not just a resolution-changing
+     remount. */
+  const pendingSavedStudiesRef = useRef(null);
   /* The room's latest known chart state, refreshed by every poll. No
      queueing counterpart to pendingLayoutRef for drawings: the
      reconciler effect further down compares against this whenever it
@@ -354,6 +362,7 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
         setTrades(body.trades || []);
         setTrade(body.trade || null);
         pendingLayoutRef.current = body.layout || null;
+        pendingSavedStudiesRef.current = Array.isArray(body.studies) ? body.studies : null;
         setNotes(body.notes || "");
         if (body.symbol) setSymbol(body.symbol);
         if (body.interval) setIv(body.interval);
@@ -428,11 +437,14 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
        queuing its own redundant call. */
     if (pendingLayoutRef.current) {
       const snap = pendingLayoutRef.current;
+      const studies = pendingSavedStudiesRef.current;
       pendingLayoutRef.current = null;
+      pendingSavedStudiesRef.current = null;
       lastAppliedLayoutRef.current = JSON.stringify(snap);
-      api.load(snap);
+      api.load(snap, studies);
     } else {
       lastAppliedLayoutRef.current = null;
+      pendingSavedStudiesRef.current = null;
     }
     /* Mirrored drawings just get forgotten here rather than re-applied
        — a new widget carries none of the previous one's, and
@@ -859,11 +871,13 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
          autosave tick (cursor keeps moving during replay) tries again
          with a live widget. */
       let layout = pendingLayoutRef.current;
+      let studies = pendingSavedStudiesRef.current;
       if (chartReady && chartCtlRef.current) {
         try { layout = await chartCtlRef.current.save(); } catch (e) {}
+        try { studies = chartCtlRef.current.getStudies(); } catch (e) {}
       }
       const ok = await data.saveSessionState(meta.id, {
-        id: meta.id, cursor, trades, trade, layout, notes, symbol, interval,
+        id: meta.id, cursor, trades, trade, layout, studies, notes, symbol, interval,
       });
       const st = computeStats(trades, startBalance);
       const ch = evaluateChallenge(trades, meta.challenge, startBalance);

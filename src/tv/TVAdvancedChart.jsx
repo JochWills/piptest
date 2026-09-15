@@ -906,8 +906,14 @@ export default function TVAdvancedChart({
             });
           } catch (e) { return []; }
         },
+        /* Always clears first — this is "make the study set equal this
+           list", not "add these on top of whatever's already there".
+           That's what makes it safe to call after load() below without
+           hand-tracking which studies came from the snapshot vs. which
+           this just added: nothing from the snapshot survives. */
         restoreStudies(list) {
           if (!Array.isArray(list)) return;
+          try { chart.removeAllStudies(); } catch (e) {}
           for (const s of list) {
             if (!s || !s.name) continue;
             try { chart.createStudy(s.name, false, false, s.inputs || {}).catch(() => {}); } catch (e) {}
@@ -941,7 +947,22 @@ export default function TVAdvancedChart({
            no-ops, restoring a range that never changed. `loadGen`
            guards against a second load() landing mid-flight and
            fighting this one over which view wins. */
-        load(rawSnapshot) {
+        /* `freshStudies`, when given, is a getStudies()-shaped list that
+           REPLACES whatever the snapshot's own studies restore into —
+           same reasoning as switchInterval's restoreStudies above,
+           just for a different remount trigger: a plain page reload
+           was found to leave a restored VWAP just as frozen/disconnected
+           as the resolution-mismatch case did, even with the resolution
+           matching this time (the widget mounts at the saved interval
+           before this ever runs). Loading a study back from the
+           library's own serialized snapshot form, at all, is the common
+           thread between both bugs — recreating fresh via createStudy is
+           the one path confirmed to actually keep tracking live price,
+           so it's now used here too rather than only across
+           switchInterval. Optional and additive: every existing caller
+           that doesn't pass it (saveShared/room-sync) keeps the old
+           snapshot-restores-its-own-studies behavior unchanged. */
+        load(rawSnapshot, freshStudies) {
           const snapshot = dedupeVolume(rawSnapshot);
           const gen = ++loadGen;
           let range = null;
@@ -955,11 +976,24 @@ export default function TVAdvancedChart({
                (and, defensively, once more synchronously in case this
                build's load() doesn't actually return a thenable). */
             const reassert = () => { if (!dead && gen === loadGen) { try { chart.applyOverrides(chartOverrides); } catch (e) {} } };
+            /* Unlike reassert, this must run ONLY after the snapshot's
+               own studies have actually landed (restoreStudies clears
+               them first) — running it early, before widget.load() has
+               finished, would recreate onto a chart that hasn't caught
+               up yet and then get its own fresh studies immediately
+               wiped out by the snapshot's late-arriving ones. So: only
+               in the .then() when there IS a real thenable, and only
+               as the synchronous fallback when there ISN'T (matching
+               reassert's own "this build completes synchronously"
+               reasoning) — never both. */
+            const restoreFresh = () => { if (!dead && gen === loadGen && Array.isArray(freshStudies)) api.restoreStudies(freshStudies); };
+            let p;
             try {
-              const p = widget.load(toApply);
-              if (p && typeof p.then === "function") p.then(reassert).catch(() => {});
+              p = widget.load(toApply);
+              if (p && typeof p.then === "function") p.then(() => { reassert(); restoreFresh(); }).catch(() => {});
             } catch (e) {}
             reassert();
+            if (!(p && typeof p.then === "function")) restoreFresh();
             /* getVisibleRange() can come back {from:0,to:0} (or otherwise
                degenerate) if the chart hasn't actually painted a real
                range yet — restoring that verbatim is how a load() ends
