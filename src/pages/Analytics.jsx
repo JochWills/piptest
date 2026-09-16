@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { PageHead } from "../components/Shell.jsx";
-import { Card, Stat, Empty } from "../components/ui.jsx";
+import { Card, Stat, Empty, EquityCurveChart } from "../components/ui.jsx";
 import { SYMBOLS } from "../theme.js";
 import {
   computeStats, groupBy, rHistogram, sessionOf, dayOf,
@@ -75,7 +75,7 @@ export default function Analytics({ trades }) {
             Start {fmtMoney(START_BALANCE)} → {fmtMoney(st.equity)} ({fmtSigned(st.net)})
           </span>
         </div>
-        <EquityChart curve={st.curve} />
+        <EquityCurveChart values={st.curve} height={200} />
       </Card>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 16 }}>
@@ -113,27 +113,6 @@ export default function Analytics({ trades }) {
 }
 
 /* ---------- pieces ---------- */
-function EquityChart({ curve, height = 180 }) {
-  if (!curve || curve.length < 2) return <div className="sm mut" style={{ height, display: "grid", placeItems: "center" }}>Not enough trades yet</div>;
-  const W = 900, H = height, pad = 10;
-  const lo = Math.min(...curve, START_BALANCE), hi = Math.max(...curve, START_BALANCE);
-  const span = hi - lo || 1;
-  const x = (i) => (i / (curve.length - 1)) * W;
-  const y = (v) => pad + (1 - (v - lo) / span) * (H - pad * 2);
-  const line = curve.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  const up = curve[curve.length - 1] >= START_BALANCE;
-  const col = up ? "var(--up)" : "var(--down)";
-  return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <defs><linearGradient id="eqg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stopColor={col} stopOpacity=".22" /><stop offset="100%" stopColor={col} stopOpacity="0" />
-      </linearGradient></defs>
-      <line x1="0" y1={y(START_BALANCE)} x2={W} y2={y(START_BALANCE)} stroke="var(--border)" strokeWidth="1" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
-      <polygon points={`0,${H} ${line} ${W},${H}`} fill="url(#eqg)" />
-      <polyline points={line} fill="none" stroke={col} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
 
 function Histogram({ hist }) {
   const all = [{ label: "<−3", n: hist.under, neg: true },

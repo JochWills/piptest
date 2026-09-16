@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { PageHead } from "../components/Shell.jsx";
-import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic } from "../components/ui.jsx";
+import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic, EquityCurveChart } from "../components/ui.jsx";
 import { SYMBOLS } from "../theme.js";
 import { computeStats, fmtSigned, fmtMoney, fmtShort, fmtR, uid, START_BALANCE, CHALLENGE_PRESETS } from "../lib/trading.js";
 
@@ -120,81 +120,7 @@ function AssetPicker({ value, onChange, sessions }) {
   );
 }
 
-/* decimals is chosen from the gap between adjacent ticks, not a fixed
-   rule — a tight range (e.g. four ticks all within $900 of each other)
-   needs a decimal or every label rounds to the same "$11k" and the
-   axis looks broken; a wide one doesn't. */
-const compactMoney = (n, decimals = 0) => {
-  const sign = n < 0 ? "−" : "";
-  const abs = Math.abs(n);
-  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(decimals)}k`;
-  return `${sign}$${abs.toFixed(0)}`;
-};
-
 const EQ_RANGES = [["1d", "1D"], ["1w", "1W"], ["1m", "1M"], ["all", "ALL"]];
-
-/* The bigger, standalone equity curve on the dashboard headline —
-   distinct from the small inline Spark used on each session card.
-   Axis labels and the "Equity curve" caption are plain HTML siblings
-   of the SVG rather than <text> inside it: the chart stretches to fill
-   whatever width the card has via preserveAspectRatio="none" (fine for
-   a line/gradient, the same trick Spark uses), but text inside that
-   same viewBox would get non-uniformly squashed or stretched along
-   with it. */
-function EquityCurveChart({ values, height = 200 }) {
-  if (!values || values.length < 2) {
-    return (
-      <div style={{ position: "relative", height }}>
-        <svg width="100%" height={height} viewBox={`0 0 600 ${height}`} preserveAspectRatio="none">
-          <line x1="0" y1={height / 2} x2="600" y2={height / 2} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 4" />
-        </svg>
-        <span className="sm mut" style={{ position: "absolute", right: 2, bottom: 0 }}>No trades in this range</span>
-      </div>
-    );
-  }
-  const W = 600;
-  const lo = Math.min(...values), hi = Math.max(...values);
-  const span = (hi - lo) || Math.abs(hi) * 0.05 || 1;
-  const pad = span * 0.18;
-  const top = hi + pad, bottom = lo - pad;
-  const y = (v) => ((top - v) / (top - bottom)) * height;
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${y(v)}`).join(" ");
-  const up = values[values.length - 1] >= values[0];
-  const color = up ? "var(--up)" : "var(--down)";
-  const id = "eqg" + Math.random().toString(36).slice(2, 7);
-  const step = (top - bottom) / 3;
-  const ticks = [top, top - step, top - 2 * step, bottom];
-  const decimals = step < 1000 ? 1 : 0;
-
-  return (
-    <div style={{ display: "flex", gap: 10 }}>
-      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-        <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none">
-          <defs>
-            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity=".32" />
-              <stop offset="100%" stopColor={color} stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {ticks.map((tv, i) => (
-            <line key={i} x1="0" y1={y(tv)} x2={W} y2={y(tv)} stroke="var(--border)" strokeWidth="1" />
-          ))}
-          <polygon points={`0,${height} ${pts} ${W},${height}`} fill={`url(#${id})`} />
-          <polyline points={pts} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke"
-            strokeLinejoin="round" strokeLinecap="round" />
-        </svg>
-        <span className="sm mut" style={{ position: "absolute", right: 4, bottom: 2, fontSize: 11.5 }}>
-          Equity Curve
-        </span>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", width: 50 }}>
-        {ticks.map((tv, i) => (
-          <span key={i} className="sm mut" style={{ fontSize: 11.5, textAlign: "right" }}>{compactMoney(tv, decimals)}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function Spark({ curve, h = 40, w = 240 }) {
   if (!curve || curve.length < 2) {
