@@ -341,8 +341,8 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
           </div>
 
           <div style={{ flex: 1, minWidth: 280 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-              <div className="cap">Equity curve</div>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+              <div className="cap" style={{ marginBottom: 6 }}>Equity curve</div>
               <div style={{ display: "inline-flex", padding: 3, borderRadius: 999, background: "var(--surface2)", border: "1px solid var(--border)", gap: 2 }}>
                 {EQ_RANGES.map(([id, label]) => (
                   <button key={id} type="button" onClick={() => setEqRange(id)}
