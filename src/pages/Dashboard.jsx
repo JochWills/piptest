@@ -120,6 +120,82 @@ function AssetPicker({ value, onChange, sessions }) {
   );
 }
 
+/* decimals is chosen from the gap between adjacent ticks, not a fixed
+   rule — a tight range (e.g. four ticks all within $900 of each other)
+   needs a decimal or every label rounds to the same "$11k" and the
+   axis looks broken; a wide one doesn't. */
+const compactMoney = (n, decimals = 0) => {
+  const sign = n < 0 ? "−" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(decimals)}k`;
+  return `${sign}$${abs.toFixed(0)}`;
+};
+
+const EQ_RANGES = [["1d", "1D"], ["1w", "1W"], ["1m", "1M"], ["all", "ALL"]];
+
+/* The bigger, standalone equity curve on the dashboard headline —
+   distinct from the small inline Spark used on each session card.
+   Axis labels and the "Equity curve" caption are plain HTML siblings
+   of the SVG rather than <text> inside it: the chart stretches to fill
+   whatever width the card has via preserveAspectRatio="none" (fine for
+   a line/gradient, the same trick Spark uses), but text inside that
+   same viewBox would get non-uniformly squashed or stretched along
+   with it. */
+function EquityCurveChart({ values, height = 200 }) {
+  if (!values || values.length < 2) {
+    return (
+      <div style={{ position: "relative", height }}>
+        <svg width="100%" height={height} viewBox={`0 0 600 ${height}`} preserveAspectRatio="none">
+          <line x1="0" y1={height / 2} x2="600" y2={height / 2} stroke="var(--border)" strokeWidth="1" strokeDasharray="3 4" />
+        </svg>
+        <span className="sm mut" style={{ position: "absolute", right: 2, bottom: 0 }}>No trades in this range</span>
+      </div>
+    );
+  }
+  const W = 600;
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const span = (hi - lo) || Math.abs(hi) * 0.05 || 1;
+  const pad = span * 0.18;
+  const top = hi + pad, bottom = lo - pad;
+  const y = (v) => ((top - v) / (top - bottom)) * height;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${y(v)}`).join(" ");
+  const up = values[values.length - 1] >= values[0];
+  const color = up ? "var(--up)" : "var(--down)";
+  const id = "eqg" + Math.random().toString(36).slice(2, 7);
+  const step = (top - bottom) / 3;
+  const ticks = [top, top - step, top - 2 * step, bottom];
+  const decimals = step < 1000 ? 1 : 0;
+
+  return (
+    <div style={{ display: "flex", gap: 10 }}>
+      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+        <svg width="100%" height={height} viewBox={`0 0 ${W} ${height}`} preserveAspectRatio="none">
+          <defs>
+            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity=".32" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {ticks.map((tv, i) => (
+            <line key={i} x1="0" y1={y(tv)} x2={W} y2={y(tv)} stroke="var(--border)" strokeWidth="1" />
+          ))}
+          <polygon points={`0,${height} ${pts} ${W},${height}`} fill={`url(#${id})`} />
+          <polyline points={pts} fill="none" stroke={color} strokeWidth="2" vectorEffect="non-scaling-stroke"
+            strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <span className="sm mut" style={{ position: "absolute", right: 4, bottom: 2, fontSize: 11.5 }}>
+          Equity Curve
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", width: 50 }}>
+        {ticks.map((tv, i) => (
+          <span key={i} className="sm mut" style={{ fontSize: 11.5, textAlign: "right" }}>{compactMoney(tv, decimals)}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Spark({ curve, h = 40, w = 240 }) {
   if (!curve || curve.length < 2) {
     return <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
@@ -171,6 +247,21 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
   };
 
   const agg = useMemo(() => computeStats(trades), [trades]);
+
+  const [eqRange, setEqRange] = useState("all");
+  /* Scoped the same way Analytics' own range filter already does it
+     (see src/pages/Analytics.jsx) — recompute stats from just the
+     trades closed within the window, rather than trying to anchor the
+     curve at the "true" equity level going into it. That means 1D/1W/1M
+     all start from START_BALANCE same as ALL does, which is a
+     simplification, but it's the one this app already uses elsewhere
+     for range-scoped views, so this doesn't behave differently. */
+  const eqAgg = useMemo(() => {
+    if (eqRange === "all") return agg;
+    const days = eqRange === "1d" ? 1 : eqRange === "1w" ? 7 : 30;
+    const cut = Date.now() - days * 86400000;
+    return computeStats(trades.filter((t) => (t.closedAt || 0) >= cut));
+  }, [trades, eqRange, agg]);
   /* a joined room's throwaway session (see App.jsx's joinRoomFromDashboard)
      never gets saved and disappears the moment it's left — it shouldn't
      ever flash into view here as if it were a real saved session */
@@ -231,7 +322,7 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
 
       {/* headline */}
       <Card style={{ padding: 20, marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 30, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 30, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
             <div className="cap" style={{ marginBottom: 6 }}>Net across all sessions</div>
             {loading ? (
@@ -248,11 +339,25 @@ export default function Dashboard({ sessions, trades, onOpen, onCreate, onDelete
                 : (agg.count ? `${fmtR(agg.totalR)} over ${agg.count} trades` : "No trades recorded yet")}
             </div>
           </div>
-          <div style={{ flex: 1, minWidth: 200, maxWidth: 460 }}>
-            <div className="cap" style={{ marginBottom: 6 }}>Equity curve</div>
+
+          <div style={{ flex: 1, minWidth: 280 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+              <div className="cap">Equity curve</div>
+              <div style={{ display: "inline-flex", padding: 3, borderRadius: 999, background: "var(--surface2)", border: "1px solid var(--border)", gap: 2 }}>
+                {EQ_RANGES.map(([id, label]) => (
+                  <button key={id} type="button" onClick={() => setEqRange(id)}
+                    style={{ border: "none", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 600,
+                      padding: "4px 11px", borderRadius: 999,
+                      background: eqRange === id ? "var(--surface3)" : "transparent",
+                      color: eqRange === id ? "var(--ink)" : "var(--dim)" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {loading
-              ? <span className="skel" style={{ display: "block", width: "100%", height: 54 }} />
-              : <Spark curve={agg.curve} h={54} />}
+              ? <span className="skel" style={{ display: "block", width: "100%", height: 140 }} />
+              : <EquityCurveChart values={eqAgg.curve} height={140} />}
           </div>
         </div>
       </Card>
