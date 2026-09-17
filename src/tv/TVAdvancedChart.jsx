@@ -476,8 +476,9 @@ export default function TVAdvancedChart({
 
       /* keep the replay engine pointed at whatever the user switches to.
          Symbols now come from two exchanges (BINANCE for crypto,
-         DUKASCOPY for the forex/index/gold markets — see datafeed.js),
-         so strip whichever prefix is present rather than assuming one. */
+         and any future non-crypto source would add its own — see
+         datafeed.js), so strip whatever prefix is present rather than
+         assuming one. */
       const bareSymbol = () => chart.symbol().split(":").pop();
       chart.onIntervalChanged().subscribe(null, (res) => {
         replay.setMarket(bareSymbol(), res);

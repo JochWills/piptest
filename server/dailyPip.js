@@ -9,11 +9,9 @@
    This was originally crypto-only because the alternative feed was
    a shared, quota-metered API key that a global daily challenge
    could have drained in minutes. That constraint is gone — the
-   forex/index/gold feed is now served from our own mirror (see
-   dukascopy.js), where a given symbol+range is fetched upstream at
-   most once ever, no matter how many people ask for it. So opening
-   this pool up to forex, gold or the indices is now a product
-   decision rather than a rate-limit one.
+   non-crypto markets have since been withdrawn entirely pending a
+   data licence (see the note above SYMBOLS in src/theme.js), so this
+   pool is crypto-only for that reason now too.
 
    Holds its own symbol list here rather than importing from src/ —
    this server is a separate deployed service with its own

@@ -589,12 +589,11 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      only ever reached by clicking one of Piptest's own timeframe buttons.
      Now it's reached from handleIntervalChanged below, which has already
      asked and gotten a yes by the time this runs — this is purely the
-     "make the switch happen" half. Dukascopy's missing 1s resolution
-     no longer needs handling here either: the chart's own dropdown is
-     built from supported_resolutions, which never lists 1S for a
-     Dukascopy symbol in the first place (see resolveSymbol in
-     datafeed.js), so this can't be reached with a resolution that was
-     never offered. */
+     "make the switch happen" half. A resolution a symbol doesn't
+     support needs no handling here either: the chart's own dropdown is
+     built from supported_resolutions, which only advertises what that
+     symbol's feed actually has (see resolveSymbol in datafeed.js), so
+     this can't be reached with a resolution that was never offered. */
   const switchInterval = (nextIv) => {
     if (!nextIv || nextIv === interval) return;
     if (trade?.status === "open" && price) closeNow();

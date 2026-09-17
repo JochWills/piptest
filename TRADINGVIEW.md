@@ -57,18 +57,18 @@ save, which triggers a redeploy that actually installs the library this time.
 
 | File | Role |
 |---|---|
-| `marketFeed.js` | TradingView-shaped caching/lookups over `lib/candles.js` — the same Binance/Dukascopy routing the live chart already uses, not a second data client. |
-| `datafeed.js` | The Datafeed API, plus the replay cursor. Covers every market in `theme.js`'s `SYMBOLS` (crypto **and** forex/indices/gold), not just crypto. |
+| `marketFeed.js` | TradingView-shaped caching/lookups over `lib/candles.js` — the same feed routing the live chart already uses, not a second data client. |
+| `datafeed.js` | The Datafeed API, plus the replay cursor. Covers every market in `theme.js`'s `SYMBOLS`, whatever those happen to be. |
 | `replayController.js` | Drives the cursor at a chosen speed, emits revealed bars. |
 | `TVAdvancedChart.jsx` | Mounts the widget, returns a controller object. |
 
 `marketFeed.js` matters more than it looks: it's the thing that keeps this
 integration from silently drifting out of sync with the real chart. It calls
 `lib/candles.js`'s `loadWindow`/`fetchPaged` — the exact functions
-`ReplayChart.jsx` calls today — instead of re-fetching Binance/Dukascopy
+`ReplayChart.jsx` calls today — instead of re-fetching the feeds
 independently, so every fix and edge case handled there (multi-host Binance
-fallback, the weekend/market-hours widening for forex, the deterministic
-synthetic fallback when a feed is unreachable) is inherited for free.
+fallback, the deterministic synthetic fallback when a feed is unreachable) is
+inherited for free.
 
 ### How replay works
 

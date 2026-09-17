@@ -16,7 +16,6 @@ import {
   revokeRefresh, revokeAllForUser, setRefreshCookie, clearRefreshCookie,
   REFRESH_COOKIE, requireAuth, requireAdmin, reqIp, adminEmails, publicUser,
 } from "./auth.js";
-import { DUKASCOPY_SYMBOLS, loadDukascopyCandles } from "./dukascopy.js";
 import { hasProfaneSubstring, censor } from "./profanity.js";
 
 export const router = express.Router();
@@ -873,37 +872,20 @@ router.patch("/kv/:key", requireAuth, writeLimiter, async (req, res) => {
 });
 
 /* =====================================================
-   MARKET DATA — forex, indices and gold via Dukascopy
+   MARKET DATA
 
-   Binance-sourced crypto candles are fetched straight from the
-   browser (see src/lib/market.js). Dukascopy can't work that way —
-   its archive only allows CORS from Dukascopy's own site — so these
-   go through us. Requests here are served from our own mirror of
-   the archive rather than from Dukascopy directly; see
-   server/dukascopy.js for how that mirror is filled and why it
-   exists (they throttle hard, and published history never changes).
+   There is no market-data route here on purpose. Crypto candles are
+   fetched straight from Binance in the browser (src/lib/market.js),
+   so the server never touches them.
+
+   A server-side feed for forex/gold/indices did exist briefly, proxying
+   Dukascopy. It was removed because Dukascopy confirmed they do not
+   license historical data for commercial use, and Piptest is
+   ad-supported. Before adding any replacement, get written permission
+   covering commercial use, redistribution to end users, AND
+   server-side caching — see the note above SYMBOLS in src/theme.js
+   for what every other free feed's terms actually say.
    ===================================================== */
-const marketLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
-
-router.get("/market/dukascopy/symbols", requireAuth, (_req, res) => {
-  res.json({ symbols: DUKASCOPY_SYMBOLS });
-});
-
-router.get("/market/dukascopy/candles", requireAuth, marketLimiter, async (req, res) => {
-  const { symbol, interval, from, to } = req.query;
-  if (!DUKASCOPY_SYMBOLS[symbol]) return res.status(400).json({ error: "unknown_symbol" });
-  const fromMs = Number(from), toMs = Number(to);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
-    return res.status(400).json({ error: "bad_range", message: "from/to must be numeric ms timestamps with to > from." });
-  }
-  try {
-    const candles = await loadDukascopyCandles(symbol, interval, fromMs, toMs);
-    res.json({ candles });
-  } catch (e) {
-    console.error("dukascopy candles failed:", e.message);
-    res.status(502).json({ error: "upstream_failed", message: "Market data is unavailable right now — try again shortly." });
-  }
-});
 
 /* =====================================================
    ADMIN

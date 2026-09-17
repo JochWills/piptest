@@ -65,28 +65,35 @@ different session start dates can silently see different candles while the UI
 claims they're in sync. If working on rooms, fix this properly (sync by
 timestamp) rather than patching around it.
 
-**Market data comes from two places, and only one of them is ours to worry
-about.** Crypto is fetched straight from Binance in the browser (`src/lib/market.js`)
-— keyless, unlimited, no server involvement. Forex, gold and the US indices come
-from Dukascopy Bank's free public archive, which needs very different handling:
-its CORS only allows Dukascopy's own site (so it *must* go through our server),
-and it throttles hard and without any published limit — roughly a dozen quick
-requests from one IP earns a 503 lasting minutes.
+**Market data is crypto-only, and that is a licensing decision, not a technical
+one.** Candles come straight from Binance in the browser (`src/lib/market.js`) —
+keyless, unlimited, no server involvement and no API key anywhere. There is no
+market-data route on the API at all.
 
-So we don't call it per request. `server/dukascopy.js` **mirrors** the archive
-into Postgres (`duka_bars`) and serves charts from there; each upstream file is
-fetched at most once ever, because published history never changes. An earlier
-attempt at this feed was abandoned for rate limiting precisely because it
-*didn't* do this — it downloaded per-hour tick files and bucketed them by hand,
-~25 requests per chart. Dukascopy publishes ready-made candle files (one per day
-for 1-minute, one per month for hourly); use those. Run
-`server/backfill-dukascopy.mjs` to pre-warm the mirror.
+Forex, gold and the indices have shipped twice (Twelve Data, then Dukascopy) and
+been withdrawn both times. **Do not add a data provider without checking its
+licence first** — the read-terms-then-build order matters, because the second
+attempt was fully built, tested and deployed before anyone asked, and Dukascopy
+then confirmed in writing that they "do not offer historical data licensing for
+commercial use."
 
-Two things in that file will look like bugs and aren't: the record layout is
-open-**close**-low-high (not OHLC), and bars with `volume == 0` are dropped
-because that's how the archive pads sessions the instrument wasn't trading in.
-Both are documented at the top of `server/dukascopy.js` with how they were
-verified. No API key is involved anywhere in this.
+Piptest trips three clauses that free tiers almost always exclude, so check all
+three by name:
+
+1. **Commercial use** — Piptest is commercial. It's free to users but
+   ad-supported, so never describe it as non-commercial to a provider.
+2. **Redistribution/display to end users** — we send price bars to browsers.
+   That is redistribution, usually priced separately (Twelve Data sells it as a
+   "Redistribution Rights Add-On").
+3. **Server-side caching** — any mirror-the-archive design needs retention
+   rights, which several licences cap outright.
+
+Checked and ruled out on their own published terms: Dukascopy (no commercial
+licence at all), Finnhub ("strictly for personal use"), Alpha Vantage (free is
+non-commercial), Twelve Data free tier (§2.3(l)). HistData and TrueFX publish no
+terms at all, which is not permission. The realistic routes back are a paid
+redistribution licence or a broker partnership — which is how FX Replay does it
+(OANDA/Dukascopy/CME). See the note above `SYMBOLS` in `src/theme.js`.
 
 **Admin console is a separate app on purpose.** Don't merge it back into the
 main site — keeping it on its own origin means user-management code isn't in
@@ -112,8 +119,8 @@ moves fast:
 2. No email verification on signup (only password reset is built)
 3. Room sync is polling, not WebSockets (see above)
 4. No "join a room" entry point outside the simulator page
-5. Dukascopy's archive has no sub-minute candles, so "1s" is crypto-only. The
-   picker already hides it for those symbols — don't re-add it for them.
+5. Forex, gold and indices are withdrawn pending a data licence — the market
+   picker shows a "coming soon" note instead (see `COMING_SOON` in `theme.js`)
 
 ## Environment variables (server)
 

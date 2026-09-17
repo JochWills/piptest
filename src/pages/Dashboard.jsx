@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { PageHead } from "../components/Shell.jsx";
 import { Card, Field, Stat, Empty, Modal, ConfirmDialog, Svg, Ic, EquityCurveChart } from "../components/ui.jsx";
-import { SYMBOLS } from "../theme.js";
+import { SYMBOLS, COMING_SOON } from "../theme.js";
 import { computeStats, fmtSigned, fmtMoney, fmtShort, fmtR, uid, START_BALANCE, CHALLENGE_PRESETS } from "../lib/trading.js";
 
 /* ---------- asset picker ----------
@@ -114,6 +114,17 @@ function AssetPicker({ value, onChange, sessions }) {
                 {list.map((s) => <AssetRow key={s.id} s={s} active={s.id === value} onPick={pick} />)}
               </div>
             ))}
+
+          {/* Inert on purpose — searching "gold" or "EUR" turns up nothing,
+              and without this the absence reads as a broken search rather
+              than a market we haven't shipped yet. */}
+          <div className="sm mut" style={{
+            display: "flex", alignItems: "center", gap: 7, padding: "9px 4px 2px",
+            borderTop: "1px solid var(--border)", marginTop: 2, fontSize: 12,
+          }}>
+            <Svg s={13} style={{ color: "var(--dim)", flexShrink: 0 }}>{Ic.clock}</Svg>
+            <span>{COMING_SOON}</span>
+          </div>
         </div>
       )}
     </div>

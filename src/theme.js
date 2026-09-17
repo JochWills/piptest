@@ -46,20 +46,25 @@ export const cssVars = (t) => {
 };
 
 /* markets offered in the simulator. `source` decides which feed a
-   symbol's candles and live price come from (surfaced in the UI too,
-   e.g. the watchlist editor):
-   · "Binance" — fetched straight from the browser, see lib/market.js
-   · "Dukascopy" — forex, indices and gold. Routed through our own API
-     because Dukascopy's archive only allows CORS from its own site,
-     and served from our local mirror of it rather than fetched live;
-     see lib/candles.js and server/dukascopy.js. No live price
-     (candles only) and no "1s" interval — the archive publishes
-     1-minute candles as its finest resolution.
-   These index symbols are the real S&P 500, Dow and Nasdaq, not ETF
-   proxies for them. An earlier Twelve Data feed could only offer
-   SPY/DIA/QQQ here because the genuine indices were paywalled on its
-   free plan; Dukascopy publishes them, so the ids and prices below
-   are the indices themselves (~6800 for the S&P, not SPY's ~680). */
+   symbol's candles and live price come from (surfaced in the UI too):
+   · "Binance" — fetched straight from the browser, see lib/market.js.
+     Keyless, unlimited, and its public market data carries no
+     redistribution problem, which is why it's the only feed here.
+
+   Forex, metals and indices are deliberately NOT listed. They were
+   live briefly on a Dukascopy feed and were withdrawn: Dukascopy
+   confirmed in writing that they "do not offer historical data
+   licensing for commercial use", and Piptest is commercial (it's free
+   to users but ad-supported). Every other free feed checked says the
+   same in its terms — Finnhub is "strictly for personal use", Alpha
+   Vantage free is non-commercial, Twelve Data's free tier bars
+   commercial use and sells redistribution as a paid add-on, and
+   HistData/TrueFX publish no terms at all, which is not permission.
+
+   So do not re-add a market here until there is written permission
+   covering all three things Piptest actually does: commercial use,
+   redistribution/display to end users, and caching data server-side.
+   COMING_SOON below is what the UI shows in the meantime. */
 export const SYMBOLS = [
   { id: "BTCUSDT", label: "BTC/USDT", cls: "Crypto", source: "Binance" },
   { id: "ETHUSDT", label: "ETH/USDT", cls: "Crypto", source: "Binance" },
@@ -71,21 +76,11 @@ export const SYMBOLS = [
   { id: "LINKUSDT", label: "LINK/USDT", cls: "Crypto", source: "Binance" },
   { id: "AVAXUSDT", label: "AVAX/USDT", cls: "Crypto", source: "Binance" },
   { id: "LTCUSDT", label: "LTC/USDT", cls: "Crypto", source: "Binance" },
-
-  { id: "EURUSD", label: "EUR/USD", cls: "Forex", source: "Dukascopy" },
-  { id: "GBPUSD", label: "GBP/USD", cls: "Forex", source: "Dukascopy" },
-  { id: "USDJPY", label: "USD/JPY", cls: "Forex", source: "Dukascopy" },
-  { id: "USDCHF", label: "USD/CHF", cls: "Forex", source: "Dukascopy" },
-  { id: "USDCAD", label: "USD/CAD", cls: "Forex", source: "Dukascopy" },
-  { id: "AUDUSD", label: "AUD/USD", cls: "Forex", source: "Dukascopy" },
-  { id: "NZDUSD", label: "NZD/USD", cls: "Forex", source: "Dukascopy" },
-
-  { id: "XAUUSD", label: "Gold (XAU/USD)", cls: "Metal", source: "Dukascopy" },
-
-  { id: "USA500IDXUSD", label: "US 500 (S&P)", cls: "Index", source: "Dukascopy" },
-  { id: "USA30IDXUSD", label: "US 30 (Dow)", cls: "Index", source: "Dukascopy" },
-  { id: "USATECHIDXUSD", label: "US Tech (Nasdaq)", cls: "Index", source: "Dukascopy" },
 ];
+
+/* Shown as an inert "coming soon" note wherever a market is chosen, so
+   the absence reads as planned rather than as a missing feature. */
+export const COMING_SOON = "Forex, gold & indices — coming soon";
 
 export const INTERVALS = [
   { id: "1s", ms: 1000, label: "1s" },

@@ -119,10 +119,12 @@ change — swap `localStorage` for API calls behind the same interface.
 That's fine at low volume, but you'll want to proxy and cache klines through your
 own service before you have real traffic.
 
-**Forex data.** Forex, gold and the US indices come from Dukascopy Bank's public
-archive. Its compressed binary files can't be fetched from a browser (its CORS
-only allows Dukascopy's own site) and it throttles hard, so the server mirrors
-the slices we use into Postgres and serves charts from there — each upstream
-file is fetched at most once, ever. See `server/dukascopy.js`, and
-`server/backfill-dukascopy.mjs` to pre-warm the mirror. One-second bars remain
-crypto-only: the archive's finest candle resolution is one minute.
+**Forex data.** Crypto only for now. The blocker is licensing, not engineering:
+the replay engine is source-agnostic, but a public, ad-supported tool needs the
+right to *redistribute* a provider's price history to its users, and to cache it
+server-side. Free tiers almost universally exclude both — Dukascopy confirmed in
+writing they don't license historical data for commercial use at all, and
+Finnhub, Alpha Vantage and Twelve Data's free tiers are all personal/
+non-commercial by their own terms. Getting forex back means a paid redistribution
+licence or a broker partnership, not a different endpoint. See the note above
+`SYMBOLS` in `src/theme.js` before adding any feed.

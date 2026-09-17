@@ -141,11 +141,9 @@ export const api = {
   addTrades:   (trades)  => raw("/api/trades", { method: "POST", body: { trades } }),
   patchTrade:  (id, b)   => raw(`/api/trades/${id}`, { method: "PATCH", body: b }),
 
-  /* market data — forex, indices & gold (see server/dukascopy.js for
-     why this one goes through our own API instead of being fetched
-     client-side like the Binance-sourced crypto candles are) */
-  dukascopyCandles: (symbol, interval, from, to) =>
-    raw(`/api/market/dukascopy/candles?symbol=${symbol}&interval=${interval}&from=${from}&to=${to}`),
+  /* no market-data method here: every market Piptest offers is crypto
+     from Binance, fetched client-side in src/lib/market.js without
+     touching our API at all */
 
   /* the daily pip */
   dailyPipToday:       ()       => raw("/api/daily-pip/today"),

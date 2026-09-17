@@ -2,19 +2,17 @@
    marketFeed.js — market data for the TradingView datafeed
 
    Owns caching and TradingView-shaped lookups (getRange, nextBar,
-   ensureAround, barAt). The actual fetching — Binance direct from
-   the browser, or forex/indices/gold through our own API to the
-   Dukascopy mirror — is NOT duplicated here: it's the same
-   lib/candles.js the rest of the app already uses, so this feed
-   picks up every fix and quirk-handling (the weekend/market-hours
-   widening for Dukascopy, the multi-host Binance fallback, and the deterministic
-   synthetic fallback when a feed is unreachable) for free, and can
-   never drift out of sync with the "real" chart the way a second,
-   hand-rolled Binance client would.
+   ensureAround, barAt). The actual fetching is NOT duplicated here:
+   it goes through the same lib/candles.js the rest of the app already
+   uses, so this feed inherits every fix and quirk-handling there (the
+   multi-host Binance fallback, the deterministic synthetic fallback
+   when a feed is unreachable) for free, and can never drift out of
+   sync with the "real" chart the way a second, hand-rolled client
+   would.
 
-   This is the one piece of src/tv/ that had to change once the
-   forex/index markets were added — see TRADINGVIEW.md for how
-   candles.js routes a symbol to Binance vs Dukascopy.
+   That indirection is also what makes a second data source a
+   candles.js-only change rather than a src/tv/ one — see
+   TRADINGVIEW.md.
    ============================================================ */
 
 import { loadWindow, fetchPaged } from "../lib/candles.js";
@@ -125,7 +123,7 @@ class MarketFeed {
 
   /* Make sure the cache covers `ms`. Returns false when the feed genuinely
      has no data that far back at this granularity (1s from months ago,
-     or a Dukascopy symbol outside the window it happened to widen to). */
+     or a symbol outside the window it happened to widen to). */
   async ensureAround(symbol, res, ms) {
     const ivId = TV_RES_TO_IV[res];
     if (!ivId) return false;
