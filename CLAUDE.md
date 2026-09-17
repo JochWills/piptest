@@ -18,8 +18,8 @@ Live at **piptest.com**. Three deployed services, one shared database.
 - **API**: Node + Express
 - **Database**: Postgres, hosted on **Supabase** (not Render's own Postgres —
   that one gets deleted 30 days after creation on the free tier)
-- **Charts**: TradingView Lightweight Charts (free). Advanced Charts access
-  applied for but not yet approved/integrated — see `TRADINGVIEW.md` if present.
+- **Charts**: TradingView Advanced Charts, integrated and live — it's what the
+  simulator renders (see `src/tv/`, and `TRADINGVIEW.md` for the layout).
 - **Auth**: scrypt password hashing, JWT access token (in-memory, not
   localStorage) + rotating refresh token in an httpOnly cookie
 - **Email**: Resend, for password reset
@@ -65,6 +65,29 @@ different session start dates can silently see different candles while the UI
 claims they're in sync. If working on rooms, fix this properly (sync by
 timestamp) rather than patching around it.
 
+**Market data comes from two places, and only one of them is ours to worry
+about.** Crypto is fetched straight from Binance in the browser (`src/lib/market.js`)
+— keyless, unlimited, no server involvement. Forex, gold and the US indices come
+from Dukascopy Bank's free public archive, which needs very different handling:
+its CORS only allows Dukascopy's own site (so it *must* go through our server),
+and it throttles hard and without any published limit — roughly a dozen quick
+requests from one IP earns a 503 lasting minutes.
+
+So we don't call it per request. `server/dukascopy.js` **mirrors** the archive
+into Postgres (`duka_bars`) and serves charts from there; each upstream file is
+fetched at most once ever, because published history never changes. An earlier
+attempt at this feed was abandoned for rate limiting precisely because it
+*didn't* do this — it downloaded per-hour tick files and bucketed them by hand,
+~25 requests per chart. Dukascopy publishes ready-made candle files (one per day
+for 1-minute, one per month for hourly); use those. Run
+`server/backfill-dukascopy.mjs` to pre-warm the mirror.
+
+Two things in that file will look like bugs and aren't: the record layout is
+open-**close**-low-high (not OHLC), and bars with `volume == 0` are dropped
+because that's how the archive pads sessions the instrument wasn't trading in.
+Both are documented at the top of `server/dukascopy.js` with how they were
+verified. No API key is involved anywhere in this.
+
 **Admin console is a separate app on purpose.** Don't merge it back into the
 main site — keeping it on its own origin means user-management code isn't in
 the bundle a regular visitor downloads.
@@ -89,9 +112,8 @@ moves fast:
 2. No email verification on signup (only password reset is built)
 3. Room sync is polling, not WebSockets (see above)
 4. No "join a room" entry point outside the simulator page
-5. TradingView Advanced Charts integration code may exist in a `src/tv/`
-   directory from an earlier exploration — check whether it's wired in or
-   orphaned before building on it
+5. Dukascopy's archive has no sub-minute candles, so "1s" is crypto-only. The
+   picker already hides it for those symbols — don't re-add it for them.
 
 ## Environment variables (server)
 

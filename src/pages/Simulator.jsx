@@ -589,11 +589,12 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
      only ever reached by clicking one of Piptest's own timeframe buttons.
      Now it's reached from handleIntervalChanged below, which has already
      asked and gotten a yes by the time this runs — this is purely the
-     "make the switch happen" half. Twelve Data's missing 1s resolution
+     "make the switch happen" half. Dukascopy's missing 1s resolution
      no longer needs handling here either: the chart's own dropdown is
-     built from supported_resolutions, which never lists 1S for a Twelve
-     Data symbol in the first place (see resolveSymbol in datafeed.js),
-     so this can't be reached with a resolution that was never offered. */
+     built from supported_resolutions, which never lists 1S for a
+     Dukascopy symbol in the first place (see resolveSymbol in
+     datafeed.js), so this can't be reached with a resolution that was
+     never offered. */
   const switchInterval = (nextIv) => {
     if (!nextIv || nextIv === interval) return;
     if (trade?.status === "open" && price) closeNow();
@@ -1791,9 +1792,8 @@ export default function Simulator({ meta, account, theme, T, onExit, onSaveSessi
 
         {/* ---- left: ad slot ----
             Market watch (and its watchlist editor) was retired — no live
-            ticker polling here any more, so it can't compete with actual
-            candle-loading for Twelve Data's shared daily quota, and this
-            rail is now entirely the ad's. PIP Affiliates' 120×600
+            ticker polling here any more, and this rail is now entirely
+            the ad's. PIP Affiliates' 120×600
             skyscraper creative, fixed pixel size rather than stretched to
             the rail's ~200px usable width, same as any other ad network:
             they serve that exact box, not a responsive one.

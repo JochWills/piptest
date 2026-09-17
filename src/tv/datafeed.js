@@ -10,9 +10,9 @@
    makes switching timeframe free — the same instant resolves
    correctly on 1s and on 1D with no conversion.
 
-   Every market Piptest offers (crypto via Binance, forex/index
-   ETFs via Twelve Data — see theme.js's SYMBOLS) is resolvable
-   here, not just the original crypto set. Twelve Data has no
+   Every market Piptest offers (crypto via Binance, forex/indices/
+   gold via Dukascopy — see theme.js's SYMBOLS) is resolvable
+   here, not just the original crypto set. Dukascopy has no
    sub-minute candles, so those symbols simply don't advertise
    the 1s resolution — see SYMBOLS in theme.js for the source of
    truth on which markets exist and where each one's data comes
@@ -26,12 +26,12 @@ import { SYMBOLS as MARKETS, INTERVALS, barMsOf } from "../theme.js";
    Calling one synchronously can blow the stack inside the library. */
 const async_ = (fn) => setTimeout(fn, 0);
 
-const EXCHANGE_LABEL = { Binance: "BINANCE", TwelveData: "PIPTEST" };
+const EXCHANGE_LABEL = { Binance: "BINANCE", Dukascopy: "DUKASCOPY" };
 
 /* The finest resolution actually available for a symbol — Binance goes
-   down to 1 second, Twelve Data (forex/index ETFs) only down to 1
+   down to 1 second, Dukascopy (forex/indices/gold) only down to 1
    minute. Used below as the fallback when the chosen step size itself
-   isn't offered for this symbol (picking "1s" steps on a Twelve Data
+   isn't offered for this symbol (picking "1s" steps on a Dukascopy
    market, which has no seconds data at all). */
 function baseResFor(symbolName) {
   const m = MARKETS.find((x) => x.id === symbolName);
@@ -58,7 +58,7 @@ const CONFIG = {
   supports_time: true,
   exchanges: [
     { value: "BINANCE", name: "Binance", desc: "Binance Spot" },
-    { value: "PIPTEST", name: "Piptest", desc: "Forex & index ETFs (Twelve Data)" },
+    { value: "DUKASCOPY", name: "Dukascopy", desc: "Forex, indices & metals" },
   ],
   symbols_types: [{ name: "crypto", value: "crypto" }, { name: "forex", value: "forex" }, { name: "index", value: "index" }],
 };
@@ -66,14 +66,19 @@ const CONFIG = {
 /* price precision per instrument — pricescale is 10^decimals.
    Picked per how the instrument actually quotes, not guessed from a
    regex: crypto majors to 2dp, low-price crypto to 4dp, JPY forex
-   pairs to 3dp (their convention), other forex pairs to 5dp, index
-   ETFs to 2dp like any other equity-priced instrument. */
+   pairs to 3dp (their convention), other forex pairs to 5dp. Gold and
+   the indices are 3dp because that is genuinely the precision
+   Dukascopy publishes them at — their `point` in server/dukascopy.js
+   is 1e3, so a quote really does arrive as e.g. 6810.654, and
+   rounding the display to 2dp here would throw away a digit the feed
+   actually carries. */
 const PRICESCALE = {
   BTCUSDT: 100, ETHUSDT: 100, SOLUSDT: 100, BNBUSDT: 100, LTCUSDT: 100, AVAXUSDT: 100,
   XRPUSDT: 10000, DOGEUSDT: 10000, ADAUSDT: 10000, LINKUSDT: 1000,
   USDJPY: 1000,
   EURUSD: 100000, GBPUSD: 100000, USDCHF: 100000, USDCAD: 100000, AUDUSD: 100000, NZDUSD: 100000,
-  SPY: 100, DIA: 100, QQQ: 100,
+  XAUUSD: 1000,
+  USA500IDXUSD: 1000, USA30IDXUSD: 1000, USATECHIDXUSD: 1000,
 };
 
 function typeOf(cls) {
@@ -385,7 +390,7 @@ export function createDatafeed(opts = {}) {
          delay visibly flashed the default view first and only then
          snapped back — worse, over a real (not localhost) network,
          resetData's own re-fetch (getBars below, a real round trip to
-         our API/Binance/Twelve Data) can easily take longer than any
+         our API/Binance/Dukascopy) can easily take longer than any
          short guessed delay, so the restore landed too early, got
          overwritten right back by the library's own reset once data
          actually arrived, and the view sat wrong until whatever NEXT

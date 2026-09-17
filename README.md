@@ -119,6 +119,10 @@ change — swap `localStorage` for API calls behind the same interface.
 That's fine at low volume, but you'll want to proxy and cache klines through your
 own service before you have real traffic.
 
-**Forex data.** Currently crypto only. Free 1s forex means Dukascopy, whose
-compressed binary files can't be fetched from a browser — that needs an ingest
-job on the server writing normalised bars to your own store.
+**Forex data.** Forex, gold and the US indices come from Dukascopy Bank's public
+archive. Its compressed binary files can't be fetched from a browser (its CORS
+only allows Dukascopy's own site) and it throttles hard, so the server mirrors
+the slices we use into Postgres and serves charts from there — each upstream
+file is fetched at most once, ever. See `server/dukascopy.js`, and
+`server/backfill-dukascopy.mjs` to pre-warm the mirror. One-second bars remain
+crypto-only: the archive's finest candle resolution is one minute.

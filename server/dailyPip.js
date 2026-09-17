@@ -2,16 +2,22 @@
    dailyPip.js — "The Daily Pip" challenge selection
 
    One historical chart, the same for every user, per UTC calendar
-   day. Crypto only (Binance) — deliberately, not Twelve Data: a
-   global daily challenge means many users fetching the identical
-   symbol+range at once the moment it's published, and Binance is
-   unlimited/keyless/client-direct while Twelve Data's free tier is
-   an 800-requests/day shared quota (see twelvedata.js) that a whole
-   userbase hitting the same day's chart could blow through in
-   minutes. Mirrors twelvedata.js's own precedent of holding its own
-   symbol list here rather than importing from src/ — this server is
-   a separate deployed service with its own node_modules, not a
-   shared build with the frontend.
+   day. Crypto only (Binance), which is unlimited, keyless and
+   fetched client-direct, so a whole userbase opening the identical
+   symbol+range the moment it's published costs us nothing.
+
+   This was originally crypto-only because the alternative feed was
+   a shared, quota-metered API key that a global daily challenge
+   could have drained in minutes. That constraint is gone — the
+   forex/index/gold feed is now served from our own mirror (see
+   dukascopy.js), where a given symbol+range is fetched upstream at
+   most once ever, no matter how many people ask for it. So opening
+   this pool up to forex, gold or the indices is now a product
+   decision rather than a rate-limit one.
+
+   Holds its own symbol list here rather than importing from src/ —
+   this server is a separate deployed service with its own
+   node_modules, not a shared build with the frontend.
 
    Selection is deterministic (seeded from the date string, not
    random) so every user genuinely gets the same puzzle, computed

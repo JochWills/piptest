@@ -475,8 +475,8 @@ export default function TVAdvancedChart({
       } catch (e) {}
 
       /* keep the replay engine pointed at whatever the user switches to.
-         Symbols now come from two exchanges (BINANCE for crypto, PIPTEST
-         for the Twelve Data-backed forex/index markets — see datafeed.js),
+         Symbols now come from two exchanges (BINANCE for crypto,
+         DUKASCOPY for the forex/index/gold markets — see datafeed.js),
          so strip whichever prefix is present rather than assuming one. */
       const bareSymbol = () => chart.symbol().split(":").pop();
       chart.onIntervalChanged().subscribe(null, (res) => {

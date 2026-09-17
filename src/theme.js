@@ -49,15 +49,17 @@ export const cssVars = (t) => {
    symbol's candles and live price come from (surfaced in the UI too,
    e.g. the watchlist editor):
    · "Binance" — fetched straight from the browser, see lib/market.js
-   · "TwelveData" — forex & index ETFs, routed through our own API to
-     stay inside its shared per-minute quota, see lib/candles.js and
-     server/twelvedata.js. No live price (candles only) and no "1s"
-     interval — Twelve Data doesn't offer either.
-   The "index" symbols here (SPY/DIA/QQQ) are liquid ETFs that track
-   the S&P 500/Dow/Nasdaq closely, not the indices themselves — the
-   real indices are paywalled on Twelve Data's free plan (confirmed
-   directly against the live API, not assumed). Labelled as such
-   below rather than presented as the literal index. */
+   · "Dukascopy" — forex, indices and gold. Routed through our own API
+     because Dukascopy's archive only allows CORS from its own site,
+     and served from our local mirror of it rather than fetched live;
+     see lib/candles.js and server/dukascopy.js. No live price
+     (candles only) and no "1s" interval — the archive publishes
+     1-minute candles as its finest resolution.
+   These index symbols are the real S&P 500, Dow and Nasdaq, not ETF
+   proxies for them. An earlier Twelve Data feed could only offer
+   SPY/DIA/QQQ here because the genuine indices were paywalled on its
+   free plan; Dukascopy publishes them, so the ids and prices below
+   are the indices themselves (~6800 for the S&P, not SPY's ~680). */
 export const SYMBOLS = [
   { id: "BTCUSDT", label: "BTC/USDT", cls: "Crypto", source: "Binance" },
   { id: "ETHUSDT", label: "ETH/USDT", cls: "Crypto", source: "Binance" },
@@ -70,16 +72,19 @@ export const SYMBOLS = [
   { id: "AVAXUSDT", label: "AVAX/USDT", cls: "Crypto", source: "Binance" },
   { id: "LTCUSDT", label: "LTC/USDT", cls: "Crypto", source: "Binance" },
 
-  { id: "EURUSD", label: "EUR/USD", cls: "Forex", source: "TwelveData" },
-  { id: "GBPUSD", label: "GBP/USD", cls: "Forex", source: "TwelveData" },
-  { id: "USDJPY", label: "USD/JPY", cls: "Forex", source: "TwelveData" },
-  { id: "USDCHF", label: "USD/CHF", cls: "Forex", source: "TwelveData" },
-  { id: "USDCAD", label: "USD/CAD", cls: "Forex", source: "TwelveData" },
-  { id: "AUDUSD", label: "AUD/USD", cls: "Forex", source: "TwelveData" },
-  { id: "NZDUSD", label: "NZD/USD", cls: "Forex", source: "TwelveData" },
-  { id: "SPY", label: "US 500 (SPY)", cls: "Index ETF", source: "TwelveData" },
-  { id: "DIA", label: "US 30 (DIA)", cls: "Index ETF", source: "TwelveData" },
-  { id: "QQQ", label: "US Tech (QQQ)", cls: "Index ETF", source: "TwelveData" },
+  { id: "EURUSD", label: "EUR/USD", cls: "Forex", source: "Dukascopy" },
+  { id: "GBPUSD", label: "GBP/USD", cls: "Forex", source: "Dukascopy" },
+  { id: "USDJPY", label: "USD/JPY", cls: "Forex", source: "Dukascopy" },
+  { id: "USDCHF", label: "USD/CHF", cls: "Forex", source: "Dukascopy" },
+  { id: "USDCAD", label: "USD/CAD", cls: "Forex", source: "Dukascopy" },
+  { id: "AUDUSD", label: "AUD/USD", cls: "Forex", source: "Dukascopy" },
+  { id: "NZDUSD", label: "NZD/USD", cls: "Forex", source: "Dukascopy" },
+
+  { id: "XAUUSD", label: "Gold (XAU/USD)", cls: "Metal", source: "Dukascopy" },
+
+  { id: "USA500IDXUSD", label: "US 500 (S&P)", cls: "Index", source: "Dukascopy" },
+  { id: "USA30IDXUSD", label: "US 30 (Dow)", cls: "Index", source: "Dukascopy" },
+  { id: "USATECHIDXUSD", label: "US Tech (Nasdaq)", cls: "Index", source: "Dukascopy" },
 ];
 
 export const INTERVALS = [

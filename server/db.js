@@ -191,6 +191,37 @@ CREATE TABLE IF NOT EXISTS daily_pip_attempts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS daily_pip_user_date_key ON daily_pip_attempts (user_id, challenge_date);
 CREATE INDEX IF NOT EXISTS daily_pip_leaderboard_idx ON daily_pip_attempts (challenge_date, r DESC);
+
+-- Local mirror of the slices of Dukascopy's public archive we actually
+-- serve, so a chart load is a read from here rather than a request to
+-- them (they throttle hard, and the archive is immutable once a period
+-- closes). One row = one upstream file: a UTC day of 1-minute candles
+-- (kind 'min1') or a UTC month of hourly ones (kind 'hour1'). The bars
+-- column holds brotli'd raw 24-byte records, decoded from LZMA once at
+-- write time — see server/dukascopy.js for the record layout and why
+-- it's stored decoded. is_final marks a period that has fully elapsed
+-- and so can never change again; anything else is re-fetched once it
+-- goes stale.
+--
+-- bars is base64 text rather than the bytea it obviously wants to be,
+-- and that is deliberate: pg-mem (what server/test-api.mjs runs
+-- against) round-trips bytea through a UTF-8 string, so every byte
+-- that isn't valid UTF-8 comes back as the replacement character —
+-- writing 0xff and reading 0xef 0xbf 0xbd, confirmed directly. Real
+-- Postgres handles bytea correctly, but storing binary there would
+-- make the mirror read path — the whole point of this table —
+-- impossible to cover in the test suite. Don't "optimise" this back
+-- to bytea without also solving that.
+CREATE TABLE IF NOT EXISTS duka_bars (
+  symbol       text   NOT NULL,
+  kind         text   NOT NULL,
+  period_start bigint NOT NULL,
+  bars         text   NOT NULL,
+  n            integer NOT NULL DEFAULT 0,
+  is_final     boolean NOT NULL DEFAULT false,
+  fetched_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (symbol, kind, period_start)
+);
 `;
 
 export async function migrate() {

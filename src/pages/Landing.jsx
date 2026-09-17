@@ -25,11 +25,11 @@ const FEATURES = [
 ];
 
 const FAQ = [
-  { q: "Is the data real?", a: "Yes — historical candles come straight from Binance's public market data, down to one-second bars. If the feed is ever unreachable, Piptest says so plainly rather than quietly substituting anything." },
+  { q: "Is the data real?", a: "Yes — crypto candles come straight from Binance's public market data, down to one-second bars, and forex, gold and the index markets come from Dukascopy Bank's published historical archive. If a feed is ever unreachable, Piptest says so plainly rather than quietly substituting anything." },
   { q: "Do I need to install anything?", a: "No. Piptest runs in the browser. Your sessions, trades and drawings are saved automatically." },
   { q: "How is this different from a demo account?", a: "A demo account moves in real time — a week of price action takes a week. Piptest compresses that into an afternoon, and lets you replay the same session as many times as you like." },
   { q: "Can I share a session with my trading group?", a: "That's the point. Start a room, share the six-character code, and everyone watches your chart live. You control who can draw on it." },
-  { q: "What about forex?", a: "Crypto is live today. Forex is next — the data pipeline is the only piece outstanding, since free tick-level FX history needs its own ingest." },
+  { q: "What about forex?", a: "It's live. Seven major pairs, gold, and the real S&P 500, Dow and Nasdaq — the indices themselves, not ETF stand-ins for them — all replay bar by bar exactly the way crypto does, from one-minute candles up to daily." },
   { q: "Does it cost anything?", a: "No — Piptest is completely free, with no paid plans or card required. Everything you build stays yours." },
 ];
 
@@ -480,7 +480,7 @@ function MarketScene() {
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px",
           borderRadius: 7, fontSize: 12.5, border: "1px solid var(--border)", opacity: .5 }}>
-          <span style={{ fontWeight: 600 }}>EUR/USD</span><span className="sm mut">TwelveData</span>
+          <span style={{ fontWeight: 600 }}>EUR/USD</span><span className="sm mut">Dukascopy</span>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, marginTop: 4,
